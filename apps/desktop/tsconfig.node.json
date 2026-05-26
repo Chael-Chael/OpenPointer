@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "rootDir": "src",
+    "outDir": "dist-electron",
+    "types": ["node"]
+  },
+  "references": [
+    { "path": "../../packages/core" },
+    { "path": "../../packages/gestures" },
+    { "path": "../../packages/intent" },
+    { "path": "../../packages/grounding" },
+    { "path": "../../packages/backends" },
+    { "path": "../../packages/executors" },
+    { "path": "../../packages/storage" }
+  ],
+  "include": ["src/main/**/*.ts", "src/preload/**/*.ts", "src/shared/**/*.ts"]
+}

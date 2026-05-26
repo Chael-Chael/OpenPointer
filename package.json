@@ -1,0 +1,26 @@
+{
+  "name": "openmagicpointer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenMagicPointer desktop AI pointer assistant.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @openmagicpointer/desktop",
+    "build": "npm run build -w @openmagicpointer/core && npm run build -w @openmagicpointer/gestures && npm run build -w @openmagicpointer/intent && npm run build -w @openmagicpointer/voice && npm run build -w @openmagicpointer/backends && npm run build -w @openmagicpointer/executors && npm run build -w @openmagicpointer/grounding && npm run build -w @openmagicpointer/storage && npm run build -w @openmagicpointer/desktop",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "lint": "tsc -b --pretty false"
+  },
+  "devDependencies": {
+    "@types/node": "^20.12.12",
+    "@vitejs/plugin-react": "^6.0.2",
+    "typescript": "^5.4.5",
+    "vite": "^8.0.14",
+    "vitest": "^4.1.7"
+  }
+}

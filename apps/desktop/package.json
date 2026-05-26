@@ -1,0 +1,32 @@
+{
+  "name": "@openmagicpointer/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist-electron/main/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"tsc -p tsconfig.node.json --watch\" \"wait-on tcp:5173 dist-electron/main/main.js && electron .\"",
+    "build": "vite build && tsc -p tsconfig.node.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@openmagicpointer/backends": "0.1.0",
+    "@openmagicpointer/core": "0.1.0",
+    "@openmagicpointer/executors": "0.1.0",
+    "@openmagicpointer/gestures": "0.1.0",
+    "@openmagicpointer/grounding": "0.1.0",
+    "@openmagicpointer/intent": "0.1.0",
+    "@openmagicpointer/storage": "0.1.0",
+    "@openmagicpointer/voice": "0.1.0",
+    "electron": "^42.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "concurrently": "^8.2.2",
+    "wait-on": "^7.2.0"
+  }
+}

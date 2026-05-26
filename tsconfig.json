@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/gestures" },
+    { "path": "packages/intent" },
+    { "path": "packages/voice" },
+    { "path": "packages/backends" },
+    { "path": "packages/executors" },
+    { "path": "packages/grounding" },
+    { "path": "packages/storage" },
+    { "path": "apps/desktop" }
+  ]
+}

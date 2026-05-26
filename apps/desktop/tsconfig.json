@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist-renderer",
+    "types": ["vite/client"]
+  },
+  "references": [
+    { "path": "../../packages/core" },
+    { "path": "../../packages/gestures" },
+    { "path": "../../packages/intent" },
+    { "path": "../../packages/storage" },
+    { "path": "../../packages/voice" }
+  ],
+  "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx", "src/shared/**/*.ts"]
+}
