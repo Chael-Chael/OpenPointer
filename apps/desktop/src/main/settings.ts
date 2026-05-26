@@ -58,8 +58,8 @@ export function saveSettings(patch: Partial<AppSettings> & { apiKey?: string }):
   if (patch.apiKey && patch.apiKey.trim()) {
     const encrypted = safeStorage.encryptString(patch.apiKey.trim());
     next.encryptedApiKey = encrypted.toString('base64');
-    next.hasApiKey = true;
   }
+  next.hasApiKey = Boolean(process.env.OMP_OPENAI_COMPAT_API_KEY || next.encryptedApiKey);
   delete (next as { apiKey?: string }).apiKey;
   writeStored(next);
   return getSettings();

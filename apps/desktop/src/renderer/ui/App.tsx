@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { Point, PointerActionPlan, PointerContext, PointerGestureKind, PointerIntent } from '@openmagicpointer/core';
+import { useEffect, useRef, useState } from 'react';
+import { createPointerMemory, rememberCurrent, rememberInsertion, rememberSelected, type Point, type PointerActionPlan, type PointerContext, type PointerGestureKind, type PointerIntent, type PointerMemory } from '@openmagicpointer/core';
 import type { AppSettings } from '@openmagicpointer/storage';
 import { parseVoiceCommand } from '@openmagicpointer/voice';
 import type { CursorPayload } from '../../shared/types';
@@ -19,12 +19,14 @@ export function App() {
   const [prompt, setPrompt] = useState('');
   const [answer, setAnswer] = useState('');
   const [plan, setPlan] = useState<PointerActionPlan | null>(null);
+  const [highRiskConfirm, setHighRiskConfirm] = useState(false);
   const [status, setStatus] = useState('');
   const [captureMode, setCaptureMode] = useState<CaptureMode>('none');
   const [path, setPath] = useState<Point[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [panelPosition, setPanelPosition] = useState({ x: 20, y: 20 });
+  const [memory, setMemory] = useState(createPointerMemory);
   const drawingRef = useRef(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; panelX: number; panelY: number } | null>(null);
@@ -41,6 +43,7 @@ export function App() {
       setActive(true);
       setAnswer('');
       setPlan(null);
+      setHighRiskConfirm(false);
       window.openMagicPointer.setInteractive(true);
       void buildContext(payload, 'hover', [{ x: payload.localX, y: payload.localY, t: Date.now() }]);
     });
@@ -80,6 +83,7 @@ export function App() {
         setSettingsOpen(false);
         setActive(false);
         setPlan(null);
+        setHighRiskConfirm(false);
         setPath([]);
         window.openMagicPointer.deactivate();
       }
@@ -136,6 +140,16 @@ export function App() {
     setContext(result.context);
     setIntents(result.intents);
     setContexts((prev) => [result.context, ...prev.filter((item) => item.id !== result.context.id)].slice(0, 6));
+    setMemory((prev) => {
+      let next = rememberCurrent(prev, result.context);
+      if (kind === 'sweep' || kind === 'lasso' || kind === 'circle' || kind === 'rectangle') {
+        next = rememberSelected(next, result.context);
+      }
+      if (result.context.selection?.insertionTarget) {
+        next = rememberInsertion(next, result.context);
+      }
+      return next;
+    });
     setStatus(`${kind ?? 'pointer'} context captured`);
     focusPromptInput();
   }
@@ -145,6 +159,7 @@ export function App() {
     setStatus('Asking model...');
     setAnswer('');
     setPlan(null);
+    setHighRiskConfirm(false);
     const response = await window.openMagicPointer.query({ context, prompt: text || 'Explain this pointer context.' });
     setAnswer(response.answer);
     setIntents(response.intents);
@@ -157,19 +172,29 @@ export function App() {
     setIntents([]);
     setAnswer('');
     setPlan(null);
+    setHighRiskConfirm(false);
     setPath([]);
     setCaptureMode('none');
+    setMemory(createPointerMemory());
     setStatus('Context cleared');
+    focusPromptInput();
+  }
+
+  function selectContext(item: PointerContext) {
+    setContext(item);
+    setMemory((prev) => rememberCurrent(prev, item));
+    setStatus(`${contextChipLabel(memory, item)} context selected`);
     focusPromptInput();
   }
 
   async function chooseIntent(intent: PointerIntent) {
     if (!context) return;
     setStatus('Preparing action preview...');
+    setHighRiskConfirm(false);
     const nextPlan = await window.openMagicPointer.createPlan({ context, intent, prompt: prompt || intent.defaultPrompt });
     if (nextPlan.requiresConfirmation) {
       setPlan(nextPlan);
-      setStatus('Preview ready');
+      setStatus(isHighRiskPlan(nextPlan) ? 'High-risk preview ready' : 'Preview ready');
       return;
     }
     await runPrompt(intent.defaultPrompt);
@@ -177,10 +202,16 @@ export function App() {
 
   async function executePlan() {
     if (!plan) return;
+    if (isHighRiskPlan(plan) && !highRiskConfirm) {
+      setHighRiskConfirm(true);
+      setStatus('Review the high-risk action and confirm again.');
+      return;
+    }
     setStatus('Executing...');
     const result = await window.openMagicPointer.executePlan(plan);
     setStatus(result.ok ? result.summary : `Execution failed: ${result.error ?? result.summary}`);
     setPlan(null);
+    setHighRiskConfirm(false);
   }
 
   function startCapture(mode: CaptureMode) {
@@ -253,7 +284,10 @@ export function App() {
       setPrompt(text);
       const command = parseVoiceCommand(text);
       if (command.kind === 'execute') void executePlan();
-      else if (command.kind === 'cancel') setPlan(null);
+      else if (command.kind === 'cancel') {
+        setPlan(null);
+        setHighRiskConfirm(false);
+      }
       else void runPrompt(text);
     };
     recognition.onerror = () => setStatus('Voice recognition failed.');
@@ -310,8 +344,9 @@ export function App() {
 
           <div className="context-row">
             {contexts.map((item) => (
-              <button key={item.id} className="context-chip" onClick={() => setContext(item)}>
-                {item.gesture?.kind ?? item.target?.kind ?? 'context'}
+              <button key={item.id} className="context-chip" onClick={() => selectContext(item)} title={contextSummary(item)}>
+                <strong>{contextChipRole(memory, item)}</strong>
+                <span>{contextSummary(item)}</span>
               </button>
             ))}
             <button className="danger-button" onClick={clearContext} disabled={contexts.length === 0 && !context}>
@@ -344,11 +379,23 @@ export function App() {
 
           {plan && (
             <div className="preview">
-              <strong>Action preview</strong>
+              <div className="preview-header">
+                <strong>Action preview</strong>
+                <span className={`risk-badge risk-${plan.risk}`}>{plan.risk} risk</span>
+              </div>
               <pre>{plan.preview}</pre>
+              {isHighRiskPlan(plan) && (
+                <label className="check risk-confirm">
+                  <input type="checkbox" checked={highRiskConfirm} onChange={(event) => setHighRiskConfirm(event.target.checked)} />
+                  I reviewed this high-risk action.
+                </label>
+              )}
               <div>
-                <button onClick={() => void executePlan()}>Confirm</button>
-                <button onClick={() => setPlan(null)}>Cancel</button>
+                <button onClick={() => void executePlan()} disabled={isHighRiskPlan(plan) && !highRiskConfirm}>Confirm</button>
+                <button onClick={() => {
+                  setPlan(null);
+                  setHighRiskConfirm(false);
+                }}>Cancel</button>
               </div>
             </div>
           )}
@@ -376,6 +423,18 @@ export function App() {
             <label>
               Cua endpoint
               <input value={settings.cuaEndpoint} onChange={(event) => setSettings({ ...settings, cuaEndpoint: event.target.value })} />
+            </label>
+            <label>
+              Activation hotkey
+              <input value={settings.activationHotkey} onChange={(event) => setSettings({ ...settings, activationHotkey: event.target.value })} />
+            </label>
+            <label>
+              Mouse wiggle sensitivity
+              <select value={settings.wiggleSensitivity} onChange={(event) => setSettings({ ...settings, wiggleSensitivity: event.target.value as AppSettings['wiggleSensitivity'] })}>
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
             </label>
             <label className="check">
               <input type="checkbox" checked={settings.wiggleEnabled} onChange={(event) => setSettings({ ...settings, wiggleEnabled: event.target.checked })} />
@@ -427,4 +486,31 @@ function clampPanelPosition(pos: { x: number; y: number }) {
     x: Math.min(Math.max(20, pos.x), maxX),
     y: Math.min(Math.max(20, pos.y), maxY)
   };
+}
+
+function isHighRiskPlan(plan: PointerActionPlan): boolean {
+  return plan.risk === 'high' || plan.risk === 'critical';
+}
+
+function contextChipRole(memory: PointerMemory, item: PointerContext): string {
+  const roles = [
+    memory.current?.id === item.id ? 'this' : '',
+    memory.previous?.id === item.id ? 'that' : '',
+    memory.selected.some((selected) => selected.id === item.id) ? 'these' : '',
+    memory.insertion?.id === item.id ? 'here' : ''
+  ].filter(Boolean);
+  return roles.length > 0 ? roles.join('/') : 'context';
+}
+
+function contextChipLabel(memory: PointerMemory, item: PointerContext): string {
+  return `${contextChipRole(memory, item)} ${contextSummary(item)}`;
+}
+
+function contextSummary(item: PointerContext): string {
+  const parts = [
+    item.gesture?.kind,
+    item.target?.kind,
+    item.entities.length === 1 ? '1 element' : `${item.entities.length} elements`
+  ].filter(Boolean);
+  return parts.join(' · ') || 'pointer context';
 }

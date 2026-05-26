@@ -5,8 +5,11 @@
   "type": "module",
   "main": "dist-electron/main/main.js",
   "scripts": {
-    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"tsc -p tsconfig.node.json --watch\" \"wait-on tcp:5173 dist-electron/main/main.js && electron .\"",
-    "build": "vite build && tsc -p tsconfig.node.json",
+    "dev": "concurrently -k \"npm run dev:ts\" \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev:ts": "tsc -b tsconfig.json tsconfig.node.json --watch",
+    "dev:vite": "wait-on ../../packages/core/dist/index.js ../../packages/gestures/dist/index.js ../../packages/intent/dist/index.js ../../packages/storage/dist/index.js ../../packages/voice/dist/index.js && vite --host 127.0.0.1",
+    "dev:electron": "wait-on ../../packages/backends/dist/index.js ../../packages/core/dist/index.js ../../packages/executors/dist/index.js ../../packages/gestures/dist/index.js ../../packages/grounding/dist/index.js ../../packages/intent/dist/index.js ../../packages/storage/dist/index.js dist-electron/main/main.js tcp:5173 && electron .",
+    "build": "tsc -b tsconfig.json tsconfig.node.json && vite build",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "start": "electron ."
   },

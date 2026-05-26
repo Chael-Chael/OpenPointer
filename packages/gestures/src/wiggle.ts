@@ -16,6 +16,18 @@ export const DEFAULT_WIGGLE_OPTIONS: WiggleOptions = {
   cooldownMs: 1200
 };
 
+export type WiggleSensitivity = 'low' | 'medium' | 'high';
+
+export function wiggleOptionsForSensitivity(sensitivity: WiggleSensitivity): WiggleOptions {
+  if (sensitivity === 'low') {
+    return { windowMs: 900, minAmplitudePx: 72, minReversals: 4, sampleTtlMs: 1300, cooldownMs: 1800 };
+  }
+  if (sensitivity === 'high') {
+    return { windowMs: 1100, minAmplitudePx: 32, minReversals: 2, sampleTtlMs: 1500, cooldownMs: 900 };
+  }
+  return DEFAULT_WIGGLE_OPTIONS;
+}
+
 export class WiggleDetector {
   private samples: Point[] = [];
   private lastFireAt = 0;
