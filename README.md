@@ -11,6 +11,14 @@ npm run dev
 
 Copy `.env.example` to `.env` for local provider configuration. Do not commit real API keys.
 
+## Project docs
+
+- Product notes: [`docs/product/OpenMagicPointer.md`](docs/product/OpenMagicPointer.md)
+- Roadmap: [`docs/product/roadmap.md`](docs/product/roadmap.md)
+- Architecture: [`docs/architecture.md`](docs/architecture.md)
+- Safety policy: [`docs/safety.md`](docs/safety.md)
+- Reference policy: [`docs/reference-policy.md`](docs/reference-policy.md)
+
 ## Current MVP
 
 - Electron + React desktop overlay.

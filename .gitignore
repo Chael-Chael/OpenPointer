@@ -8,6 +8,10 @@ release/
 .npm-cache/
 coverage/
 *.tsbuildinfo
+apps/desktop/src/shared/*.js
+apps/desktop/src/shared/*.js.map
+apps/desktop/src/shared/*.d.ts
+apps/desktop/src/shared/*.d.ts.map
 
 .env
 .env.*

@@ -1,5 +1,5 @@
 import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen } from 'electron';
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { OpenAICompatibleBackend, buildPointerMessages, isUnsupportedImageInputError } from '@openmagicpointer/backends';
@@ -78,16 +78,57 @@ async function createOverlay(display: Electron.Display): Promise<void> {
     console.error('[omp] renderer process gone', { displayId: display.id, details });
   });
 
-  if (process.env.NODE_ENV === 'production' || app.isPackaged) {
-    const filePath = join(__dirname, '../../dist/index.html');
-    console.log('[omp] loading packaged renderer', filePath);
-    await win.loadFile(filePath, { query: { displayId: String(display.id) } });
-  } else {
-    console.log('[omp] loading dev renderer', devUrl);
-    await win.loadURL(`${devUrl}?displayId=${display.id}`);
-  }
+  await loadRenderer(win, display.id);
   if (!win.isVisible()) win.showInactive();
   win.on('closed', () => windows.delete(display.id));
+}
+
+async function loadRenderer(win: BrowserWindow, displayId: number): Promise<void> {
+  const filePath = join(__dirname, '../../dist/index.html');
+  if (app.isPackaged || process.env.NODE_ENV === 'production') {
+    await loadBuiltRenderer(win, filePath, displayId);
+    return;
+  }
+  if (process.env.VITE_DEV_SERVER_URL || await devRendererAvailable()) {
+    try {
+      const url = rendererUrlForDisplay(displayId);
+      console.log('[omp] loading dev renderer', url);
+      await win.loadURL(url);
+      return;
+    } catch (error) {
+      console.warn('[omp] dev renderer unavailable; falling back to built renderer', error);
+    }
+  }
+  await loadBuiltRenderer(win, filePath, displayId);
+}
+
+async function loadBuiltRenderer(win: BrowserWindow, filePath: string, displayId: number): Promise<void> {
+  if (!existsSync(filePath)) {
+    throw new Error(`Renderer build not found at ${filePath}. Run npm run build or npm run dev first.`);
+  }
+  console.log('[omp] loading built renderer', filePath);
+  await win.loadFile(filePath, { query: { displayId: String(displayId) } });
+}
+
+async function devRendererAvailable(): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 750);
+    try {
+      const response = await fetch(devUrl, { signal: controller.signal });
+      return response.ok;
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch {
+    return false;
+  }
+}
+
+function rendererUrlForDisplay(displayId: number): string {
+  const url = new URL(devUrl);
+  url.searchParams.set('displayId', String(displayId));
+  return url.toString();
 }
 
 function cursorPayload(): CursorPayload {
