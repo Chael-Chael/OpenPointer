@@ -10,6 +10,7 @@
     "packages/*"
   ],
   "scripts": {
+    "postinstall": "git -C vendor/cua apply ../../patches/cua/0001-get-window-state-elements-structured-output.patch || exit 0",
     "dev": "npm run dev -w @openmagicpointer/desktop",
     "build": "npm run build -w @openmagicpointer/core && npm run build -w @openmagicpointer/gestures && npm run build -w @openmagicpointer/voice && npm run build -w @openmagicpointer/backends && npm run build -w @openmagicpointer/grounding && npm run build -w @openmagicpointer/storage && npm run build -w @openmagicpointer/agent-bridge && npm run build -w @openmagicpointer/desktop",
     "typecheck": "tsc -b",
