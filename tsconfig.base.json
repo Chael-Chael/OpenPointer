@@ -17,12 +17,11 @@
     "paths": {
       "@openmagicpointer/core": ["packages/core/src/index.ts"],
       "@openmagicpointer/gestures": ["packages/gestures/src/index.ts"],
-      "@openmagicpointer/intent": ["packages/intent/src/index.ts"],
       "@openmagicpointer/voice": ["packages/voice/src/index.ts"],
       "@openmagicpointer/backends": ["packages/backends/src/index.ts"],
-      "@openmagicpointer/executors": ["packages/executors/src/index.ts"],
       "@openmagicpointer/grounding": ["packages/grounding/src/index.ts"],
-      "@openmagicpointer/storage": ["packages/storage/src/index.ts"]
+      "@openmagicpointer/storage": ["packages/storage/src/index.ts"],
+      "@openmagicpointer/agent-bridge": ["packages/agent-bridge/src/index.ts"]
     }
   }
 }

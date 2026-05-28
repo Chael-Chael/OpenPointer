@@ -11,17 +11,25 @@
     "start": "electron ."
   },
   "dependencies": {
+    "@fontsource/dm-sans": "^5.2.8",
+    "@openmagicpointer/agent-bridge": "0.1.0",
     "@openmagicpointer/backends": "0.1.0",
     "@openmagicpointer/core": "0.1.0",
-    "@openmagicpointer/executors": "0.1.0",
     "@openmagicpointer/gestures": "0.1.0",
     "@openmagicpointer/grounding": "0.1.0",
-    "@openmagicpointer/intent": "0.1.0",
     "@openmagicpointer/storage": "0.1.0",
     "@openmagicpointer/voice": "0.1.0",
+    "active-win": "^8.2.1",
     "electron": "^42.2.0",
+    "katex": "^0.17.0",
+    "mermaid": "^11.15.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "uiohook-napi": "^1.5.5"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

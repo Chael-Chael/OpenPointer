@@ -25,6 +25,47 @@ export type CompletionResult = {
 export class OpenAICompatibleBackend {
   constructor(private readonly config: OpenAICompatibleConfig) {}
 
+  async *streamComplete(messages: ChatMessage[], signal?: AbortSignal): AsyncIterable<string> {
+    const model = this.config.model || 'gpt-4o-mini';
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 60000);
+    const combinedSignal = signal ?? controller.signal;
+    try {
+      const response = await fetch(`${this.config.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.config.apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature: 0.2,
+          stream: true
+        }),
+        signal: combinedSignal
+      });
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`Provider error ${response.status}: ${text.slice(0, 400)}`);
+      }
+
+      const contentType = response.headers.get('content-type') ?? '';
+      if (!response.body || !/text\/event-stream|application\/x-ndjson/i.test(contentType)) {
+        const json = (await response.json().catch(() => ({}))) as {
+          choices?: Array<{ message?: { content?: string }; text?: string }>;
+        };
+        const text = json.choices?.[0]?.message?.content ?? json.choices?.[0]?.text ?? '';
+        if (text) yield text;
+        return;
+      }
+
+      yield* parseChatCompletionStream(response);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   async complete(messages: ChatMessage[], signal?: AbortSignal): Promise<CompletionResult> {
     const model = this.config.model || 'gpt-4o-mini';
     const controller = new AbortController();
@@ -60,6 +101,62 @@ export class OpenAICompatibleBackend {
       clearTimeout(timeout);
     }
   }
+}
+
+async function* parseChatCompletionStream(response: Response): AsyncIterable<string> {
+  if (!response.body) return;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let boundary = findBoundary(buffer);
+    while (boundary >= 0) {
+      const chunk = buffer.slice(0, boundary).trim();
+      buffer = buffer.slice(boundary + (buffer[boundary] === '\r' ? 4 : 2));
+      const delta = parseStreamChunk(chunk);
+      if (delta) yield delta;
+      boundary = findBoundary(buffer);
+    }
+  }
+  const tail = parseStreamChunk(buffer.trim());
+  if (tail) yield tail;
+}
+
+function parseStreamChunk(chunk: string): string {
+  if (!chunk) return '';
+  const payloads = chunk
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trim());
+  const rawPayloads = payloads.length > 0 ? payloads : chunk.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  let text = '';
+  for (const payload of rawPayloads) {
+    if (!payload || payload === '[DONE]') continue;
+    try {
+      const json = JSON.parse(payload) as {
+        choices?: Array<{
+          delta?: { content?: string };
+          message?: { content?: string };
+          text?: string;
+        }>;
+      };
+      text += json.choices?.[0]?.delta?.content ?? json.choices?.[0]?.message?.content ?? json.choices?.[0]?.text ?? '';
+    } catch {
+      text += payload;
+    }
+  }
+  return text;
+}
+
+function findBoundary(buffer: string): number {
+  const rn = buffer.indexOf('\r\n\r\n');
+  const nn = buffer.indexOf('\n\n');
+  if (rn === -1) return nn;
+  if (nn === -1) return rn;
+  return Math.min(rn, nn);
 }
 
 export function buildPointerMessages(context: PointerContext, userPrompt: string, options: { includeImage?: boolean } = {}): ChatMessage[] {

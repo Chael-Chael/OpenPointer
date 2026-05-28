@@ -1,15 +1,29 @@
-import type { ExecutorResult, PointerActionPlan, PointerContext } from '@openmagicpointer/core';
+import type { AgentContextEnvelope, AgentEvent, PointerContext } from '@openmagicpointer/core';
 
 export type AppSettings = {
-  openAICompatibleBaseUrl: string;
-  openAICompatibleModel: string;
-  hasApiKey: boolean;
-  cuaEndpoint: string;
+  agentBackend: 'auto' | 'local-vlm' | 'hermes' | 'opencode' | 'claude-agent' | 'codex';
+  localVlmEnabled: boolean;
+  localVlmBaseUrl: string;
+  localVlmModel: string;
+  hasLocalVlmApiKey: boolean;
+  hasHermesApiKey: boolean;
+  hermesBaseUrl: string;
+  hasOpenCodeApiKey: boolean;
+  opencodeBaseUrl: string;
+  claudeAgentEnabled: boolean;
+  hasClaudeAgentApiKey: boolean;
+  hasCodexApiKey: boolean;
+  codexAppServerUrl: string;
+  cuaMode: 'off' | 'prefer' | 'require-on-explicit-command';
+  requireApprovalBeforeCua: boolean;
   activationHotkey: string;
-  wiggleEnabled: boolean;
-  wiggleSensitivity: 'low' | 'medium' | 'high';
-  trailEnabled: boolean;
+  longPressEnabled: boolean;
   voiceEnabled: boolean;
+  pillWidth: number;
+  pillHeight: number;
+  newDialogBehavior: 'new' | 'continue' | 'interval';
+  newDialogInterval: number;
+  localVlmContextWindow: number;
 };
 
 export type HistoryEntry = {
@@ -17,14 +31,14 @@ export type HistoryEntry = {
   context: PointerContext;
   prompt: string;
   answer?: string;
-  plan?: PointerActionPlan;
-  result?: ExecutorResult;
+  envelope?: AgentContextEnvelope;
+  events?: AgentEvent[];
   createdAt: number;
 };
 
 export type AuditEntry = {
   id: string;
-  plan: PointerActionPlan;
-  result: ExecutorResult;
+  envelope: AgentContextEnvelope;
+  events: AgentEvent[];
   createdAt: number;
 };

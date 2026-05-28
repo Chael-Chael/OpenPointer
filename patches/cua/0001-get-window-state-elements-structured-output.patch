@@ -1,0 +1,34 @@
+diff --git a/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs b/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs
+index 05a388e0..fe0ec7fe 100644
+--- a/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs
++++ b/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs
+@@ -681,6 +681,29 @@ impl Tool for GetWindowStateTool {
+                     }
+                     structured["element_count"] = json!(count);
+                     structured["tree_markdown"] = json!(tr.tree_markdown);
++                    structured["elements"] = json!(tr.nodes.iter()
++                        .filter(|n| n.element_index.is_some())
++                        .map(|n| {
++                            let rect = n.rect.map(|(l, t, r, b)| json!({
++                                "x": l,
++                                "y": t,
++                                "width": r - l,
++                                "height": b - t,
++                            }));
++                            json!({
++                                "element_index": n.element_index,
++                                "control_type": &n.control_type,
++                                "name": &n.name,
++                                "value": &n.value,
++                                "automation_id": &n.automation_id,
++                                "help_text": &n.help_text,
++                                "actions": &n.actions,
++                                "rect": rect,
++                                "center": { "x": n.center_x, "y": n.center_y },
++                                "source": if n.msaa_role.is_some() { "msaa" } else { "uia" },
++                            })
++                        })
++                        .collect::<Vec<_>>());
+                 }
+ 
+                 if let Some((b64, w, h, orig_w)) = screenshot_opt {

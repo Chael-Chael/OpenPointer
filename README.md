@@ -1,11 +1,13 @@
 # OpenMagicPointer
 
-OpenMagicPointer is a desktop-first AI pointer assistant. It lets a user point, hover, sweep, lasso, speak, or type over screen content, then turns that context into safe AI actions with previews and explicit confirmation.
+OpenMagicPointer is a desktop pointer context bridge. Long-press any screen object, enter a text or voice instruction, and the app sends screenshot, window, cursor, and target context to a local VLM or an agent backend.
+
+OpenMagicPointer does not execute CUA locally. MCP, skills, CUA, and coding tools are selected and invoked by the configured agent runtime.
 
 ## Development
 
 ```powershell
-npm install
+npm install --cache .\.npm-cache
 npm run dev
 ```
 
@@ -13,12 +15,10 @@ Copy `.env.example` to `.env` for local provider configuration. Do not commit re
 
 ## Current MVP
 
-- Electron + React desktop overlay.
-- Typed core data model.
-- Mouse wiggle activation and shortcut activation.
-- Cursor trail and pointer context chips.
-- Hover, sweep, lasso, and rectangle context primitives.
-- Local intent recommendations.
-- Voice command parsing.
-- OpenAI-compatible backend adapter.
-- Cua HTTP executor adapter with preview/audit flow.
+- Electron + React transparent desktop overlay.
+- Global long-press activation with pointer loading ring.
+- Compact command bubble for text and voice input.
+- Real screenshot crop and pointer/window context capture.
+- Unified `AgentContextEnvelope` and streamed `AgentEvent` UI.
+- Local OpenAI-compatible VLM fallback.
+- Hermes, OpenCode, Claude Agent, Codex, and mock bridge adapters with testable unavailable/error paths.

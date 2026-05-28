@@ -1,16 +1,29 @@
 # OpenMagicPointer Architecture
 
-OpenMagicPointer is a desktop-first AI pointer assistant. The application owns user intent, pointer context, memory, action preview, and safety policy. Cua is treated as an external execution layer for confirmed computer-use actions.
+OpenMagicPointer is a desktop pointer context bridge. It captures what the user points at, collects screenshot/window/cursor context, accepts text or voice instructions, and streams results from a local VLM or an external agent backend.
 
-The first implementation is an Electron app with typed internal packages:
+The app no longer owns local computer-use execution. CUA, MCP tools, and skills are selected and invoked by the configured agent runtime.
 
-- `core`: canonical data types, action plans, risk policy, and session memory.
-- `gestures`: mouse wiggle activation, trail state, hover/sweep/lasso/rectangle gesture primitives.
-- `grounding`: turns cursor, window, visual, and gesture information into `PointerContext`.
-- `intent`: local first intent recommendation.
-- `voice`: voice command parsing and a small voice state machine.
-- `backends`: OpenAI-compatible LLM adapter.
-- `executors`: Cua and mock executors behind a common adapter.
-- `storage`: local settings, history, and audit abstractions.
+Packages:
 
-The model is never allowed to directly operate the computer. Model output is converted into a `PointerActionPlan`, validated locally, previewed to the user, and only then executed.
+- `core`: pointer context, agent envelope, CUA directive, and agent event contracts.
+- `gestures`: cursor trail and region geometry utilities.
+- `grounding`: converts cursor, screenshot crop, and window metadata into `PointerContext`.
+- `agent-bridge`: Local VLM, Hermes, OpenCode, Claude Agent, Codex, and mock bridge adapters.
+- `backends`: OpenAI-compatible model transport used by Local VLM fallback.
+- `voice`: speech text normalization into user instructions.
+- `storage`: local app settings and future history/audit shapes.
+- `apps/desktop`: Electron overlay, global long press, command bubble UI, and IPC streaming.
+
+Runtime flow:
+
+```text
+long press
+-> command bubble
+-> AgentContextEnvelope
+-> AgentBridge.run()
+-> AgentEvent stream
+-> bubble progress/result/approval UI
+```
+
+OpenMagicPointer passes generic tool hints such as app-specific MCP, document skill, screen skill, and CUA. It does not hardcode app-specific paths.

@@ -1,0 +1,48 @@
+import type { AgentBackendId, AgentContextEnvelope, AgentEvent } from '@openmagicpointer/core';
+
+export type AgentRunOptions = {
+  signal?: AbortSignal;
+  sessionKey?: string;
+};
+
+export type ApprovalDecision = 'approve' | 'deny';
+
+export interface AgentBridge {
+  id: AgentBackendId;
+  run(envelope: AgentContextEnvelope, options?: AgentRunOptions): AsyncIterable<AgentEvent>;
+  stop?(runId: string): Promise<void>;
+  approve?(approvalId: string, decision: ApprovalDecision): Promise<void>;
+}
+
+export type FetchLike = typeof fetch;
+
+export type LocalVlmBridgeConfig = {
+  baseUrl: string;
+  apiKey: string;
+  model?: string;
+  timeoutMs?: number;
+  contextWindow?: number;
+};
+
+export type HttpAgentBridgeConfig = {
+  baseUrl: string;
+  apiKey?: string;
+  timeoutMs?: number;
+  fetch?: FetchLike;
+};
+
+export type ClaudeAgentBridgeConfig = {
+  enabled: boolean;
+  apiKey?: string;
+  sdk?: {
+    query(args: unknown): AsyncIterable<unknown>;
+  };
+};
+
+export type AgentBridgeRegistryConfig = {
+  localVlm?: LocalVlmBridgeConfig;
+  hermes?: HttpAgentBridgeConfig;
+  opencode?: HttpAgentBridgeConfig;
+  claudeAgent?: ClaudeAgentBridgeConfig;
+  codex?: HttpAgentBridgeConfig;
+};

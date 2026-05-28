@@ -1,0 +1,62 @@
+import { describe, expect, it } from 'vitest';
+import type { PointerContext } from '@openmagicpointer/core';
+import { buildAgentContextEnvelope } from './routing.js';
+
+const context: PointerContext = {
+  id: 'ctx-test',
+  source: 'desktop',
+  cursor: { x: 100, y: 200, localX: 100, localY: 200, displayId: 1, dpr: 1 },
+  window: { title: 'Research Notes', app: 'PaperApp', process: 'paperapp.exe' },
+  target: {
+    id: 'entity-1',
+    kind: 'text',
+    text: 'Selected row',
+    bbox: { x: 80, y: 180, width: 240, height: 40 },
+    confidence: 0.8,
+    origin: 'manual'
+  },
+  entities: [],
+  visual: {
+    screenshotId: 'screen-1',
+    crop: { x: 0, y: 0, width: 600, height: 400 },
+    imageBase64: 'abc',
+    mimeType: 'image/jpeg'
+  },
+  nearby: [],
+  createdAt: 1
+};
+
+describe('buildAgentContextEnvelope', () => {
+  it('creates a generic envelope without app-specific tool hardcoding', () => {
+    const envelope = buildAgentContextEnvelope({
+      instruction: 'What is this?',
+      mode: 'text',
+      context
+    });
+    expect(envelope.schemaVersion).toBe('openmagicpointer.agent-context.v1');
+    expect(envelope.routing.preferredTools).toEqual(['app-specific-mcp', 'document-skill', 'screen-skill']);
+    expect(envelope.routing.preferredTools.join(',')).not.toMatch(/zotero/i);
+    expect(envelope.attachments[0]?.dataUrl).toContain('data:image/jpeg;base64,abc');
+  });
+
+  it('adds a CUA directive for explicit desktop operation intent', () => {
+    const envelope = buildAgentContextEnvelope({
+      instruction: 'merge these selected items',
+      mode: 'text',
+      context
+    });
+    expect(envelope.routing.toolPolicy).toBe('prefer');
+    expect(envelope.cuaDirective?.mode).toBe('prefer');
+    expect(envelope.cuaDirective?.target?.bbox).toEqual(context.target?.bbox);
+  });
+
+  it('requires CUA only for explicit force wording', () => {
+    const envelope = buildAgentContextEnvelope({
+      instruction: '直接操作这个窗口，强制 CUA 点击这个',
+      mode: 'voice',
+      context
+    });
+    expect(envelope.routing.toolPolicy).toBe('require');
+    expect(envelope.cuaDirective?.mode).toBe('require');
+  });
+});

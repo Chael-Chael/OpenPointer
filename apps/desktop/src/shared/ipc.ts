@@ -4,13 +4,19 @@ export const OMP_CHANNELS = {
   RequestDeactivate: 'omp:deactivate:request',
   RendererReady: 'omp:renderer:ready',
   Cursor: 'omp:cursor',
+  HoldProgress: 'omp:hold:progress',
   SetInteractive: 'omp:overlay:set-interactive',
-  BuildContext: 'omp:context:build',
-  Query: 'omp:llm:query',
-  CreatePlan: 'omp:plan:create',
-  ExecutePlan: 'omp:plan:execute',
+  RequestGrounding: 'omp:grounding:request',
+  SubmitInstruction: 'omp:agent:submit',
+  AgentEvent: 'omp:agent:event',
+  ApproveAgentRequest: 'omp:agent:approve',
+  CancelRun: 'omp:agent:cancel',
   GetSettings: 'omp:settings:get',
-  SaveSettings: 'omp:settings:save'
+  SaveSettings: 'omp:settings:save',
+  GetConversations: 'omp:history:list',
+  GetConversation: 'omp:history:get',
+  DeleteConversation: 'omp:history:delete',
+  FetchVisionModels: 'omp:models:fetch-vision'
 } as const;
 
 export type OmpChannel = (typeof OMP_CHANNELS)[keyof typeof OMP_CHANNELS];

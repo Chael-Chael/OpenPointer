@@ -1,5 +1,5 @@
+import type { AgentBackendId, AgentEvent, AgentInputMode, Point, PointerEntity } from '@openmagicpointer/core';
 import type { AppSettings } from '@openmagicpointer/storage';
-import type { Point, PointerActionPlan, PointerContext, PointerGestureKind, PointerIntent } from '@openmagicpointer/core';
 
 export type CursorPayload = {
   x: number;
@@ -10,45 +10,71 @@ export type CursorPayload = {
   dpr: number;
 };
 
-export type BuildContextRequest = {
+export type HoldProgressPayload = {
   cursor: CursorPayload;
-  gestureKind?: PointerGestureKind;
-  gesturePath?: Point[];
+  progress: number;
+  state: 'holding' | 'completed' | 'canceled';
 };
 
-export type QueryRequest = {
-  context: PointerContext;
-  prompt: string;
+export type SubmitInstructionRequest = {
+  text: string;
+  mode: AgentInputMode;
+  backend?: AgentBackendId;
+  cursor?: CursorPayload;
+  targetPath?: Point[];
+  selectedEntity?: PointerEntity;
+  conversationId?: string;
 };
 
-export type QueryResponse = {
-  answer: string;
-  intents: PointerIntent[];
+export type SubmitInstructionResponse = {
+  requestId: string;
+  backend: AgentBackendId;
+  conversationId: string;
 };
 
-export type CreatePlanRequest = {
-  context: PointerContext;
-  intent: PointerIntent;
-  prompt?: string;
+export type SaveSettingsPatch = Partial<AppSettings> & {
+  localVlmApiKey?: string;
+  hermesApiKey?: string;
+  opencodeApiKey?: string;
+  claudeAgentApiKey?: string;
+  codexApiKey?: string;
+  clearLocalVlmApiKey?: boolean;
+  clearHermesApiKey?: boolean;
+  clearOpenCodeApiKey?: boolean;
+  clearClaudeAgentApiKey?: boolean;
+  clearCodexApiKey?: boolean;
 };
 
-export type ExecutePlanResponse = {
-  ok: boolean;
-  summary: string;
+export type GroundingPreviewRequest = {
+  cursor: CursorPayload;
+};
+
+export type GroundingPreviewResponse = {
+  status: 'matched' | 'unavailable' | 'fallback';
+  entities: PointerEntity[];
+  hoveredEntityId?: string;
+  pid?: number;
+  windowId?: string;
   error?: string;
 };
 
 export type DesktopApi = {
   onActivate(cb: (cursor: CursorPayload) => void): () => void;
   onDeactivate(cb: () => void): () => void;
+  onCursor(cb: (cursor: CursorPayload) => void): () => void;
+  onHoldProgress(cb: (payload: HoldProgressPayload) => void): () => void;
+  onAgentEvent(cb: (event: AgentEvent) => void): () => void;
   deactivate(): void;
   ready(): void;
-  onCursor(cb: (cursor: CursorPayload) => void): () => void;
   setInteractive(value: boolean): void;
-  buildContext(req: BuildContextRequest): Promise<{ context: PointerContext; intents: PointerIntent[] }>;
-  query(req: QueryRequest): Promise<QueryResponse>;
-  createPlan(req: CreatePlanRequest): Promise<PointerActionPlan>;
-  executePlan(plan: PointerActionPlan): Promise<ExecutePlanResponse>;
+  requestGrounding(req: GroundingPreviewRequest): Promise<GroundingPreviewResponse>;
+  submitInstruction(req: SubmitInstructionRequest): Promise<SubmitInstructionResponse>;
+  approveAgentRequest(id: string, decision: 'approve' | 'deny'): Promise<void>;
+  cancelRun(): void;
   getSettings(): Promise<AppSettings>;
-  saveSettings(patch: Partial<AppSettings> & { apiKey?: string }): Promise<AppSettings>;
+  saveSettings(patch: SaveSettingsPatch): Promise<AppSettings>;
+  getConversations(): Promise<import('@openmagicpointer/core').Conversation[]>;
+  getConversation(id: string): Promise<import('@openmagicpointer/core').Conversation | null>;
+  deleteConversation(id: string): Promise<void>;
+  fetchVisionModels(req: { baseUrl: string; apiKey: string }): Promise<{ success: boolean; models?: string[]; error?: string }>;
 };

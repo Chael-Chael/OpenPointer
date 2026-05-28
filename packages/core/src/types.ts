@@ -59,6 +59,14 @@ export type PointerEntity = {
   accessibilityPath?: string;
   confidence: number;
   origin: 'accessibility' | 'ocr' | 'vision' | 'manual' | 'mock';
+  groundingRef?: {
+    provider: 'cua';
+    pid: number;
+    windowId: string;
+    elementIndex?: number;
+    actions?: string[];
+    screenRect?: Rect;
+  };
 };
 
 export type PointerContext = {
@@ -93,75 +101,101 @@ export type PointerContext = {
   };
   gesture?: PointerGesture;
   nearby: Array<Pick<PointerEntity, 'id' | 'kind' | 'text' | 'bbox' | 'confidence'>>;
+  grounding?: {
+    provider: 'cua';
+    status: 'matched' | 'unavailable' | 'fallback';
+    pid?: number;
+    windowId?: string;
+    elementCount?: number;
+    error?: string;
+  };
   createdAt: number;
 };
 
-export type PointerIntentId =
-  | 'ask'
-  | 'explain'
-  | 'summarize'
-  | 'translate'
-  | 'rewrite'
-  | 'extract'
-  | 'fill'
-  | 'copy'
-  | 'click'
-  | 'open'
-  | 'compare'
-  | 'send-to-agent';
+export type AgentBackendId = 'auto' | 'local-vlm' | 'hermes' | 'opencode' | 'claude-agent' | 'codex' | 'mock';
 
-export type PointerIntent = {
-  id: PointerIntentId;
-  label: string;
-  reason: string;
-  confidence: number;
-  requiresInput: boolean;
-  defaultPrompt: string;
+export type AgentInputMode = 'text' | 'voice';
+
+export type AgentToolPolicy = 'agent_decides' | 'prefer' | 'require';
+
+export type AgentAttachment = {
+  type: 'screenshot';
+  mimeType: 'image/jpeg' | 'image/png';
+  dataUrl?: string;
+  tempPath?: string;
+  crop?: Rect;
 };
 
-export type ActionRisk = 'low' | 'medium' | 'high' | 'critical';
+export type CuaDirective = {
+  enabled: boolean;
+  mode: 'prefer' | 'require';
+  objective: string;
+  target?: {
+    kind: 'point' | 'region' | 'window' | 'element';
+    screenPoint?: { x: number; y: number; displayId: number };
+    bbox?: Rect;
+    coordinateSpace: 'screen' | 'window' | 'crop';
+    description?: string;
+  };
+  allowedActions: Array<'screenshot' | 'click' | 'doubleClick' | 'type' | 'scroll' | 'drag' | 'hotkey'>;
+  constraints: {
+    appAllowlist?: string[];
+    stayWithinBbox?: boolean;
+    requireApprovalBeforeStateChange: boolean;
+    stopWhen?: string;
+  };
+};
 
-export type ActionStep =
-  | { type: 'answer'; prompt: string }
-  | { type: 'copy'; text: string }
-  | { type: 'fill'; text: string; target?: PointerEntity }
-  | { type: 'click'; x: number; y: number; button?: 'left' | 'right' | 'middle' }
-  | { type: 'doubleClick'; x: number; y: number }
-  | { type: 'move'; x: number; y: number }
-  | { type: 'drag'; from: Point; to: Point }
-  | { type: 'scroll'; x: number; y: number; deltaX: number; deltaY: number }
-  | { type: 'type'; text: string }
-  | { type: 'hotkey'; keys: string[] }
-  | { type: 'open'; target: string }
-  | { type: 'launchApp'; appId: string }
-  | { type: 'shell'; command: string };
-
-export type PointerActionPlan = {
+export type ChatTurn = {
   id: string;
-  intent: PointerIntentId;
-  risk: ActionRisk;
-  contextId: string;
-  steps: ActionStep[];
-  preview: string;
-  requiresConfirmation: boolean;
+  role: 'user' | 'assistant';
+  text: string;
+  pointerContext?: PointerContext;
+  timestamp: number;
+};
+
+export type Conversation = {
+  id: string;
+  title?: string;
+  turns: ChatTurn[];
   createdAt: number;
+  updatedAt: number;
 };
 
-export type ExecutorResult = {
-  ok: boolean;
-  summary: string;
-  beforeScreenshotId?: string;
-  afterScreenshotId?: string;
-  error?: string;
-  raw?: unknown;
+export type AgentContextEnvelope = {
+  schemaVersion: 'openmagicpointer.agent-context.v1';
+  requestId: string;
+  instruction: {
+    text: string;
+    mode: AgentInputMode;
+    submittedAt: number;
+  };
+  conversationId?: string;
+  history?: ChatTurn[];
+  pointerContext: PointerContext;
+  attachments: AgentAttachment[];
+  routing: {
+    backend: AgentBackendId;
+    preferredTools: string[];
+    requiredCapabilities: string[];
+    toolPolicy: AgentToolPolicy;
+  };
+  cuaDirective?: CuaDirective;
+  toolServers?: Array<{
+    id: 'cua';
+    transport: 'local' | 'local-http';
+    sessionId: string;
+    endpoint?: string;
+    tools: string[];
+  }>;
 };
 
-export type ExecutorAdapter = {
-  id: string;
-  label: string;
-  capabilities(): Promise<string[]>;
-  dryRun(plan: PointerActionPlan): Promise<PointerActionPlan>;
-  execute(plan: PointerActionPlan, approvalToken: string): Promise<ExecutorResult>;
-  captureBeforeAfter?<T>(run: () => Promise<T>): Promise<{ result: T; before?: string; after?: string }>;
-  audit(plan: PointerActionPlan, result: ExecutorResult): Promise<void>;
-};
+export type AgentEvent =
+  | { type: 'run.started'; runId: string; backend: AgentBackendId }
+  | { type: 'assistant.delta'; text: string }
+  | { type: 'tool.discovery'; tools: string[]; skills: string[]; message: string }
+  | { type: 'tool.started'; name: string; input?: unknown }
+  | { type: 'tool.completed'; name: string; output?: unknown }
+  | { type: 'approval.requested'; id: string; reason: string; tool?: string }
+  | { type: 'run.completed'; text?: string }
+  | { type: 'run.failed'; error: string; recoverable?: boolean };

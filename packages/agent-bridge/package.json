@@ -1,5 +1,5 @@
 {
-  "name": "@openmagicpointer/intent",
+  "name": "@openmagicpointer/agent-bridge",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@openmagicpointer/backends": "0.1.0",
     "@openmagicpointer/core": "0.1.0"
   }
 }

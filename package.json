@@ -11,7 +11,7 @@
   ],
   "scripts": {
     "dev": "npm run dev -w @openmagicpointer/desktop",
-    "build": "npm run build -w @openmagicpointer/core && npm run build -w @openmagicpointer/gestures && npm run build -w @openmagicpointer/intent && npm run build -w @openmagicpointer/voice && npm run build -w @openmagicpointer/backends && npm run build -w @openmagicpointer/executors && npm run build -w @openmagicpointer/grounding && npm run build -w @openmagicpointer/storage && npm run build -w @openmagicpointer/desktop",
+    "build": "npm run build -w @openmagicpointer/core && npm run build -w @openmagicpointer/gestures && npm run build -w @openmagicpointer/voice && npm run build -w @openmagicpointer/backends && npm run build -w @openmagicpointer/grounding && npm run build -w @openmagicpointer/storage && npm run build -w @openmagicpointer/agent-bridge && npm run build -w @openmagicpointer/desktop",
     "typecheck": "tsc -b",
     "test": "vitest run",
     "lint": "tsc -b --pretty false"
@@ -22,5 +22,6 @@
     "typescript": "^5.4.5",
     "vite": "^8.0.14",
     "vitest": "^4.1.7"
-  }
+  },
+  "dependencies": {}
 }

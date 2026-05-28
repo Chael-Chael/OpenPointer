@@ -10,9 +10,9 @@
   "references": [
     { "path": "../../packages/core" },
     { "path": "../../packages/gestures" },
-    { "path": "../../packages/intent" },
     { "path": "../../packages/storage" },
-    { "path": "../../packages/voice" }
+    { "path": "../../packages/voice" },
+    { "path": "../../packages/agent-bridge" }
   ],
   "include": ["src/renderer/**/*.ts", "src/renderer/**/*.tsx", "src/shared/**/*.ts"]
 }

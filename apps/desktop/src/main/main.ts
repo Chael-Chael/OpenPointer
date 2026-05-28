@@ -1,40 +1,62 @@
 import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen } from 'electron';
+import activeWindow from 'active-win';
+import { UiohookKey, uIOhook } from 'uiohook-napi';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import { OpenAICompatibleBackend, buildPointerMessages, isUnsupportedImageInputError } from '@openmagicpointer/backends';
-import { actionPreviewFromSteps, createActionPlan, validateActionPlan, type PointerActionPlan, type PointerEntity, type Rect } from '@openmagicpointer/core';
-import { CuaHttpExecutor, MockExecutor } from '@openmagicpointer/executors';
-import { WiggleDetector } from '@openmagicpointer/gestures';
+import {
+  createAgentBridge,
+  resolveBackendForEnvelope,
+  buildAgentContextEnvelope,
+  type AgentBridge,
+  type AgentBridgeRegistryConfig
+} from '@openmagicpointer/agent-bridge';
+import type { AgentBackendId, AgentContextEnvelope, AgentEvent, Point, PointerContext, PointerEntity, Rect } from '@openmagicpointer/core';
 import { buildPointerContext } from '@openmagicpointer/grounding';
-import { recommendIntents } from '@openmagicpointer/intent';
 import { OMP_CHANNELS } from '../shared/ipc.js';
-import type { BuildContextRequest, CreatePlanRequest, CursorPayload, QueryRequest } from '../shared/types.js';
+import type { CursorPayload, HoldProgressPayload, SubmitInstructionRequest } from '../shared/types.js';
+import { CuaBroker } from './cua-broker.js';
+import { CuaGroundingProvider } from './cua-grounding.js';
+import { CuaSidecarManager } from './cua-sidecar.js';
 import { loadLocalEnv } from './env.js';
-import { getApiKey, getSettings, saveSettings } from './settings.js';
+import { getClaudeAgentApiKey, getCodexApiKey, getHermesApiKey, getLocalVlmApiKey, getOpenCodeApiKey, getSettings, saveSettings } from './settings.js';
+import { ChatHistoryManager } from './history.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '../../../..');
 loadLocalEnv(repoRoot);
 
 const windows = new Map<number, BrowserWindow>();
-const wiggle = new WiggleDetector();
 let cursorTimer: NodeJS.Timeout | null = null;
-let lastCursor: CursorPayload | null = null;
 let active = false;
+let lastCursor: CursorPayload | null = null;
+let lastActivationCursor: CursorPayload | null = null;
+let activeAbort: AbortController | null = null;
+let activeBridge: AgentBridge | null = null;
+const cuaSidecar = new CuaSidecarManager(repoRoot);
+const cuaGrounding = new CuaGroundingProvider(cuaSidecar);
+const cuaBroker = new CuaBroker(cuaSidecar);
+const chatHistory = new ChatHistoryManager();
 
+const hold = {
+  active: false,
+  completed: false,
+  start: null as CursorPayload | null,
+  startedAt: 0,
+  timer: null as NodeJS.Timeout | null,
+  progressTimer: null as NodeJS.Timeout | null
+};
+
+const HOLD_MS = 650;
+const HOLD_RING_DELAY_MS = 180;
+const HOLD_MOVE_TOLERANCE_PX = 8;
 const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173';
 
 async function createOverlay(display: Electron.Display): Promise<void> {
-  console.log('[omp] creating overlay', {
-    displayId: display.id,
-    workArea: display.workArea,
-    scaleFactor: display.scaleFactor
-  });
   const win = new BrowserWindow({
-    x: display.workArea.x,
-    y: display.workArea.y,
-    width: display.workArea.width,
-    height: display.workArea.height,
+    x: display.bounds.x,
+    y: display.bounds.y,
+    width: display.bounds.width,
+    height: display.bounds.height,
     frame: false,
     transparent: true,
     backgroundColor: '#00000000',
@@ -55,30 +77,20 @@ async function createOverlay(display: Electron.Display): Promise<void> {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setIgnoreMouseEvents(true, { forward: true });
   windows.set(display.id, win);
-  win.once('ready-to-show', () => {
-    console.log('[omp] overlay ready-to-show', { displayId: display.id });
-    win.showInactive();
-  });
+  win.once('ready-to-show', () => win.showInactive());
   win.webContents.on('did-finish-load', () => {
-    console.log('[omp] overlay did-finish-load', { displayId: display.id });
     if (!win.isVisible()) win.showInactive();
-    if (active) {
-      win.webContents.send(OMP_CHANNELS.Activate, cursorPayload());
-    }
+    const payload = cursorPayload();
+    win.webContents.send(OMP_CHANNELS.Cursor, payload);
+    if (active) win.webContents.send(OMP_CHANNELS.Activate, payload);
   });
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
     console.error('[omp] overlay failed to load', { displayId: display.id, errorCode, errorDescription, validatedURL });
   });
-  win.webContents.on('render-process-gone', (_event, details) => {
-    console.error('[omp] renderer process gone', { displayId: display.id, details });
-  });
 
   if (process.env.NODE_ENV === 'production' || app.isPackaged) {
-    const filePath = join(__dirname, '../../dist/index.html');
-    console.log('[omp] loading packaged renderer', filePath);
-    await win.loadFile(filePath, { query: { displayId: String(display.id) } });
+    await win.loadFile(join(__dirname, '../../dist/index.html'), { query: { displayId: String(display.id) } });
   } else {
-    console.log('[omp] loading dev renderer', devUrl);
     await win.loadURL(`${devUrl}?displayId=${display.id}`);
   }
   if (!win.isVisible()) win.showInactive();
@@ -91,8 +103,8 @@ function cursorPayload(): CursorPayload {
   return {
     x: point.x,
     y: point.y,
-    localX: point.x - display.workArea.x,
-    localY: point.y - display.workArea.y,
+    localX: point.x - display.bounds.x,
+    localY: point.y - display.bounds.y,
     displayId: display.id,
     dpr: display.scaleFactor
   };
@@ -104,12 +116,10 @@ function broadcast(channel: string, payload?: unknown): void {
   }
 }
 
-function activate(): void {
-  console.log('[omp] activate');
+function activate(cursor = cursorPayload()): void {
   active = true;
-  const payload = cursorPayload();
-  lastCursor = payload;
-  const activeWin = windows.get(payload.displayId);
+  lastActivationCursor = cursor;
+  const activeWin = windows.get(cursor.displayId);
   for (const win of windows.values()) {
     if (win.isDestroyed()) continue;
     win.setAlwaysOnTop(true, 'screen-saver');
@@ -121,12 +131,14 @@ function activate(): void {
     activeWin.focus();
     activeWin.webContents.focus();
   }
-  broadcast(OMP_CHANNELS.Activate, payload);
+  broadcast(OMP_CHANNELS.Activate, cursor);
 }
 
 function deactivate(): void {
-  console.log('[omp] deactivate');
   active = false;
+  activeAbort?.abort();
+  activeAbort = null;
+  activeBridge = null;
   broadcast(OMP_CHANNELS.Deactivate);
   for (const win of windows.values()) {
     if (!win.isDestroyed()) win.setIgnoreMouseEvents(true, { forward: true });
@@ -139,11 +151,80 @@ function startCursorLoop(): void {
     const payload = cursorPayload();
     lastCursor = payload;
     broadcast(OMP_CHANNELS.Cursor, payload);
-    const settings = getSettings();
-    if (!active && settings.wiggleEnabled && wiggle.push({ x: payload.x, y: payload.y, t: Date.now() })) {
-      activate();
-    }
   }, 33);
+}
+
+function startGlobalLongPress(): void {
+  try {
+    uIOhook.on('keydown', (event) => {
+      if (event.keycode === UiohookKey.Escape && active) deactivate();
+    });
+
+    uIOhook.on('mousedown', (event) => {
+      if (!getSettings().longPressEnabled || !isPrimaryMouseButton(event.button)) return;
+      const cursor = cursorPayload();
+      hold.active = true;
+      hold.completed = false;
+      hold.start = cursor;
+      hold.startedAt = Date.now();
+      hold.timer = setTimeout(() => completeHold(), HOLD_MS);
+      hold.progressTimer = setInterval(() => {
+        if (!hold.active || !hold.start) return;
+        const elapsed = Date.now() - hold.startedAt;
+        if (elapsed < HOLD_RING_DELAY_MS) return;
+        const progress = Math.min(1, (elapsed - HOLD_RING_DELAY_MS) / (HOLD_MS - HOLD_RING_DELAY_MS));
+        broadcastHold({ cursor: hold.start, progress, state: 'holding' });
+      }, 32);
+    });
+
+    uIOhook.on('mousemove', (event) => {
+      if (!hold.active || !hold.start || hold.completed) return;
+      const distance = Math.hypot(event.x - hold.start.x, event.y - hold.start.y);
+      if (distance > HOLD_MOVE_TOLERANCE_PX) cancelHold();
+    });
+
+    uIOhook.on('mouseup', (event) => {
+      if (!isPrimaryMouseButton(event.button)) return;
+      if (hold.active && !hold.completed) cancelHold();
+    });
+
+    uIOhook.start();
+  } catch (error) {
+    console.warn('[omp] global long-press hook unavailable', error);
+  }
+}
+
+function completeHold(): void {
+  if (!hold.active || !hold.start) return;
+  hold.completed = true;
+  clearHoldTimers();
+  broadcastHold({ cursor: hold.start, progress: 1, state: 'completed' });
+  activate(hold.start);
+  hold.active = false;
+}
+
+function cancelHold(): void {
+  if (!hold.active || !hold.start) return;
+  broadcastHold({ cursor: hold.start, progress: 0, state: 'canceled' });
+  hold.active = false;
+  hold.completed = false;
+  hold.start = null;
+  clearHoldTimers();
+}
+
+function clearHoldTimers(): void {
+  if (hold.timer) clearTimeout(hold.timer);
+  if (hold.progressTimer) clearInterval(hold.progressTimer);
+  hold.timer = null;
+  hold.progressTimer = null;
+}
+
+function broadcastHold(payload: HoldProgressPayload): void {
+  broadcast(OMP_CHANNELS.HoldProgress, payload);
+}
+
+function isPrimaryMouseButton(button: unknown): boolean {
+  return button === 1 || button === 0 || button === 'left';
 }
 
 function registerIpc(): void {
@@ -152,138 +233,249 @@ function registerIpc(): void {
     if (win) win.setIgnoreMouseEvents(!value, { forward: true });
   });
 
-  ipcMain.on(OMP_CHANNELS.RequestDeactivate, () => {
-    deactivate();
-  });
+  ipcMain.on(OMP_CHANNELS.RequestDeactivate, () => deactivate());
+  ipcMain.on(OMP_CHANNELS.CancelRun, () => activeAbort?.abort());
 
   ipcMain.on(OMP_CHANNELS.RendererReady, (event) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    console.log('[omp] renderer ready', { active, hasWindow: Boolean(win) });
-    if (!active && !app.isPackaged) {
-      activate();
-      return;
-    }
-    if (active) {
-      event.sender.send(OMP_CHANNELS.Activate, cursorPayload());
-    } else {
-      event.sender.send(OMP_CHANNELS.Cursor, cursorPayload());
-    }
+    const payload = cursorPayload();
+    event.sender.send(OMP_CHANNELS.Cursor, payload);
+    if (active) event.sender.send(OMP_CHANNELS.Activate, lastActivationCursor ?? payload);
   });
 
   ipcMain.handle(OMP_CHANNELS.GetSettings, () => getSettings());
   ipcMain.handle(OMP_CHANNELS.SaveSettings, (_event, patch) => saveSettings(patch));
-
-  ipcMain.handle(OMP_CHANNELS.BuildContext, async (_event, req: BuildContextRequest) => {
-    const capture = await captureContextImage(req);
-    const entities = visualEntities(req, capture.crop);
-    const context = buildPointerContext({
-      cursor: req.cursor,
-      source: 'desktop',
-      entities,
-      gestureKind: req.gestureKind,
-      gesturePath: req.gesturePath,
-      screenshotId: capture.id,
-      imageBase64: capture.imageBase64,
-      mimeType: capture.mimeType,
-      crop: capture.crop
-    });
-    return { context, intents: recommendIntents(context) };
-  });
-
-  ipcMain.handle(OMP_CHANNELS.Query, async (_event, req: QueryRequest) => {
-    const apiKey = getApiKey();
-    if (!apiKey) {
-      return {
-        answer: 'No OpenAI-compatible API key is configured. Add it in Settings or a local .env file.',
-        intents: recommendIntents(req.context)
-      };
-    }
-    const settings = getSettings();
-    const backend = new OpenAICompatibleBackend({
-      baseUrl: settings.openAICompatibleBaseUrl,
-      apiKey,
-      model: settings.openAICompatibleModel || undefined
-    });
+  ipcMain.handle(OMP_CHANNELS.GetConversations, () => chatHistory.getConversations());
+  ipcMain.handle(OMP_CHANNELS.GetConversation, (_event, id: string) => chatHistory.getConversation(id));
+  ipcMain.handle(OMP_CHANNELS.DeleteConversation, (_event, id: string) => chatHistory.deleteConversation(id));
+  ipcMain.handle(OMP_CHANNELS.FetchVisionModels, async (_event, req: { baseUrl: string; apiKey: string }) => {
     try {
-      const result = await backend.complete(buildPointerMessages(req.context, req.prompt, { includeImage: true }));
-      return { answer: result.text || 'The model returned an empty response.', intents: recommendIntents(req.context) };
-    } catch (error) {
-      if (!isUnsupportedImageInputError(error)) throw error;
-      console.warn('[omp] provider does not support image input; retrying text-only context');
-      const result = await backend.complete(buildPointerMessages(req.context, req.prompt, { includeImage: false }));
-      const prefix = 'Note: the configured model does not support image input, so I used only pointer metadata rather than the screenshot.\n\n';
-      return { answer: prefix + (result.text || 'The model returned an empty response.'), intents: recommendIntents(req.context) };
+      const apiKey = req.apiKey || getLocalVlmApiKey();
+      const response = await fetch(`${req.baseUrl.replace(/\/$/, '')}/models`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${apiKey}`
+        }
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch models: ${response.status} ${response.statusText}`);
+      }
+      const data = await response.json() as { data?: Array<{ id: string }> };
+      const models = data.data?.map(m => m.id) ?? [];
+      const visionModels = models.filter(name => 
+        /vision|vl|multimodal|gpt-4o|claude-3|gemini|minicpm|internvl|llama-3\.2.*vision|deepseek-vl/i.test(name)
+      );
+      return { success: true, models: visionModels.length > 0 ? visionModels : models };
+    } catch (e: any) {
+      return { success: false, error: e.message };
     }
   });
-
-  ipcMain.handle(OMP_CHANNELS.CreatePlan, (_event, req: CreatePlanRequest) => {
-    const text = req.prompt || req.intent.defaultPrompt;
-    const steps = req.intent.id === 'click' && req.context.target?.bbox
-      ? [{ type: 'click' as const, x: req.context.target.bbox.x + req.context.target.bbox.width / 2, y: req.context.target.bbox.y + req.context.target.bbox.height / 2 }]
-      : req.intent.id === 'fill'
-        ? [{ type: 'type' as const, text }]
-        : [{ type: 'answer' as const, prompt: text }];
-    const plan = createActionPlan({
-      intent: req.intent.id,
-      context: req.context,
-      steps,
-      preview: actionPreviewFromSteps(steps)
-    });
-    const valid = validateActionPlan(plan);
-    if (!valid.ok) throw new Error(valid.error);
-    return plan;
-  });
-
-  ipcMain.handle(OMP_CHANNELS.ExecutePlan, async (_event, plan: PointerActionPlan) => {
-    const valid = validateActionPlan(plan);
-    if (!valid.ok) return { ok: false, summary: valid.error, error: valid.error };
+  ipcMain.handle(OMP_CHANNELS.RequestGrounding, async (_event, req: { cursor: CursorPayload }) => {
     const settings = getSettings();
-    const executor = settings.cuaEndpoint ? new CuaHttpExecutor({ endpoint: settings.cuaEndpoint }) : new MockExecutor();
-    try {
-      const dryRun = await executor.dryRun(plan);
-      const result = await executor.execute(dryRun, `approved-${Date.now()}`);
-      await executor.audit(dryRun, result);
-      return { ok: result.ok, summary: result.summary, error: result.error };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return { ok: false, summary: message, error: message };
+    if (settings.cuaMode === 'off') return { status: 'fallback', entities: [], error: 'CUA mode is off.' };
+    return cuaGrounding.preview(req.cursor, await activeWindowInfo());
+  });
+  ipcMain.handle(OMP_CHANNELS.ApproveAgentRequest, async (_event, id: string, decision: 'approve' | 'deny') => {
+    if (cuaBroker.hasPendingApproval(id)) {
+      cuaBroker.approve(id, decision);
+      return;
     }
+    await activeBridge?.approve?.(id, decision);
+  });
+
+  ipcMain.handle(OMP_CHANNELS.SubmitInstruction, async (event, req: SubmitInstructionRequest) => {
+    activeAbort?.abort();
+    const settings = getSettings();
+    const cursor = req.cursor ?? lastActivationCursor ?? lastCursor ?? cursorPayload();
+    const context = await capturePointerContext(cursor, req.targetPath, req.selectedEntity, settings.cuaMode !== 'off');
+    
+    let conversationId = req.conversationId || `conv-${Date.now()}`;
+    await chatHistory.appendTurn(conversationId, {
+      id: `turn-${Date.now()}-user`,
+      role: 'user',
+      text: req.text,
+      pointerContext: context,
+      timestamp: Date.now()
+    });
+    const conversation = await chatHistory.getConversation(conversationId);
+
+    const initialEnvelope = buildAgentContextEnvelope({
+      instruction: req.text,
+      mode: req.mode,
+      context,
+      backend: req.backend ?? settings.agentBackend
+    });
+    if (conversation) {
+      initialEnvelope.conversationId = conversationId;
+      initialEnvelope.history = conversation.turns;
+    }
+    const config = bridgeConfig(settings);
+    const backend = resolveBackendForEnvelope(initialEnvelope, config);
+    const cuaBrokerSession = context.grounding?.status === 'matched'
+      ? await cuaBroker.ensureStarted({
+          requireApprovalBeforeCua: settings.requireApprovalBeforeCua,
+          emit: (agentEvent) => event.sender.send(OMP_CHANNELS.AgentEvent, agentEvent)
+        })
+      : undefined;
+    const envelope: AgentContextEnvelope = {
+      ...initialEnvelope,
+      routing: { ...initialEnvelope.routing, backend },
+      toolServers: cuaBrokerSession
+        ? [{
+            id: 'cua',
+            transport: 'local-http',
+            sessionId: cuaBrokerSession.sessionId,
+            endpoint: cuaBrokerSession.endpoint,
+            tools: ['list_windows', 'get_window_state', 'click', 'type_text', 'scroll', 'press_key']
+          }]
+        : initialEnvelope.toolServers
+    };
+    const controller = new AbortController();
+    activeAbort = controller;
+    activeBridge = createAgentBridge(backend, config);
+    void streamBridgeEvents(event.sender, activeBridge, envelope, controller, settings.localVlmEnabled && backend !== 'local-vlm');
+    return { requestId: envelope.requestId, backend, conversationId };
   });
 }
 
-function visualEntities(req: BuildContextRequest, crop: Rect): PointerEntity[] {
-  const base = req.gesturePath && req.gesturePath.length > 0
-    ? {
-        x: Math.min(...req.gesturePath.map((p) => p.x)),
-        y: Math.min(...req.gesturePath.map((p) => p.y)),
-        width: Math.max(40, Math.max(...req.gesturePath.map((p) => p.x)) - Math.min(...req.gesturePath.map((p) => p.x))),
-        height: Math.max(30, Math.max(...req.gesturePath.map((p) => p.y)) - Math.min(...req.gesturePath.map((p) => p.y)))
+async function streamBridgeEvents(
+  sender: Electron.WebContents,
+  bridge: AgentBridge,
+  envelope: AgentContextEnvelope,
+  controller: AbortController,
+  allowLocalFallback: boolean
+): Promise<void> {
+  let emittedStarted = false;
+  let fullAnswer = '';
+  for await (const agentEvent of bridge.run(envelope, { signal: controller.signal, sessionKey: sessionKeyForContext(envelope.pointerContext) })) {
+    sender.send(OMP_CHANNELS.AgentEvent, agentEvent);
+    if (agentEvent.type === 'run.started') emittedStarted = true;
+    if (agentEvent.type === 'assistant.delta') fullAnswer += agentEvent.text;
+    if (agentEvent.type === 'run.failed' && agentEvent.recoverable && allowLocalFallback && !emittedStarted) {
+      const localEnvelope: AgentContextEnvelope = { ...envelope, routing: { ...envelope.routing, backend: 'local-vlm' } };
+      sender.send(OMP_CHANNELS.AgentEvent, { type: 'assistant.delta', text: 'Agent backend is unavailable. Falling back to local VLM.' } satisfies AgentEvent);
+      const localBridge = createAgentBridge('local-vlm', bridgeConfig(getSettings()));
+      for await (const localEvent of localBridge.run(localEnvelope, { signal: controller.signal })) {
+        sender.send(OMP_CHANNELS.AgentEvent, localEvent);
+        if (localEvent.type === 'assistant.delta') fullAnswer += localEvent.text;
       }
-    : crop;
+      if (envelope.conversationId) {
+        await chatHistory.appendTurn(envelope.conversationId, {
+          id: `turn-${Date.now()}-assistant`,
+          role: 'assistant',
+          text: fullAnswer,
+          timestamp: Date.now()
+        });
+      }
+      return;
+    }
+  }
+  if (envelope.conversationId && fullAnswer) {
+    await chatHistory.appendTurn(envelope.conversationId, {
+      id: `turn-${Date.now()}-assistant`,
+      role: 'assistant',
+      text: fullAnswer,
+      timestamp: Date.now()
+    });
+  }
+}
+
+function bridgeConfig(settings = getSettings()): AgentBridgeRegistryConfig {
+  const localApiKey = getLocalVlmApiKey();
+  return {
+    localVlm: settings.localVlmEnabled
+      ? {
+          baseUrl: settings.localVlmBaseUrl,
+          model: settings.localVlmModel || undefined,
+          apiKey: localApiKey,
+          contextWindow: settings.localVlmContextWindow || 32768
+        }
+      : undefined,
+    hermes: settings.hermesBaseUrl ? { baseUrl: settings.hermesBaseUrl, apiKey: getHermesApiKey() } : undefined,
+    opencode: settings.opencodeBaseUrl ? { baseUrl: settings.opencodeBaseUrl, apiKey: getOpenCodeApiKey() } : undefined,
+    claudeAgent: { enabled: settings.claudeAgentEnabled, apiKey: getClaudeAgentApiKey() },
+    codex: settings.codexAppServerUrl ? { baseUrl: settings.codexAppServerUrl, apiKey: getCodexApiKey() } : undefined
+  };
+}
+
+async function capturePointerContext(cursor: CursorPayload, targetPath?: Point[], selectedEntity?: PointerEntity, useCua = true): Promise<PointerContext> {
+  const capture = await captureContextImage(cursor, targetPath);
+  const windowInfo = await activeWindowInfo();
+  
+  const manualEntities = targetPath && targetPath.length > 1 
+    ? visualEntities(cursor, capture.crop, targetPath) 
+    : [];
+    
+  const entities = selectedEntity ? [selectedEntity] : manualEntities;
+  
+  const context = buildPointerContext({
+    cursor,
+    source: 'desktop',
+    window: windowInfo,
+    entities,
+    gestureKind: targetPath && targetPath.length > 1 ? 'rectangle' : 'hover',
+    gesturePath: targetPath && targetPath.length > 0 ? targetPath : [{ x: cursor.localX, y: cursor.localY, t: Date.now() }],
+    screenshotId: capture.id,
+    imageBase64: capture.imageBase64,
+    mimeType: capture.mimeType,
+    crop: capture.crop
+  });
+
+  if (selectedEntity?.groundingRef) {
+    context.grounding = {
+      provider: 'cua',
+      status: 'matched',
+      pid: selectedEntity.groundingRef.pid,
+      windowId: selectedEntity.groundingRef.windowId,
+      elementCount: 1
+    };
+  }
+
+  return context;
+}
+
+async function activeWindowInfo(): Promise<PointerContext['window']> {
+  try {
+    const info = await activeWindow({ screenRecordingPermission: false, accessibilityPermission: false });
+    if (!info) return undefined;
+    return {
+      title: info.title,
+      app: info.owner?.name,
+      process: info.owner?.name,
+      windowId: String(info.id)
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function visualEntities(cursor: CursorPayload, crop: Rect, targetPath?: Point[]): PointerEntity[] {
+  const bbox = targetPath && targetPath.length > 1
+    ? bboxFromPoints(targetPath)
+    : {
+        x: Math.max(0, cursor.localX - 24),
+        y: Math.max(0, cursor.localY - 24),
+        width: 48,
+        height: 48
+      };
   return [
     {
       id: `entity-${Date.now()}`,
       kind: 'image',
-      text: req.gestureKind ? `Real ${req.gestureKind} screenshot region` : 'Real screenshot around pointer',
-      bbox: base,
-      confidence: 0.8,
+      text: targetPath && targetPath.length > 1 ? 'Pointer-selected screen region' : 'Pointer target region',
+      bbox: bbox.width > 0 && bbox.height > 0 ? bbox : crop,
+      confidence: 0.72,
       origin: 'manual'
     }
   ];
 }
 
-async function captureContextImage(req: BuildContextRequest): Promise<{
+async function captureContextImage(cursor: CursorPayload, targetPath?: Point[]): Promise<{
   id: string;
   imageBase64: string;
   mimeType: 'image/jpeg';
   crop: Rect;
 }> {
-  const display = screen.getDisplayMatching({
-    x: req.cursor.x,
-    y: req.cursor.y,
-    width: 1,
-    height: 1
-  });
+  const display = screen.getDisplayMatching({ x: cursor.x, y: cursor.y, width: 1, height: 1 });
   const sources = await desktopCapturer.getSources({
     types: ['screen'],
     thumbnailSize: {
@@ -298,7 +490,7 @@ async function captureContextImage(req: BuildContextRequest): Promise<{
 
   const image = source.thumbnail;
   const size = image.getSize();
-  const crop = cropForRequest(req, size.width, size.height);
+  const crop = cropForRequest(cursor, size.width, size.height, targetPath);
   const jpeg = image.crop(crop).toJPEG(82);
   return {
     id: `screen-${Date.now()}`,
@@ -308,32 +500,38 @@ async function captureContextImage(req: BuildContextRequest): Promise<{
   };
 }
 
-function cropForRequest(req: BuildContextRequest, screenWidth: number, screenHeight: number): Rect {
-  if (req.gesturePath && req.gesturePath.length > 1) {
-    const xs = req.gesturePath.map((point) => point.x);
-    const ys = req.gesturePath.map((point) => point.y);
-    const pad = 48;
-    const x = Math.floor(Math.max(0, Math.min(...xs) - pad));
-    const y = Math.floor(Math.max(0, Math.min(...ys) - pad));
-    const right = Math.ceil(Math.min(screenWidth, Math.max(...xs) + pad));
-    const bottom = Math.ceil(Math.min(screenHeight, Math.max(...ys) + pad));
-    return {
-      x,
-      y,
-      width: Math.max(1, right - x),
-      height: Math.max(1, bottom - y)
-    };
+function cropForRequest(cursor: CursorPayload, screenWidth: number, screenHeight: number, targetPath?: Point[]): Rect {
+  if (targetPath && targetPath.length > 1) {
+    const bbox = bboxFromPoints(targetPath);
+    const x = Math.floor(Math.max(0, bbox.x));
+    const y = Math.floor(Math.max(0, bbox.y));
+    const right = Math.ceil(Math.min(screenWidth, bbox.x + bbox.width));
+    const bottom = Math.ceil(Math.min(screenHeight, bbox.y + bbox.height));
+    return { x, y, width: Math.max(1, right - x), height: Math.max(1, bottom - y) };
   }
 
   const width = Math.min(720, screenWidth);
   const height = Math.min(480, screenHeight);
-  const x = Math.round(Math.max(0, Math.min(screenWidth - width, req.cursor.localX - width / 2)));
-  const y = Math.round(Math.max(0, Math.min(screenHeight - height, req.cursor.localY - height / 2)));
+  const x = Math.round(Math.max(0, Math.min(screenWidth - width, cursor.localX - width / 2)));
+  const y = Math.round(Math.max(0, Math.min(screenHeight - height, cursor.localY - height / 2)));
   return { x, y, width, height };
 }
 
+function bboxFromPoints(points: Point[]): Rect {
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+function sessionKeyForContext(context: PointerContext): string {
+  return [context.source, context.window?.app, context.window?.windowId].filter(Boolean).join(':') || 'desktop';
+}
+
 app.whenReady().then(async () => {
-  console.log('[omp] app ready');
   registerIpc();
   for (const display of screen.getAllDisplays()) {
     await createOverlay(display);
@@ -342,6 +540,7 @@ app.whenReady().then(async () => {
   const registered = globalShortcut.register(settings.activationHotkey, () => (active ? deactivate() : activate()));
   console.log('[omp] global shortcut', settings.activationHotkey, registered ? 'registered' : 'failed');
   startCursorLoop();
+  startGlobalLongPress();
   if (!app.isPackaged) {
     setTimeout(() => {
       if (!active) activate();
@@ -356,4 +555,13 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   if (cursorTimer) clearInterval(cursorTimer);
+  activeAbort?.abort();
+  cuaBroker.stop();
+  cuaSidecar.stop();
+  clearHoldTimers();
+  try {
+    uIOhook.stop();
+  } catch {
+    // Global hook may not have started.
+  }
 });
