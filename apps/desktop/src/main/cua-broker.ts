@@ -6,18 +6,25 @@ import { CuaSidecarManager } from './cua-sidecar.js';
 
 type BrokerOptions = {
   requireApprovalBeforeCua: boolean;
+  // Whitelist of CUA tool names the agent is permitted to invoke. The broker
+  // rejects any call whose name is not in this set, so the agent cannot reach
+  // unlisted driver tools even if it knows their names.
+  allowedTools: string[];
   emit(event: AgentEvent): void;
 };
 
 type PendingApproval = {
   resolve(decision: 'approve' | 'deny'): void;
+  timeout: NodeJS.Timeout;
 };
 
 const STATE_CHANGING_TOOLS = new Set([
   'click',
   'double_click',
+  'right_click',
   'type_text',
   'press_key',
+  'hotkey',
   'scroll',
   'drag',
   'set_value',
@@ -56,12 +63,14 @@ export class CuaBroker {
   approve(id: string, decision: 'approve' | 'deny'): void {
     const pending = this.pendingApprovals.get(id);
     if (!pending) return;
+    clearTimeout(pending.timeout);
     this.pendingApprovals.delete(id);
     pending.resolve(decision);
   }
 
   stop(): void {
     for (const [id, pending] of this.pendingApprovals) {
+      clearTimeout(pending.timeout);
       pending.resolve('deny');
       this.pendingApprovals.delete(id);
     }
@@ -81,6 +90,13 @@ export class CuaBroker {
       const args = isRecord(body.arguments) ? body.arguments : isRecord(body.args) ? body.args : {};
       if (!name) {
         sendJson(res, 400, { error: 'Missing CUA tool name.' });
+        return;
+      }
+      // Enforce the tool whitelist. The advertised tool list is not a security
+      // boundary on its own; reject anything not explicitly allowed.
+      const allowed = this.options?.allowedTools ?? [];
+      if (!allowed.includes(name)) {
+        sendJson(res, 403, { error: `CUA tool "${name}" is not allowed.` });
         return;
       }
       if (this.options?.requireApprovalBeforeCua && STATE_CHANGING_TOOLS.has(name)) {
@@ -106,12 +122,12 @@ export class CuaBroker {
       tool
     });
     const decision = await new Promise<'approve' | 'deny'>((resolve) => {
-      this.pendingApprovals.set(id, { resolve });
-      setTimeout(() => {
+      const timeout = setTimeout(() => {
         if (!this.pendingApprovals.has(id)) return;
         this.pendingApprovals.delete(id);
         resolve('deny');
       }, 120000);
+      this.pendingApprovals.set(id, { resolve, timeout });
     });
     return decision === 'approve';
   }

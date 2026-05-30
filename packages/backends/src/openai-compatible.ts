@@ -29,7 +29,7 @@ export class OpenAICompatibleBackend {
     const model = this.config.model || 'gpt-4o-mini';
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 60000);
-    const combinedSignal = signal ?? controller.signal;
+    const combinedSignal = combineSignals(signal, controller.signal);
     try {
       const response = await fetch(`${this.config.baseUrl.replace(/\/$/, '')}/chat/completions`, {
         method: 'POST',
@@ -70,7 +70,7 @@ export class OpenAICompatibleBackend {
     const model = this.config.model || 'gpt-4o-mini';
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 60000);
-    const combinedSignal = signal ?? controller.signal;
+    const combinedSignal = combineSignals(signal, controller.signal);
     try {
       const response = await fetch(`${this.config.baseUrl.replace(/\/$/, '')}/chat/completions`, {
         method: 'POST',
@@ -101,6 +101,21 @@ export class OpenAICompatibleBackend {
       clearTimeout(timeout);
     }
   }
+}
+
+function combineSignals(external: AbortSignal | undefined, internal: AbortSignal): AbortSignal {
+  if (!external) return internal;
+  // Node 18.17+/20+ provides AbortSignal.any to merge multiple signals.
+  const anyFn = (AbortSignal as unknown as { any?: (signals: AbortSignal[]) => AbortSignal }).any;
+  if (typeof anyFn === 'function') return anyFn([external, internal]);
+  // Fallback: forward both signals into a fresh controller.
+  const controller = new AbortController();
+  const abort = (reason?: unknown) => controller.abort(reason);
+  if (external.aborted) abort(external.reason);
+  else external.addEventListener('abort', () => abort(external.reason), { once: true });
+  if (internal.aborted) abort(internal.reason);
+  else internal.addEventListener('abort', () => abort(internal.reason), { once: true });
+  return controller.signal;
 }
 
 async function* parseChatCompletionStream(response: Response): AsyncIterable<string> {

@@ -21,8 +21,8 @@ export class ChatHistoryManager {
       for (const conv of parsed) {
         this.conversations.set(conv.id, conv);
       }
-    } catch (e: any) {
-      if (e.code !== 'ENOENT') {
+    } catch (e: unknown) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
         console.error('[omp] Failed to load chat history:', e);
       }
     }
@@ -75,9 +75,6 @@ export class ChatHistoryManager {
     }
     conv.turns.push(turn);
     conv.updatedAt = now;
-    if (conv.turns.length === 1 && turn.role === 'user') {
-        conv.title = turn.text.slice(0, 50) + (turn.text.length > 50 ? '...' : '');
-    }
     await this.save();
     return conv;
   }

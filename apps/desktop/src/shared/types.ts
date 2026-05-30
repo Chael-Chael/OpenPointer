@@ -49,6 +49,14 @@ export type GroundingPreviewRequest = {
   cursor: CursorPayload;
 };
 
+// Emitted by the main process around the submit-time screenshot capture so the
+// renderer can tint the pointer. `withCua` is true when the capture coincides
+// with a selected CUA element (screenshot + grounding happening together).
+export type CaptureActivityPayload = {
+  phase: 'start' | 'end';
+  withCua: boolean;
+};
+
 export type GroundingPreviewResponse = {
   status: 'matched' | 'unavailable' | 'fallback';
   entities: PointerEntity[];
@@ -64,6 +72,7 @@ export type DesktopApi = {
   onCursor(cb: (cursor: CursorPayload) => void): () => void;
   onHoldProgress(cb: (payload: HoldProgressPayload) => void): () => void;
   onAgentEvent(cb: (event: AgentEvent) => void): () => void;
+  onCaptureActivity(cb: (payload: CaptureActivityPayload) => void): () => void;
   deactivate(): void;
   ready(): void;
   setInteractive(value: boolean): void;

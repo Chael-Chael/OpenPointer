@@ -46,6 +46,18 @@ export type PointerEntityKind =
   | 'issue'
   | 'diff'
   | 'error-log'
+  | 'checkbox'
+  | 'radio'
+  | 'toggle'
+  | 'menuitem'
+  | 'tab'
+  | 'listitem'
+  | 'treeitem'
+  | 'combobox'
+  | 'slider'
+  | 'menu'
+  | 'toolbar'
+  | 'container'
   | 'unknown';
 
 export type PointerEntity = {
@@ -100,7 +112,7 @@ export type PointerContext = {
     mimeType?: 'image/png' | 'image/jpeg';
   };
   gesture?: PointerGesture;
-  nearby: Array<Pick<PointerEntity, 'id' | 'kind' | 'text' | 'bbox' | 'confidence'>>;
+  nearby: Array<Pick<PointerEntity, 'id' | 'kind' | 'text' | 'bbox' | 'confidence' | 'role' | 'name' | 'groundingRef'>>;
   grounding?: {
     provider: 'cua';
     status: 'matched' | 'unavailable' | 'fallback';

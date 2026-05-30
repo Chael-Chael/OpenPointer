@@ -239,13 +239,30 @@ textarea:focus-visible {
   background: radial-gradient(
     circle,
     var(--glow-color) 0%,
-    rgba(52, 120, 246, 0.10) 55%,
+    var(--glow-mid, rgba(52, 120, 246, 0.10)) 55%,
     transparent 75%
   );
   pointer-events: none;
   opacity: 0.9;
   animation: glow-breathe 2.4s ease-in-out infinite;
   will-change: opacity;
+  transition: background 160ms ease;
+}
+
+/* Pointer tint by activity (see App.tsx pointerActivity).
+   cua = blue, capture = purple, both = teal. */
+.cursor-glow.activity-cua {
+  --glow-color: rgba(52, 120, 246, 0.45);
+  --glow-mid: rgba(52, 120, 246, 0.16);
+}
+.cursor-glow.activity-capture {
+  --glow-color: rgba(168, 85, 247, 0.55);
+  --glow-mid: rgba(168, 85, 247, 0.18);
+}
+.cursor-glow.activity-both {
+  --glow-color: rgba(20, 184, 166, 0.6);
+  --glow-mid: rgba(20, 184, 166, 0.2);
+  animation-duration: 1.2s;
 }
 
 .cursor-trail {

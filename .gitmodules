@@ -1,3 +1,4 @@
 [submodule "vendor/cua"]
 	path = vendor/cua
-	url = https://github.com/trycua/cua.git        ignore = dirty
+	url = https://github.com/trycua/cua.git
+	ignore = dirty

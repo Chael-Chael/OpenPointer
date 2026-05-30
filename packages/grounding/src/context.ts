@@ -35,12 +35,18 @@ export function buildPointerContext(input: BuildContextInput): PointerContext {
         }
       : undefined,
     gesture,
-    nearby: entities.slice(0, 8).map((entity) => ({
+    // Up to 24 elements (complex windows like browsers/IDEs far exceed 8) with
+    // role/name and the grounding reference so the agent can target an element
+    // by its index instead of relying solely on coordinates.
+    nearby: entities.slice(0, 24).map((entity) => ({
       id: entity.id,
       kind: entity.kind,
       text: entity.text,
+      role: entity.role,
+      name: entity.name,
       bbox: entity.bbox,
-      confidence: entity.confidence
+      confidence: entity.confidence,
+      groundingRef: entity.groundingRef
     })),
     createdAt: Date.now()
   };
@@ -51,11 +57,21 @@ function pickTarget(x: number, y: number, entities: PointerEntity[], gesture?: P
     const hit = entities.find((entity) => entity.bbox && rectsIntersect(entity.bbox, gesture.region!.bbox));
     if (hit) return hit;
   }
-  return entities.find((entity) => {
-    const bbox = entity.bbox;
-    if (!bbox) return false;
-    return x >= bbox.x && x <= bbox.x + bbox.width && y >= bbox.y && y <= bbox.y + bbox.height;
-  }) ?? entities[0];
+  // Prefer the smallest entity that contains the point so nested controls
+  // (e.g. a button inside a toolbar) resolve to the innermost target.
+  const containing = entities
+    .filter((entity): entity is PointerEntity & { bbox: Rect } => Boolean(entity.bbox))
+    .filter((entity) => pointInRect(x, y, entity.bbox))
+    .sort((a, b) => rectArea(a.bbox) - rectArea(b.bbox));
+  return containing[0] ?? entities[0];
+}
+
+function pointInRect(x: number, y: number, rect: Rect): boolean {
+  return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
+}
+
+function rectArea(rect: Rect): number {
+  return rect.width * rect.height;
 }
 
 function buildGesture(path: Point[], kind: PointerGestureKind | undefined, entities: PointerEntity[]): PointerGesture | undefined {

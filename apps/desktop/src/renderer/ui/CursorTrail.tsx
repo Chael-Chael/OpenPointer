@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { nextTrail } from '@openmagicpointer/gestures';
 import type { Point } from '@openmagicpointer/core';
 
@@ -10,6 +10,8 @@ type Props = {
 
 export function CursorTrail({ x, y, enabled }: Props) {
   const [points, setPoints] = useState<Point[]>([]);
+  const posRef = useRef({ x, y });
+  posRef.current = { x, y };
 
   useEffect(() => {
     if (!enabled) {
@@ -20,11 +22,13 @@ export function CursorTrail({ x, y, enabled }: Props) {
   }, [enabled, x, y]);
 
   useEffect(() => {
+    if (!enabled) return;
     const id = window.setInterval(() => {
-      setPoints((prev) => nextTrail(prev, { x, y, t: Date.now() }).filter((p) => Date.now() - (p.t ?? 0) < 430));
+      const { x: cx, y: cy } = posRef.current;
+      setPoints((prev) => nextTrail(prev, { x: cx, y: cy, t: Date.now() }).filter((p) => Date.now() - (p.t ?? 0) < 430));
     }, 80);
     return () => window.clearInterval(id);
-  }, [x, y]);
+  }, [enabled]);
 
   const segments = useMemo(() => {
     if (points.length < 2) return [];

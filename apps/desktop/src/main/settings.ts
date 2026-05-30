@@ -1,6 +1,7 @@
 import { app, safeStorage } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { clampNumber } from '@openmagicpointer/core';
 import type { AppSettings } from '@openmagicpointer/storage';
 
 type StoredSettings = AppSettings & {
@@ -54,20 +55,29 @@ function settingsPath(): string {
   return join(app.getPath('userData'), 'settings.json');
 }
 
+function settingsFileExists(): boolean {
+  return existsSync(settingsPath());
+}
+
 export function getSettings(): AppSettings {
   const loaded = readStored();
+  // Environment variables only seed the *initial* configuration. Once the user
+  // has saved settings (settings.json exists), their saved values win so that
+  // edits made in the UI actually take effect and are not clobbered by .env.
+  const persisted = settingsFileExists();
+  const envOverride = (keys: string[]): string | undefined => (persisted ? undefined : firstEnv(keys));
   return {
     ...DEFAULTS,
     ...loaded,
-    agentBackend: normalizeBackend(firstEnv(['OMP_AGENT_BACKEND', 'OP_AGENT_BACKEND']) || loaded.agentBackend || DEFAULTS.agentBackend),
-    localVlmEnabled: readBoolean(firstEnv(['OMP_LOCAL_VLM_ENABLED', 'OP_LOCAL_VLM_ENABLED']), loaded.localVlmEnabled ?? DEFAULTS.localVlmEnabled),
-    localVlmBaseUrl: firstEnv(['OMP_LOCAL_VLM_BASE_URL', 'OMP_OPENAI_COMPAT_BASE_URL', 'OP_LOCAL_VLM_BASE_URL', 'OP_OPENAI_COMPAT_BASE_URL']) || loaded.localVlmBaseUrl || DEFAULTS.localVlmBaseUrl,
-    localVlmModel: firstEnv(['OMP_LOCAL_VLM_MODEL', 'OMP_OPENAI_COMPAT_MODEL', 'OP_LOCAL_VLM_MODEL', 'OP_OPENAI_COMPAT_MODEL']) || loaded.localVlmModel || '',
-    hermesBaseUrl: firstEnv(['OMP_HERMES_BASE_URL', 'OP_HERMES_BASE_URL']) || loaded.hermesBaseUrl || DEFAULTS.hermesBaseUrl,
-    opencodeBaseUrl: firstEnv(['OMP_OPENCODE_BASE_URL', 'OP_OPENCODE_BASE_URL']) || loaded.opencodeBaseUrl || '',
-    claudeAgentEnabled: readBoolean(firstEnv(['OMP_CLAUDE_AGENT_ENABLED', 'OP_CLAUDE_AGENT_ENABLED']), loaded.claudeAgentEnabled ?? DEFAULTS.claudeAgentEnabled),
-    codexAppServerUrl: firstEnv(['OMP_CODEX_APP_SERVER_URL', 'OP_CODEX_APP_SERVER_URL']) || loaded.codexAppServerUrl || '',
-    cuaMode: normalizeCuaMode(firstEnv(['OMP_CUA_MODE', 'OP_CUA_MODE']) || loaded.cuaMode || DEFAULTS.cuaMode),
+    agentBackend: normalizeBackend(envOverride(['OMP_AGENT_BACKEND', 'OP_AGENT_BACKEND']) || loaded.agentBackend || DEFAULTS.agentBackend),
+    localVlmEnabled: readBoolean(envOverride(['OMP_LOCAL_VLM_ENABLED', 'OP_LOCAL_VLM_ENABLED']), loaded.localVlmEnabled ?? DEFAULTS.localVlmEnabled),
+    localVlmBaseUrl: envOverride(['OMP_LOCAL_VLM_BASE_URL', 'OMP_OPENAI_COMPAT_BASE_URL', 'OP_LOCAL_VLM_BASE_URL', 'OP_OPENAI_COMPAT_BASE_URL']) || loaded.localVlmBaseUrl || DEFAULTS.localVlmBaseUrl,
+    localVlmModel: envOverride(['OMP_LOCAL_VLM_MODEL', 'OMP_OPENAI_COMPAT_MODEL', 'OP_LOCAL_VLM_MODEL', 'OP_OPENAI_COMPAT_MODEL']) || loaded.localVlmModel || '',
+    hermesBaseUrl: envOverride(['OMP_HERMES_BASE_URL', 'OP_HERMES_BASE_URL']) || loaded.hermesBaseUrl || DEFAULTS.hermesBaseUrl,
+    opencodeBaseUrl: envOverride(['OMP_OPENCODE_BASE_URL', 'OP_OPENCODE_BASE_URL']) || loaded.opencodeBaseUrl || '',
+    claudeAgentEnabled: readBoolean(envOverride(['OMP_CLAUDE_AGENT_ENABLED', 'OP_CLAUDE_AGENT_ENABLED']), loaded.claudeAgentEnabled ?? DEFAULTS.claudeAgentEnabled),
+    codexAppServerUrl: envOverride(['OMP_CODEX_APP_SERVER_URL', 'OP_CODEX_APP_SERVER_URL']) || loaded.codexAppServerUrl || '',
+    cuaMode: normalizeCuaMode(envOverride(['OMP_CUA_MODE', 'OP_CUA_MODE']) || loaded.cuaMode || DEFAULTS.cuaMode),
     pillWidth: clampNumber(loaded.pillWidth, 280, 900, DEFAULTS.pillWidth),
     pillHeight: clampNumber(loaded.pillHeight, 36, 96, DEFAULTS.pillHeight),
     newDialogBehavior: normalizeNewDialogBehavior(loaded.newDialogBehavior || DEFAULTS.newDialogBehavior),
@@ -181,12 +191,6 @@ function writeStored(settings: StoredSettings): void {
 function readBoolean(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined) return fallback;
   return /^(1|true|yes|on)$/i.test(value);
-}
-
-function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
-  const numeric = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(numeric)) return fallback;
-  return Math.round(Math.min(max, Math.max(min, numeric)));
 }
 
 const localVlmSecretEnvKeys = ['OMP_LOCAL_VLM_API_KEY', 'OMP_OPENAI_COMPAT_API_KEY', 'OP_LOCAL_VLM_API_KEY', 'OP_OPENAI_COMPAT_API_KEY'];
