@@ -29,6 +29,7 @@ function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
     newDialogBehavior: 'continue',
     newDialogInterval: 300,
     localVlmContextWindow: 32768,
+    modalTheme: 'blue',
     ...overrides
   };
 }
