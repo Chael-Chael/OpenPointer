@@ -163,13 +163,14 @@ function setWindowInteractive(win: BrowserWindow, value: boolean): void {
 
 async function withOverlayHidden<T>(focusDisplayId: number | undefined, task: () => Promise<T>): Promise<T> {
   if (focusDisplayId !== undefined) overlayRestoreFocusDisplayId = focusDisplayId;
-  if (overlayHiddenDepth === 0) {
+  const firstHiddenRequest = overlayHiddenDepth === 0;
+  overlayHiddenDepth += 1;
+  if (firstHiddenRequest) {
     overlayHideReady = hideOverlaysForDesktopRead();
   }
-  overlayHiddenDepth += 1;
-  await overlayHideReady;
 
   try {
+    await overlayHideReady;
     return await task();
   } finally {
     overlayHiddenDepth -= 1;

@@ -934,10 +934,24 @@ export function App() {
     if (pointerActivity === 'cua' || pointerActivity === 'both') return '#14b8a6';
     return '#0D6FFF';
   }, [pointerActivity]);
+  const modalOpen = settingsOpen || historyOpen;
+  const menuStyle = useMemo<CSSProperties>(() => {
+    const width = 220;
+    const estimatedHeight = 232;
+    const viewportW = window.innerWidth;
+    const viewportH = window.innerHeight;
+    const shellWidth = Math.min(pillWidth, viewportW - 32);
+    const left = Math.min(Math.max(12, effectiveShellPos.x + shellWidth - width), Math.max(12, viewportW - width - 12));
+    const belowY = effectiveShellPos.y + pillHeight + 8;
+    const aboveY = effectiveShellPos.y - estimatedHeight - 8;
+    const shouldOpenAbove = hasPanel || belowY + estimatedHeight > viewportH;
+    const top = shouldOpenAbove && aboveY >= 12 ? aboveY : Math.min(belowY, Math.max(12, viewportH - estimatedHeight - 12));
+    return { left, top, width };
+  }, [effectiveShellPos.x, effectiveShellPos.y, hasPanel, pillHeight, pillWidth]);
 
   return (
     <div
-      className={`fixed inset-0 text-ink pointer-events-none${detached ? ' pointer-events-auto cursor-crosshair' : ''}${selecting ? ' cursor-crosshair' : ''}`}
+      className={`fixed inset-0 text-ink pointer-events-none${detached || menuOpen || modalOpen ? ' pointer-events-auto' : ''}${detached || selecting ? ' cursor-crosshair' : ''}`}
     >
       {hold?.state === 'holding' && <HoldRing cursor={hold.cursor} progress={hold.progress} />}
 
@@ -1262,68 +1276,6 @@ export function App() {
                 >
                   ···
                 </button>
-
-                {menuOpen && (
-                  <div className="bubble-dropdown absolute top-[calc(100%+6px)] left-0 min-w-[200px] p-1.5 border border-glass-border rounded-[14px] bg-glass-bg-solid backdrop-blur-[40px] backdrop-saturate-180 shadow-[0_8px_32px_rgba(0,0,0,0.10)] animate-dropdown-appear z-10">
-                    <button
-                      className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140"
-                      onClick={startVoice}
-                    >
-                      <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">🎤</span>
-                      Voice input
-                    </button>
-                    <div className="h-px mx-2 my-1 bg-black/[0.06]" />
-                    <label className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140">
-                      <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">⚡</span>
-                      <select
-                        className="flex-1 min-w-0 h-7 border border-glass-border rounded-lg px-2 bg-white/80 text-ink text-xs font-medium"
-                        value={backend}
-                        onChange={(event) => setBackend(event.target.value as AgentBackendId)}
-                        title="Agent backend"
-                      >
-                        {selectableBackends.map((item) => (
-                          <option key={item} value={item}>
-                            {backendLabel(item)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button
-                      className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        setConversationId(null);
-                        setHistoryTurns([]);
-                        setEvents([]);
-                        setPrompt('');
-                      }}
-                    >
-                      <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">✨</span>
-                      New Conversation
-                    </button>
-                    <button
-                      className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        setHistoryOpen(true);
-                        window.openMagicPointer.getConversations().then(setConversationsList);
-                      }}
-                    >
-                      <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">🕒</span>
-                      History
-                    </button>
-                    <button
-                      className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140"
-                      onClick={() => {
-                        setMenuOpen(false);
-                        setSettingsOpen(true);
-                      }}
-                    >
-                      <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">⚙</span>
-                      Settings
-                    </button>
-                  </div>
-                )}
               </div>
 
               {/* Faint Horizontal Line and Integrated Stream Panel */}
@@ -1417,6 +1369,65 @@ export function App() {
               )}
             </div>
           </section>
+
+          {menuOpen && (
+            <div className="bubble-dropdown" style={menuStyle} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
+              <button className="bubble-dropdown-item" onClick={startVoice}>
+                <span className="bubble-dropdown-icon">V</span>
+                Voice input
+              </button>
+              <div className="bubble-dropdown-separator" />
+              <label className="bubble-dropdown-item">
+                <span className="bubble-dropdown-icon">B</span>
+                <select
+                  className="bubble-dropdown-select"
+                  value={backend}
+                  onChange={(event) => setBackend(event.target.value as AgentBackendId)}
+                  title="Agent backend"
+                >
+                  {selectableBackends.map((item) => (
+                    <option key={item} value={item}>
+                      {backendLabel(item)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                className="bubble-dropdown-item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setConversationId(null);
+                  setHistoryTurns([]);
+                  setEvents([]);
+                  setPrompt('');
+                }}
+              >
+                <span className="bubble-dropdown-icon">N</span>
+                New Conversation
+              </button>
+              <button
+                className="bubble-dropdown-item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setHistoryOpen(true);
+                  window.openMagicPointer.getConversations().then(setConversationsList);
+                }}
+              >
+                <span className="bubble-dropdown-icon">H</span>
+                History
+              </button>
+              <button
+                className="bubble-dropdown-item"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setSettingsOpen(true);
+                }}
+              >
+                <span className="bubble-dropdown-icon">S</span>
+                Settings
+              </button>
+            </div>
+          )}
         </>
       )}
 
