@@ -445,9 +445,9 @@ function registerIpc(): void {
   ipcMain.handle(OMP_CHANNELS.RequestGrounding, async (_event, req: { cursor: CursorPayload }) => {
     const settings = getSettings();
     if (settings.cuaMode === 'off') return { status: 'fallback', entities: [], error: 'CUA mode is off.' };
-    return withOverlayHidden(req.cursor.displayId, async () => {
-      return cuaGrounding.preview(req.cursor, await activeWindowInfo());
-    });
+    // Live CUA preview is accessibility-tree based; hiding the overlay here
+    // makes the composer blink whenever background grounding refreshes.
+    return cuaGrounding.preview(req.cursor, await activeWindowInfo());
   });
   ipcMain.handle(OMP_CHANNELS.ApproveAgentRequest, async (_event, id: string, decision: 'approve' | 'deny') => {
     if (cuaBroker.hasPendingApproval(id)) {
@@ -461,7 +461,11 @@ function registerIpc(): void {
     activeAbort?.abort();
     const settings = getSettings();
     const cursor = req.cursor ?? lastActivationCursor ?? lastCursor ?? cursorPayload();
-    const context = await capturePointerContext(cursor, req.targetPath, req.selectedEntity, settings.cuaMode !== 'off');
+    const includeCua = Boolean(req.includeCua) && settings.cuaMode !== 'off';
+    const providedCuaEntities = includeCua ? (req.cuaEntities ?? []) : [];
+    const context = req.includeScreenshot
+      ? await capturePointerContext(cursor, req.targetPath, req.selectedEntity, includeCua && providedCuaEntities.length === 0, providedCuaEntities)
+      : await buildLightPointerContext(cursor, req.selectedEntity, providedCuaEntities, includeCua);
 
     const conversationId = req.conversationId || `conv-${Date.now()}`;
     await chatHistory.appendTurn(conversationId, {
@@ -586,11 +590,17 @@ function bridgeConfig(settings = getSettings()): AgentBridgeRegistryConfig {
   };
 }
 
-async function capturePointerContext(cursor: CursorPayload, targetPath?: Point[], selectedEntity?: PointerEntity, useCua = true): Promise<PointerContext> {
+async function capturePointerContext(
+  cursor: CursorPayload,
+  targetPath?: Point[],
+  selectedEntity?: PointerEntity,
+  useCua = true,
+  seedCuaEntities: PointerEntity[] = []
+): Promise<PointerContext> {
   // Signal the renderer that a submit-time screenshot is being taken so the
   // pointer can tint accordingly. `withCua` distinguishes a plain screenshot
   // (purple) from a screenshot that is paired with CUA grounding (teal).
-  const withCua = useCua || Boolean(selectedEntity?.groundingRef);
+  const withCua = useCua || Boolean(selectedEntity?.groundingRef) || seedCuaEntities.some((entity) => entity.groundingRef?.provider === 'cua');
   broadcast(OMP_CHANNELS.CaptureActivity, { phase: 'start', withCua });
   let capture: Awaited<ReturnType<typeof captureContextImage>>;
   let windowInfo: PointerContext['window'];
@@ -616,7 +626,8 @@ async function capturePointerContext(cursor: CursorPayload, targetPath?: Point[]
   }
 
   const manualEntities = targetPath && targetPath.length > 1 ? visualEntities(cursor, capture.crop, targetPath) : [];
-  const cuaEntities = cuaPreview?.entities ?? [];
+  const seededCuaEntities = seedCuaEntities.filter((entity) => entity.groundingRef?.provider === 'cua');
+  const cuaEntities = seededCuaEntities.length > 0 ? seededCuaEntities : (cuaPreview?.entities ?? []);
 
   const entities = dedupeEntities(
     selectedEntity
@@ -639,14 +650,8 @@ async function capturePointerContext(cursor: CursorPayload, targetPath?: Point[]
     crop: capture.crop
   });
 
-  if (selectedEntity?.groundingRef) {
-    context.grounding = {
-      provider: 'cua',
-      status: 'matched',
-      pid: selectedEntity.groundingRef.pid,
-      windowId: selectedEntity.groundingRef.windowId,
-      elementCount: Math.max(1, cuaEntities.length)
-    };
+  if (selectedEntity?.groundingRef || seededCuaEntities.length > 0) {
+    context.grounding = groundingFromEntities(selectedEntity ? [selectedEntity, ...cuaEntities] : cuaEntities);
   } else if (useCua && cuaPreview) {
     context.grounding = {
       provider: 'cua',
@@ -659,6 +664,57 @@ async function capturePointerContext(cursor: CursorPayload, targetPath?: Point[]
   }
 
   return context;
+}
+
+async function buildLightPointerContext(
+  cursor: CursorPayload,
+  selectedEntity: PointerEntity | undefined,
+  cuaEntities: PointerEntity[],
+  includeCua: boolean
+): Promise<PointerContext> {
+  const windowInfo = await activeWindowInfo();
+  let groundingPreview: Awaited<ReturnType<CuaGroundingProvider['preview']>> | undefined;
+  let groundedEntities = includeCua ? cuaEntities.filter((entity) => entity.groundingRef?.provider === 'cua') : [];
+  if (includeCua && groundedEntities.length === 0) {
+    groundingPreview = await cuaGrounding.preview(cursor, windowInfo);
+    groundedEntities = groundingPreview.entities;
+  }
+  const entities = dedupeEntities(selectedEntity ? [selectedEntity, ...groundedEntities] : groundedEntities);
+  const context = buildPointerContext({
+    cursor,
+    source: 'desktop',
+    window: windowInfo,
+    entities,
+    gestureKind: 'hover',
+    gesturePath: [{ x: cursor.localX, y: cursor.localY, t: Date.now() }]
+  });
+
+  if (selectedEntity?.groundingRef || groundedEntities.length > 0) {
+    context.grounding = groundingFromEntities(selectedEntity ? [selectedEntity, ...groundedEntities] : groundedEntities);
+  } else if (includeCua && groundingPreview) {
+    context.grounding = {
+      provider: 'cua',
+      status: groundingPreview.status,
+      pid: groundingPreview.pid,
+      windowId: groundingPreview.windowId,
+      elementCount: groundingPreview.entities.length,
+      error: groundingPreview.error
+    };
+  }
+
+  return context;
+}
+
+function groundingFromEntities(entities: PointerEntity[]): PointerContext['grounding'] {
+  const ref = entities.find((entity) => entity.groundingRef?.provider === 'cua')?.groundingRef;
+  const uniqueGroundedIds = new Set(entities.filter((entity) => entity.groundingRef?.provider === 'cua').map((entity) => entity.id));
+  return {
+    provider: 'cua',
+    status: 'matched',
+    pid: ref?.pid,
+    windowId: ref?.windowId,
+    elementCount: Math.max(1, uniqueGroundedIds.size)
+  };
 }
 
 function dedupeEntities(entities: PointerEntity[]): PointerEntity[] {

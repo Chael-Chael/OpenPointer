@@ -23,6 +23,9 @@ export type SubmitInstructionRequest = {
   cursor?: CursorPayload;
   targetPath?: Point[];
   selectedEntity?: PointerEntity;
+  includeScreenshot?: boolean;
+  includeCua?: boolean;
+  cuaEntities?: PointerEntity[];
   conversationId?: string;
 };
 

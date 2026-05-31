@@ -6,6 +6,7 @@ import {
   type DisplayBounds,
   type ParsedTreeElement,
   firstNonEmpty,
+  isInteractiveEntity,
   isNoiseEntity,
   kindFromControlType,
   normalizeRect,
@@ -73,7 +74,8 @@ export class CuaGroundingProvider {
         .filter((entity): entity is PointerEntity => Boolean(entity))
         // Drop pure layout containers with no actions and no label; they add
         // noise to the element list and the model's `nearby` context.
-        .filter((entity) => !isNoiseEntity(entity));
+        .filter((entity) => !isNoiseEntity(entity))
+        .filter((entity) => isInteractiveEntity(entity));
 
       // Release builds of cua-driver omit the structured `elements` array (it is
       // added by the source patch) but still render `tree_markdown`. Fall back to
@@ -86,6 +88,7 @@ export class CuaGroundingProvider {
         entities = parseTreeMarkdown(structured.tree_markdown).map((element) =>
           entityFromTreeElement(element, matched.pid!, String(matched.window_id), windowRect)
         );
+        entities = entities.filter((entity) => isInteractiveEntity(entity));
         coordinateless = entities.length > 0;
       }
 

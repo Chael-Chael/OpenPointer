@@ -15,7 +15,9 @@ export function buildToolDiscoveryEvent(envelope: AgentContextEnvelope) {
 export function buildAgentInstructions(envelope: AgentContextEnvelope): string {
   const cues = [
     'You are receiving a desktop pointer context from OpenMagicPointer.',
-    'Use the user instruction, screenshot, window metadata, pointer position, target area, and routing hints.',
+    'Treat the user instruction text as the primary intent.',
+    'Use screenshots as visual evidence and CUA grounding as structured UI evidence/action references.',
+    'If text, screenshot, and CUA disagree, follow the user instruction and explain the uncertainty instead of inventing missing state.',
     'Do not assume OpenMagicPointer can execute actions locally.',
     'If useful, discover and use configured MCP tools, skills, or CUA tools in your own runtime.',
     'If a desktop-control action can change state, request approval before proceeding.',
@@ -30,9 +32,15 @@ export function buildAgentInstructions(envelope: AgentContextEnvelope): string {
 
 export function buildAgentInput(envelope: AgentContextEnvelope): string {
   return [
-    `User instruction: ${envelope.instruction.text}`,
+    `User instruction (primary text): ${envelope.instruction.text}`,
     '',
-    'Pointer context:',
+    'Multimodal context bundle:',
+    JSON.stringify(summarizeMultimodalContext(envelope), null, 2),
+    '',
+    'Conversation context history:',
+    JSON.stringify(summarizeConversationContextHistory(envelope), null, 2),
+    '',
+    'Pointer context detail:',
     JSON.stringify(summarizePointerContext(envelope.pointerContext), null, 2),
     '',
     envelope.attachments.length > 0
@@ -89,6 +97,106 @@ function summarizePointerContext(context: PointerContext) {
       : undefined,
     nearby: context.nearby,
     grounding: context.grounding
+  };
+}
+
+function summarizeConversationContextHistory(envelope: AgentContextEnvelope) {
+  return (envelope.history ?? [])
+    .slice(0, -1)
+    .filter((turn) => turn.pointerContext)
+    .slice(-6)
+    .map((turn) => {
+      const context = turn.pointerContext!;
+      const cuaEntities = context.nearby.filter((entity) => entity.groundingRef?.provider === 'cua');
+      return {
+        role: turn.role,
+        text: turn.text,
+        window: context.window,
+        visual: context.visual
+          ? {
+              crop: context.visual.crop,
+              mimeType: context.visual.mimeType,
+              hasImage: Boolean(context.visual.imageBase64)
+            }
+          : undefined,
+        cua:
+          context.grounding || cuaEntities.length > 0
+            ? {
+                grounding: context.grounding,
+                target: context.target?.groundingRef
+                  ? {
+                      kind: context.target.kind,
+                      text: context.target.text,
+                      name: context.target.name,
+                      role: context.target.role,
+                      bbox: context.target.bbox,
+                      groundingRef: context.target.groundingRef
+                    }
+                  : undefined,
+                nearby: cuaEntities.slice(0, 6)
+              }
+            : undefined
+      };
+    });
+}
+
+function summarizeMultimodalContext(envelope: AgentContextEnvelope) {
+  const context = envelope.pointerContext;
+  const cuaEntities = context.nearby.filter((entity) => entity.groundingRef?.provider === 'cua');
+  return {
+    text: {
+      instruction: envelope.instruction.text,
+      mode: envelope.instruction.mode
+    },
+    visual: context.visual
+      ? {
+          attachment: envelope.attachments[0] ? `${envelope.attachments[0].type}:${envelope.attachments[0].mimeType}` : undefined,
+          crop: context.visual.crop,
+          gesture: context.gesture
+            ? {
+                kind: context.gesture.kind,
+                region: context.gesture.region
+              }
+            : undefined
+        }
+      : undefined,
+    cua:
+      context.grounding || cuaEntities.length > 0
+        ? {
+            grounding: context.grounding,
+            selectedTarget: context.target?.groundingRef
+              ? {
+                  kind: context.target.kind,
+                  text: context.target.text,
+                  name: context.target.name,
+                  role: context.target.role,
+                  bbox: context.target.bbox,
+                  groundingRef: context.target.groundingRef
+                }
+              : undefined,
+            nearby: cuaEntities.slice(0, 12).map((entity) => ({
+              kind: entity.kind,
+              text: entity.text,
+              name: entity.name,
+              role: entity.role,
+              bbox: entity.bbox,
+              groundingRef: entity.groundingRef
+            }))
+          }
+        : undefined,
+    pointer: {
+      window: context.window,
+      cursor: context.cursor,
+      target: context.target
+        ? {
+            kind: context.target.kind,
+            text: context.target.text,
+            name: context.target.name,
+            role: context.target.role,
+            bbox: context.target.bbox
+          }
+        : undefined
+    }
   };
 }
 

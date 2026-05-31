@@ -1,5 +1,4 @@
 import type { AgentBackendId } from '@openmagicpointer/core';
-import { backendLabel } from '../lib/backend-status';
 
 import claudeSvg from '../../assets/claude-color.svg?raw';
 import codexSvg from '../../assets/codex-color.svg?raw';

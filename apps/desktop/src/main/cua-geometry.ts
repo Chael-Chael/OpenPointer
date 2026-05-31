@@ -87,6 +87,28 @@ export function isNoiseEntity(entity: Pick<PointerEntity, 'kind' | 'text' | 'gro
   return entity.kind === 'container' || entity.kind === 'unknown';
 }
 
+const INTERACTIVE_ENTITY_KINDS = new Set<PointerEntityKind>([
+  'button',
+  'input',
+  'link',
+  'checkbox',
+  'radio',
+  'toggle',
+  'menuitem',
+  'tab',
+  'listitem',
+  'treeitem',
+  'combobox',
+  'slider',
+  'menu',
+  'toolbar'
+]);
+
+export function isInteractiveEntity(entity: Pick<PointerEntity, 'kind' | 'groundingRef'>): boolean {
+  const hasActions = (entity.groundingRef?.actions?.length ?? 0) > 0;
+  return hasActions || INTERACTIVE_ENTITY_KINDS.has(entity.kind);
+}
+
 /**
  * Pick the display whose bounds contain the rect's top-left, falling back to
  * the display with the largest overlap, then the first display. Replaces
