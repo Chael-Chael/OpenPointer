@@ -1,7 +1,8 @@
 import type { AgentBackendId, AgentContextEnvelope, AgentInputMode, AgentToolPolicy, CuaDirective, PointerContext } from '@openmagicpointer/core';
 
-const OPERATION_PATTERN = /\b(click|merge|add|insert|fill|type|open|move|drag|scroll|operate|select)\b|点击|合并|添加|加入|填|输入|打开|操作|选择/iu;
-const FORCE_CUA_PATTERN = /\b(force|must|directly).*(cua|desktop|computer)|强制.*(cua|桌面|电脑)|直接操作/iu;
+const OPERATION_PATTERN =
+  /\b(click|merge|add|insert|fill|type|open|move|drag|scroll|operate|select)\b|(?:\u70b9|\u9ede)(?:\u51fb|\u64ca)|\u5408\u5e76|\u6dfb\u52a0|\u52a0\u5165|\u586b(?:\u5145)?|\u8f93\u5165|\u6253\u5f00|\u64cd\u4f5c|\u9009\u62e9/iu;
+const FORCE_CUA_PATTERN = /\b(force|must|directly).*(cua|desktop|computer)|\u5f3a\u5236.*(cua|\u684c\u9762|\u7535\u8111)|\u76f4\u63a5\u64cd\u4f5c/iu;
 
 export function buildAgentContextEnvelope(args: {
   instruction: string;

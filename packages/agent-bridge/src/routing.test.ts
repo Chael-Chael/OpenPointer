@@ -50,9 +50,19 @@ describe('buildAgentContextEnvelope', () => {
     expect(envelope.cuaDirective?.target?.bbox).toEqual(context.target?.bbox);
   });
 
+  it('adds a CUA directive for Chinese desktop operation intent', () => {
+    const envelope = buildAgentContextEnvelope({
+      instruction: '\u70b9\u51fb\u8fd9\u4e2a\u6309\u94ae',
+      mode: 'text',
+      context
+    });
+    expect(envelope.routing.toolPolicy).toBe('prefer');
+    expect(envelope.cuaDirective?.mode).toBe('prefer');
+  });
+
   it('requires CUA only for explicit force wording', () => {
     const envelope = buildAgentContextEnvelope({
-      instruction: '直接操作这个窗口，强制 CUA 点击这个',
+      instruction: '\u76f4\u63a5\u64cd\u4f5c\u8fd9\u4e2a\u7a97\u53e3\uff0c\u5f3a\u5236 CUA \u70b9\u51fb\u8fd9\u4e2a',
       mode: 'voice',
       context
     });

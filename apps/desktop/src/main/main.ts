@@ -576,35 +576,55 @@ function bridgeConfig(settings = getSettings()): AgentBridgeRegistryConfig {
       : undefined,
     hermes: settings.hermesBaseUrl ? { baseUrl: settings.hermesBaseUrl, apiKey: getHermesApiKey() } : undefined,
     opencode: settings.opencodeBaseUrl ? { baseUrl: settings.opencodeBaseUrl, apiKey: getOpenCodeApiKey() } : undefined,
-    claudeAgent: { enabled: settings.claudeAgentEnabled, apiKey: getClaudeAgentApiKey(), baseUrl: settings.claudeAgentBaseUrl || undefined, executable: settings.claudeAgentExecutable || undefined },
+    claudeAgent: {
+      enabled: settings.claudeAgentEnabled,
+      apiKey: getClaudeAgentApiKey(),
+      baseUrl: settings.claudeAgentBaseUrl || undefined,
+      executable: settings.claudeAgentExecutable || undefined
+    },
     codex: settings.codexAppServerUrl ? { baseUrl: settings.codexAppServerUrl, apiKey: getCodexApiKey() } : undefined
   };
 }
 
-async function capturePointerContext(cursor: CursorPayload, targetPath?: Point[], selectedEntity?: PointerEntity, _useCua = true): Promise<PointerContext> {
+async function capturePointerContext(cursor: CursorPayload, targetPath?: Point[], selectedEntity?: PointerEntity, useCua = true): Promise<PointerContext> {
   // Signal the renderer that a submit-time screenshot is being taken so the
   // pointer can tint accordingly. `withCua` distinguishes a plain screenshot
-  // (purple) from a screenshot that coincides with a selected CUA element (teal).
-  const withCua = Boolean(selectedEntity?.groundingRef);
+  // (purple) from a screenshot that is paired with CUA grounding (teal).
+  const withCua = useCua || Boolean(selectedEntity?.groundingRef);
   broadcast(OMP_CHANNELS.CaptureActivity, { phase: 'start', withCua });
   let capture: Awaited<ReturnType<typeof captureContextImage>>;
   let windowInfo: PointerContext['window'];
+  let cuaPreview: Awaited<ReturnType<CuaGroundingProvider['preview']>> | undefined;
   try {
     const hiddenResult = await withOverlayHidden(cursor.displayId, async () => {
+      const currentWindow = await activeWindowInfo();
+      const [contextImage, groundingPreview] = await Promise.all([
+        captureContextImage(cursor, targetPath),
+        useCua ? cuaGrounding.preview(cursor, currentWindow) : Promise.resolve(undefined)
+      ]);
       return {
-        capture: await captureContextImage(cursor, targetPath),
-        windowInfo: await activeWindowInfo()
+        capture: contextImage,
+        windowInfo: currentWindow,
+        cuaPreview: groundingPreview
       };
     });
     capture = hiddenResult.capture;
     windowInfo = hiddenResult.windowInfo;
+    cuaPreview = hiddenResult.cuaPreview;
   } finally {
     broadcast(OMP_CHANNELS.CaptureActivity, { phase: 'end', withCua });
   }
 
   const manualEntities = targetPath && targetPath.length > 1 ? visualEntities(cursor, capture.crop, targetPath) : [];
+  const cuaEntities = cuaPreview?.entities ?? [];
 
-  const entities = selectedEntity ? [selectedEntity] : manualEntities;
+  const entities = dedupeEntities(
+    selectedEntity
+      ? [selectedEntity, ...cuaEntities, ...manualEntities]
+      : targetPath && targetPath.length > 1
+        ? [...manualEntities, ...cuaEntities]
+        : [...cuaEntities, ...manualEntities]
+  );
 
   const context = buildPointerContext({
     cursor,
@@ -625,11 +645,29 @@ async function capturePointerContext(cursor: CursorPayload, targetPath?: Point[]
       status: 'matched',
       pid: selectedEntity.groundingRef.pid,
       windowId: selectedEntity.groundingRef.windowId,
-      elementCount: 1
+      elementCount: Math.max(1, cuaEntities.length)
+    };
+  } else if (useCua && cuaPreview) {
+    context.grounding = {
+      provider: 'cua',
+      status: cuaPreview.status,
+      pid: cuaPreview.pid,
+      windowId: cuaPreview.windowId,
+      elementCount: cuaPreview.entities.length,
+      error: cuaPreview.error
     };
   }
 
   return context;
+}
+
+function dedupeEntities(entities: PointerEntity[]): PointerEntity[] {
+  const seen = new Set<string>();
+  return entities.filter((entity) => {
+    if (seen.has(entity.id)) return false;
+    seen.add(entity.id);
+    return true;
+  });
 }
 
 async function activeWindowInfo(): Promise<PointerContext['window']> {
@@ -693,7 +731,8 @@ async function captureContextImage(
 
   const image = source.thumbnail;
   const size = image.getSize();
-  const crop = cropForRequest(cursor, size.width, size.height, targetPath);
+  const scale = imageScaleForDisplay(display, size.width, size.height, cursor.dpr);
+  const crop = cropForRequest(cursor, size.width, size.height, targetPath, scale);
   const jpeg = image.crop(crop).toJPEG(82);
   return {
     id: `screen-${Date.now()}`,
@@ -703,9 +742,15 @@ async function captureContextImage(
   };
 }
 
-function cropForRequest(cursor: CursorPayload, screenWidth: number, screenHeight: number, targetPath?: Point[]): Rect {
+function cropForRequest(
+  cursor: CursorPayload,
+  screenWidth: number,
+  screenHeight: number,
+  targetPath?: Point[],
+  scale: { x: number; y: number } = { x: 1, y: 1 }
+): Rect {
   if (targetPath && targetPath.length > 1) {
-    const bbox = bboxFromPoints(targetPath);
+    const bbox = scaleRect(bboxFromPoints(targetPath), scale);
     const x = Math.floor(Math.max(0, bbox.x));
     const y = Math.floor(Math.max(0, bbox.y));
     const right = Math.ceil(Math.min(screenWidth, bbox.x + bbox.width));
@@ -715,9 +760,28 @@ function cropForRequest(cursor: CursorPayload, screenWidth: number, screenHeight
 
   const width = Math.min(720, screenWidth);
   const height = Math.min(480, screenHeight);
-  const x = Math.round(Math.max(0, Math.min(screenWidth - width, cursor.localX - width / 2)));
-  const y = Math.round(Math.max(0, Math.min(screenHeight - height, cursor.localY - height / 2)));
+  const imageX = cursor.localX * scale.x;
+  const imageY = cursor.localY * scale.y;
+  const x = Math.round(Math.max(0, Math.min(screenWidth - width, imageX - width / 2)));
+  const y = Math.round(Math.max(0, Math.min(screenHeight - height, imageY - height / 2)));
   return { x, y, width, height };
+}
+
+function imageScaleForDisplay(display: Electron.Display, imageWidth: number, imageHeight: number, fallbackDpr: number): { x: number; y: number } {
+  const fallback = Math.max(1, fallbackDpr || display.scaleFactor || 1);
+  return {
+    x: display.bounds.width > 0 ? imageWidth / display.bounds.width : fallback,
+    y: display.bounds.height > 0 ? imageHeight / display.bounds.height : fallback
+  };
+}
+
+function scaleRect(rect: Rect, scale: { x: number; y: number }): Rect {
+  return {
+    x: rect.x * scale.x,
+    y: rect.y * scale.y,
+    width: rect.width * scale.x,
+    height: rect.height * scale.y
+  };
 }
 
 function bboxFromPoints(points: Point[]): Rect {
