@@ -652,7 +652,8 @@ export function App() {
     return () => window.removeEventListener('click', onClick, { capture: true });
   }, [backendDropdownOpen]);
 
-  const hasPanel = state !== 'composing' || historyTurns.length > 0 || Boolean(conversationId);
+  const showFullContext = detached || state !== 'composing';
+  const hasPanel = showFullContext;
   const shellPosition = useMemo(
     () => computeShellPosition(cursor.localX, cursor.localY, pillWidth, pillHeight, hasPanel),
     [cursor.localX, cursor.localY, pillWidth, pillHeight, hasPanel]
@@ -732,8 +733,6 @@ export function App() {
     }
     return { maxHeight: `${maxHeight}px` };
   }, [panelHeight, effectiveShellPos.y, pillHeight]);
-  const canSubmitEmptyContext = Boolean(selection || selectedCuaEntityId || cuaEntities.length > 0);
-
   function onResizeMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
     event.stopPropagation();
@@ -1295,7 +1294,7 @@ export function App() {
                   onMouseDown={onPillMouseDown}
                 >
                   {/* Context Attachments Indicators */}
-                  {(selection || selectedEntity || cuaEntities.length > 0) && (
+                  {showFullContext && (selection || selectedEntity || cuaEntities.length > 0) && (
                     <div className="flex items-center gap-1.5 shrink-0 select-none">
                       {selection && (
                         <div
@@ -1387,8 +1386,8 @@ export function App() {
                       lineHeight: '1.4',
                       minHeight: `${Math.max(16, pillHeight - 12)}px`
                     }}
-                  value={prompt}
-                  onChange={(event) => setPrompt(event.target.value)}
+                    value={prompt}
+                    onChange={(event) => setPrompt(event.target.value)}
                     onKeyDown={(event) => {
                       if (event.key === 'Escape') {
                         event.preventDefault();
@@ -1402,10 +1401,10 @@ export function App() {
                         event.preventDefault();
                         void submit();
                       }
-                  }}
-                  placeholder={canSubmitEmptyContext && state === 'composing' && readiness.configured ? 'Press Enter to send context...' : placeholderForState(state, readiness)}
-                  rows={1}
-                />
+                    }}
+                    placeholder={placeholderForState(state, readiness)}
+                    rows={1}
+                  />
 
                   <button
                     className="bubble-menu shrink-0 grid place-items-center rounded-full text-white/70 bg-transparent leading-none tracking-[1px] hover:bg-white/10 hover:text-white active:scale-95 transition-all duration-160 relative z-1"
@@ -1423,7 +1422,7 @@ export function App() {
                 </div>
 
                 {/* Faint Horizontal Line and Integrated Stream Panel */}
-                {(state !== 'composing' || historyTurns.length > 0 || conversationId) && (
+                {showFullContext && (
                   <>
                     <div className="mx-4 h-px bg-white/12" />
                     <div className="capsule-stream-panel scrollbar-capsule px-4 pb-4 pt-3" style={streamPanelStyle} ref={streamPanelRef}>
