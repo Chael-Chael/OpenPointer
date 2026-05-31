@@ -996,7 +996,7 @@ export function App() {
                             ? '📝'
                             : selectedEntity.kind === 'image'
                               ? '🖼️'
-                              : selectedEntity.kind === 'window' || selectedEntity.kind === 'container'
+                              : selectedEntity.kind === 'container'
                                 ? '💻'
                                 : '🎯'}
                         </span>
