@@ -9,7 +9,7 @@ Packages:
 - `core`: pointer context, agent envelope, CUA directive, and agent event contracts.
 - `gestures`: cursor trail and region geometry utilities.
 - `grounding`: converts cursor, screenshot crop, and window metadata into `PointerContext`.
-- `agent-bridge`: Local VLM, Hermes, OpenCode, Claude Agent, Codex, and mock bridge adapters.
+- `agent-bridge`: Local VLM, Hermes, OpenCode, Claude Code, Codex, and mock bridge adapters.
 - `backends`: OpenAI-compatible model transport used by Local VLM fallback.
 - `voice`: speech text normalization into user instructions.
 - `storage`: local app settings and future history/audit shapes.

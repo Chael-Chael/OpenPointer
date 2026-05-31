@@ -51,8 +51,8 @@ export function SettingsPanel(props: SettingsPanelProps) {
       <div className="modal-card">
         <header className="flex items-center justify-between gap-3 mb-4">
           <div>
-            <p className="m-0 mb-1 text-accent text-[11px] font-bold uppercase tracking-[0.04em]">Agent backends</p>
-            <h2 className="m-0 text-xl font-bold leading-tight text-ink">Connection settings</h2>
+            <p className="m-0 mb-1 text-white text-[12px] font-instrument font-medium uppercase tracking-[0.04em]">Agent backends</p>
+            <h2 className="m-0 text-3xl font-instrument font-normal leading-tight text-white">Connection settings</h2>
           </div>
           <button className="ghost-button" onClick={onClose}>
             Close
@@ -104,13 +104,13 @@ export function SettingsPanel(props: SettingsPanelProps) {
             </div>
 
             {fetchedModels && fetchedModels.length > 0 && (
-              <div className="mt-2 max-h-[100px] overflow-y-auto border border-glass-border rounded-lg p-1.5 bg-black/[0.02]">
-                <p className="m-0 mb-1 text-[11px] font-bold text-muted">Select a vision model:</p>
+              <div className="mt-2 max-h-[100px] overflow-y-auto border border-white/12 rounded-lg p-1.5 bg-black/20">
+                <p className="m-0 mb-1 text-[11px] font-bold text-white/60">Select a vision model:</p>
                 <div className="flex flex-wrap gap-1">
                   {fetchedModels.map((m) => (
                     <span
                       key={m}
-                      className="cursor-pointer bg-accent-soft text-accent-deep text-[10px] py-0.5 px-1.5 rounded border border-accent/15 hover:brightness-95 hover:scale-[1.02] active:scale-[0.98] transition-all duration-150"
+                      className="cursor-pointer bg-white/12 text-white text-[10px] py-0.5 px-1.5 rounded border border-white/15 hover:bg-white/20 hover:scale-[1.02] active:scale-[0.98] transition-all duration-150"
                       onClick={() => updateSettings({ localVlmModel: m })}
                     >
                       {m}
@@ -178,7 +178,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
             />
           </BackendCard>
 
-          <BackendCard title="Claude Agent" status={backendReadiness(draftAwareSettings, 'claude-agent')}>
+          <BackendCard title="Claude Code" status={backendReadiness(draftAwareSettings, 'claude-agent')}>
             <label className="toggle-row">
               <input type="checkbox" checked={settings.claudeAgentEnabled} onChange={(event) => updateSettings({ claudeAgentEnabled: event.target.checked })} />
               <span>Enabled</span>

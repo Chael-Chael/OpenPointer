@@ -34,7 +34,7 @@ export class ClaudeAgentBridge implements AgentBridge {
 
   async *run(envelope: AgentContextEnvelope, options: AgentRunOptions = {}): AsyncIterable<AgentEvent> {
     if (!this.config?.enabled) {
-      yield { type: 'run.failed', error: 'Claude Agent bridge is disabled.', recoverable: true };
+      yield { type: 'run.failed', error: 'Claude Code bridge is disabled.', recoverable: true };
       return;
     }
     const sdk = this.config.sdk ?? (await loadClaudeSdk());

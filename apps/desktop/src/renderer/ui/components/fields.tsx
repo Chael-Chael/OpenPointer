@@ -33,7 +33,7 @@ export function BackendCard({ title, status, children }: { title: string; status
     <section className="backend-card">
       <header>
         <div>
-          <h3>{title}</h3>
+          <h3 className="font-instrument text-xl font-normal text-white">{title}</h3>
           <p>{status.detail}</p>
         </div>
         <span className={`config-status tone-${status.tone}`}>{status.label}</span>

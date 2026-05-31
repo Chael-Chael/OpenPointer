@@ -36,11 +36,11 @@ export function backendReadiness(settings: AppSettings | null, backend: AgentBac
     };
   }
   if (backend === 'claude-agent') {
-    if (!settings.claudeAgentEnabled) return { configured: false, label: 'Missing config', detail: 'Claude Agent is disabled.', tone: 'missing' };
+    if (!settings.claudeAgentEnabled) return { configured: false, label: 'Missing config', detail: 'Claude Code is disabled.', tone: 'missing' };
     return {
       configured: true,
       label: 'Ready',
-      detail: settings.hasClaudeAgentApiKey ? 'Claude Agent enabled with API key.' : 'Claude Agent enabled; using local Claude Code auth.',
+      detail: settings.hasClaudeAgentApiKey ? 'Claude Code enabled with API key.' : 'Claude Code enabled; using local Claude Code auth.',
       tone: 'ready'
     };
   }
@@ -87,7 +87,7 @@ export function backendLabel(backend: AgentBackendId): string {
     case 'opencode':
       return 'OpenCode';
     case 'claude-agent':
-      return 'Claude Agent';
+      return 'Claude Code';
     case 'codex':
       return 'Codex';
     case 'mock':

@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital,wght@0,400;1,400&display=swap');
 @import 'tailwindcss';
 
 /* ================================================================
@@ -5,6 +6,7 @@
    ================================================================ */
 
 @theme {
+  --font-instrument: 'Instrument Serif', serif;
   /* Glassmorphism */
   --color-glass-bg: rgba(255, 255, 255, 0.72);
   --color-glass-bg-solid: rgba(248, 250, 252, 0.92);
@@ -466,15 +468,19 @@
   position: fixed;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 2.5px;
   padding: 6px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  border-radius: 12px;
-  background: #ffffff;
-  color: var(--color-ink);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 14px;
+  background: rgba(13, 111, 255, 0.92);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  color: #ffffff;
   box-shadow:
-    0 18px 46px rgba(15, 23, 42, 0.18),
-    0 1px 0 rgba(255, 255, 255, 0.9) inset;
+    0 18px 46px rgba(0, 0, 0, 0.18),
+    inset 2px 3px 3px -3px rgba(255, 255, 255, 0.6),
+    inset 0px -1px 1px 0px rgba(255, 255, 255, 0.25),
+    inset 0px 1px 1px 0px rgba(255, 255, 255, 0.25);
   pointer-events: auto;
   z-index: 1000;
   animation: dropdown-appear 160ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -488,21 +494,26 @@
   min-height: 34px;
   padding: 7px 9px;
   border: 0;
-  border-radius: 8px;
-  background: #ffffff;
-  color: var(--color-ink);
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
   font-size: 13px;
   font-weight: 600;
   text-align: left;
   cursor: pointer;
   transition:
     background 120ms ease,
-    color 120ms ease;
+    color 120ms ease,
+    transform 100ms ease;
 }
 
 .bubble-dropdown-item:hover {
-  background: rgba(52, 120, 246, 0.08);
-  color: var(--color-accent-deep);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.bubble-dropdown-item:active {
+  transform: scale(0.98);
 }
 
 .bubble-dropdown-icon {
@@ -512,8 +523,8 @@
   width: 18px;
   height: 18px;
   border-radius: 6px;
-  background: rgba(52, 120, 246, 0.1);
-  color: var(--color-accent-deep);
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
   font-size: 10px;
   font-weight: 800;
   line-height: 1;
@@ -522,20 +533,26 @@
 .bubble-dropdown-separator {
   height: 1px;
   margin: 4px 8px;
-  background: rgba(0, 0, 0, 0.07);
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .bubble-dropdown-select {
   flex: 1;
   min-width: 0;
   height: 28px;
-  border: 1px solid rgba(0, 0, 0, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 8px;
-  background: #ffffff;
-  color: var(--color-ink);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
   padding: 0 8px;
   font-size: 12px;
   font-weight: 600;
+  outline: none;
+}
+
+.bubble-dropdown-select option {
+  background: #0d6fff;
+  color: #ffffff;
 }
 
 /* ── Stream Panel ── */
@@ -618,13 +635,190 @@
   width: min(860px, calc(100vw - 32px));
   max-height: min(780px, calc(100vh - 32px));
   overflow: auto;
-  border: 1px solid var(--color-glass-border);
-  border-radius: var(--radius-md);
-  background: var(--color-glass-bg-solid);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.14);
-  padding: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 24px;
+  background: rgba(13, 111, 255, 0.85);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: 
+    0 24px 64px rgba(0, 0, 0, 0.22),
+    inset 2px 3px 3px -3px rgba(255, 255, 255, 0.6),
+    inset 0px -1px 1px 0px rgba(255, 255, 255, 0.25),
+    inset 0px 1px 1px 0px rgba(255, 255, 255, 0.25);
+  padding: 24px;
   animation: modal-rise 280ms cubic-bezier(0.16, 1, 0.3, 1);
+  color: #ffffff;
 }
+
+.modal-card {
+  color: #ffffff;
+}
+
+.modal-card,
+.modal-card * {
+  &::-webkit-scrollbar {
+    width: 5px !important;
+    height: 5px !important;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent !important;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.22) !important;
+    border-radius: 99px !important;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.38) !important;
+  }
+}
+
+.modal-card .settings-section,
+.modal-card .backend-card {
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: inset 1px 1px 1px rgba(255, 255, 255, 0.06);
+  padding: 14px;
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.modal-card .settings-section {
+  margin-bottom: 12px;
+}
+
+.modal-card .field {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.modal-card .field span {
+  color: rgba(255, 255, 255, 0.95) !important;
+}
+
+.modal-card .field em {
+  color: rgba(255, 255, 255, 0.55) !important;
+}
+
+.modal-card .toggle-row {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.modal-card .field input,
+.modal-card .field select {
+  background: rgba(255, 255, 255, 0.12) !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  color: #ffffff !important;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
+  transition: all 150ms ease;
+}
+
+.modal-card .field input::placeholder {
+  color: rgba(255, 255, 255, 0.45) !important;
+}
+
+.modal-card .field input:focus,
+.modal-card .field select:focus {
+  background: rgba(255, 255, 255, 0.18) !important;
+  border-color: rgba(255, 255, 255, 0.4) !important;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.12), inset 0 1px 2px rgba(0, 0, 0, 0.1) !important;
+}
+
+.modal-card .field select option {
+  background: #0d6fff !important;
+  color: #ffffff !important;
+}
+
+/* History panel adjustments */
+.modal-card .history-item {
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: inset 1px 1px 1px rgba(255, 255, 255, 0.06);
+  color: #ffffff !important;
+}
+
+.modal-card .history-item:hover {
+  background: rgba(255, 255, 255, 0.15) !important;
+  border-color: rgba(255, 255, 255, 0.28) !important;
+  transform: translateY(-1px) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08), inset 1px 1px 1px rgba(255, 255, 255, 0.06) !important;
+}
+
+.modal-card .history-item:active {
+  transform: translateY(0) !important;
+}
+
+.modal-card .history-item-title {
+  color: #ffffff !important;
+}
+
+.modal-card .history-item-date {
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+/* Button overrides inside settings modal */
+.modal-card .ghost-button {
+  color: #ffffff !important;
+  background: rgba(255, 255, 255, 0.12) !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  box-shadow: inset 0px 1px 1px 0px rgba(255, 255, 255, 0.15) !important;
+}
+
+.modal-card .ghost-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2) !important;
+  border-color: rgba(255, 255, 255, 0.28) !important;
+}
+
+.modal-card .ghost-button:disabled {
+  opacity: 0.4 !important;
+}
+
+.modal-card .primary-button {
+  background: #ffffff !important;
+  color: #0d6fff !important;
+  border: none !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
+  font-weight: 700 !important;
+}
+
+.modal-card .primary-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.92) !important;
+  color: #0c62e6 !important;
+  transform: translateY(-0.5px) !important;
+}
+
+.modal-card .primary-button:active:not(:disabled) {
+  transform: scale(0.97) !important;
+}
+
+/* Config status tags in backend cards */
+.modal-card .config-status {
+  font-weight: 600 !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+}
+
+.modal-card .config-status.tone-ready {
+  background: rgba(74, 222, 128, 0.15) !important;
+  color: #4ade80 !important;
+  border-color: rgba(74, 222, 128, 0.25) !important;
+}
+
+.modal-card .config-status.tone-warning {
+  background: rgba(250, 204, 21, 0.15) !important;
+  color: #facc15 !important;
+  border-color: rgba(250, 204, 21, 0.25) !important;
+}
+
+.modal-card .config-status.tone-danger {
+  background: rgba(248, 113, 113, 0.15) !important;
+  color: #f87171 !important;
+  border-color: rgba(248, 113, 113, 0.25) !important;
+}
+
+.modal-card .config-status.tone-unconfigured {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: rgba(255, 255, 255, 0.55) !important;
+}
+
 
 /* ── Backend Card ── */
 

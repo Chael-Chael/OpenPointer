@@ -12,10 +12,10 @@ export function HistoryPanel({ conversations, onClose, loadConversation, deleteC
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-label="OpenMagicPointer conversation history">
       <div className="modal-card">
-        <header className="settings-header">
+        <header className="flex items-center justify-between gap-3 mb-4">
           <div>
-            <p>Chat history</p>
-            <h2>Past conversations</h2>
+            <p className="m-0 mb-1 text-cyan-200/90 text-[11px] font-bold uppercase tracking-[0.04em]">Chat history</p>
+            <h2 className="m-0 text-xl font-extrabold leading-tight text-white">Past conversations</h2>
           </div>
           <button className="ghost-button" onClick={onClose}>
             Close
@@ -23,9 +23,9 @@ export function HistoryPanel({ conversations, onClose, loadConversation, deleteC
         </header>
 
         {conversations.length === 0 ? (
-          <div className="history-empty">
-            <div className="history-empty-icon">🕒</div>
-            <p>No past conversations found. Start a new chat to begin!</p>
+          <div className="history-empty flex flex-col items-center justify-center py-12 text-center">
+            <div className="history-empty-icon text-4xl mb-3 text-white/40">🕒</div>
+            <p className="text-white/65 text-sm m-0">No past conversations found. Start a new chat to begin!</p>
           </div>
         ) : (
           <div className="history-list">

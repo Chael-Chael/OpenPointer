@@ -58,7 +58,7 @@ OpenMagicPointer is structured as a clean TypeScript monorepo using npm workspac
     ├── backends/           # OpenAI-compatible LLM/VLM backend clients
     └── agent-bridge/       # Unified routing integrations:
                             ├── Local VLM (Ollama, LM Studio, vLLM fallback)
-                            ├── Claude Agent (Anthropic Computer Use API)
+                            ├── Claude Code (Anthropic Computer Use API)
                             ├── HTTP Bridges (Hermes, OpenCode, Codex stream adapters)
                             └── Mock Bridge (Robust offline validation and diagnostics)
 ```
