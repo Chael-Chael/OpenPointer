@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
-import { clampNumber, estimateTextTokens, type AgentBackendId, type AgentEvent, type PointerEntity } from '@openmagicpointer/core';
+import { clampNumber, type AgentBackendId, type AgentEvent, type PointerEntity } from '@openmagicpointer/core';
 import type { AppSettings } from '@openmagicpointer/storage';
 import { parseVoiceCommand } from '@openmagicpointer/voice';
 import type { CursorPayload, HoldProgressPayload } from '../../shared/types';
@@ -29,7 +29,15 @@ export function App() {
   const [hold, setHold] = useState<HoldProgressPayload | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const pillWidth = clampNumber(settings?.pillWidth, 280, 900, 520);
-  const pillHeight = clampNumber(settings?.pillHeight, 36, 96, 44);
+  const pillHeight = clampNumber(settings?.pillHeight, 24, 96, 24);
+
+  // Dynamic sizing responsive to pillHeight
+  const menuSize = Math.max(20, Math.min(32, pillHeight - 6));
+  const inputFontSize = Math.max(12, Math.min(14, pillHeight - 12));
+  const gap = Math.max(8, Math.min(24, pillHeight - 12));
+  const padY = Math.max(2, Math.min(8, (pillHeight - menuSize) / 2));
+  const padXRight = Math.max(12, Math.min(24, pillHeight / 1.5));
+  const padXLeft = Math.max(8, Math.min(12, pillHeight / 3));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [secretDrafts, setSecretDrafts] = useState<SecretDrafts>(emptySecretDrafts);
   const [clearSecrets, setClearSecrets] = useState<ClearSecretFlags>(emptyClearSecretFlags);
@@ -71,31 +79,6 @@ export function App() {
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [fetchModelsError, setFetchModelsError] = useState<string | null>(null);
-
-  const estimatedUsedTokens = useMemo(() => {
-    let tokens = 0;
-    for (const turn of historyTurns) {
-      tokens += estimateTextTokens(turn.text);
-      if (turn.pointerContext?.visual?.imageBase64) {
-        tokens += 1000;
-      }
-    }
-    tokens += estimateTextTokens(prompt);
-    if (selection || selectedCuaEntityId) {
-      tokens += 1000;
-    }
-    return tokens;
-  }, [historyTurns, prompt, selection, selectedCuaEntityId]);
-
-  const contextLimit = settings?.localVlmContextWindow ?? 32768;
-  const remainingFraction = Math.max(0, (contextLimit - estimatedUsedTokens) / contextLimit);
-
-  let ringColor = '#30a14e'; // Green
-  if (remainingFraction < 0.2) {
-    ringColor = '#e5383b'; // Red
-  } else if (remainingFraction < 0.5) {
-    ringColor = '#b8860b'; // Amber
-  }
 
   async function fetchModels() {
     if (!settings?.localVlmBaseUrl) return;
@@ -523,6 +506,7 @@ export function App() {
     [cursor.localX, cursor.localY, pillWidth, pillHeight, hasPanel]
   );
   const effectiveShellPos = detachedPos ?? shellPosition;
+  const shouldUseLagFollow = active && !detachedPos && !pillDrag && !panelResizeDrag && !selecting && !selectionDrag;
   const transcript = useMemo(
     () =>
       events
@@ -550,17 +534,6 @@ export function App() {
   const approval = latestEvent(events, 'approval.requested');
   const latestFailure = latestEvent(events, 'run.failed');
   const toolEvents = useMemo(() => events.filter(isToolEvent), [events]);
-
-  // Capability indicators — only show when detected via tool.discovery
-  const capabilities = useMemo(() => {
-    if (!discovery) return { hasSkills: false, hasMcp: false, hasCua: false };
-    return {
-      hasSkills: discovery.skills.length > 0,
-      hasMcp: discovery.tools.some((t) => t.includes('mcp')),
-      hasCua: Boolean(settings?.cuaMode && settings.cuaMode !== 'off')
-    };
-  }, [discovery, settings]);
-
   useEffect(() => {
     if (state === 'completed' || state === 'failed') {
       if (thinkingTimerRef.current) {
@@ -836,6 +809,10 @@ export function App() {
     return id ? cuaEntities.find((entity) => entity.id === id && entity.bbox) : undefined;
   }, [cuaEntities, hoveredCuaEntityId, selectedCuaEntityId]);
 
+  const selectedEntity = useMemo(() => {
+    return selectedCuaEntityId ? cuaEntities.find((entity) => entity.id === selectedCuaEntityId) : undefined;
+  }, [cuaEntities, selectedCuaEntityId]);
+
   // Pointer tint state, by actual timing/priority:
   //   'both'    teal   – submit-time screenshot taken with a selected CUA element
   //   'capture' purple – submit-time screenshot only
@@ -847,6 +824,12 @@ export function App() {
     return 'none';
   }, [captureActivity.active, captureActivity.withCua, cuaEntities.length]);
 
+  const glowFillColor = useMemo(() => {
+    if (pointerActivity === 'capture') return '#8b5cf6';
+    if (pointerActivity === 'cua' || pointerActivity === 'both') return '#14b8a6';
+    return '#0D6FFF';
+  }, [pointerActivity]);
+
   return (
     <div
       className={`fixed inset-0 text-ink pointer-events-none${detached ? ' pointer-events-auto cursor-crosshair' : ''}${selecting ? ' cursor-crosshair' : ''}`}
@@ -856,7 +839,29 @@ export function App() {
       {active && (
         <>
           <CursorTrail x={cursor.localX} y={cursor.localY} enabled={active} />
-          <div className={`cursor-glow state-${state} activity-${pointerActivity}`} style={{ left: cursor.localX - 14, top: cursor.localY - 14 }} />
+          <svg
+            className="absolute pointer-events-none z-0 animate-glow-breathe"
+            style={{
+              left: cursor.localX - 40,
+              top: cursor.localY - 40,
+              width: 80,
+              height: 80
+            }}
+            viewBox="0 0 80 80"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <g filter="url(#filter0_f_42_128)">
+              <circle cx="40" cy="40" r="14" fill={glowFillColor} style={{ transition: 'fill 160ms ease' }} />
+            </g>
+            <defs>
+              <filter id="filter0_f_42_128" x="0" y="0" width="80" height="80" filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB">
+                <feFlood floodOpacity="0" result="BackgroundImageFix" />
+                <feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape" />
+                <feGaussianBlur stdDeviation="6.75" result="effect1_foregroundBlur_42_128" />
+              </filter>
+            </defs>
+          </svg>
 
           {highlightedCuaEntity?.bbox && (
             <div
@@ -921,229 +926,284 @@ export function App() {
             style={
               {
                 transform: `translate3d(${effectiveShellPos.x}px, ${effectiveShellPos.y}px, 0)`,
+                transition: shouldUseLagFollow ? 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
                 '--pill-width': `${pillWidth}px`,
                 '--pill-height': `${pillHeight}px`
               } as CSSProperties
             }
           >
             {/* Blur glow layer — always matches pill shape/size */}
-            <div className="absolute inset-0 rounded-full bg-[rgba(13,111,255,0.56)] blur-[23.9px] z-0 pointer-events-none" />
+            <div
+              className="absolute inset-0 bg-[rgba(13,111,255,0.56)] blur-[23.9px] z-0 pointer-events-none"
+              style={{ borderRadius: `${pillHeight / 2}px` }}
+            />
 
             <div
-              className="command-bubble relative z-4 flex items-start gap-6 min-h-[var(--pill-height,36px)] py-3 pr-6 pl-3 rounded-full bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] animate-bubble-pop origin-left"
-              onMouseDown={onPillMouseDown}
+              className="command-bubble relative z-4 flex flex-col bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] animate-bubble-pop origin-left"
+              style={{
+                borderRadius: `${pillHeight / 2}px`
+              }}
             >
+              {/* Inner Shadow Layer covering the ENTIRE capsule, inheriting border-radius */}
               <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
-              <button
-                className="bubble-menu shrink-0 grid place-items-center w-8 h-8 rounded-full text-white/70 bg-transparent text-lg leading-none tracking-[1px] hover:bg-white/10 hover:text-white active:scale-95 transition-all duration-160 relative z-1"
-                title="Menu"
-                onClick={() => setMenuOpen(!menuOpen)}
-                aria-label="Menu"
-              >
-                ···
-              </button>
 
-              <textarea
-                ref={inputRef}
-                autoFocus
-                className="bubble-input"
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setSettingsOpen(false);
-                    window.openMagicPointer.cancelRun();
-                    window.openMagicPointer.deactivate();
-                    return;
-                  }
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    void submit();
-                  }
+              <div
+                className="flex items-center w-full relative z-1"
+                style={{
+                  minHeight: `${pillHeight}px`,
+                  gap: `${gap}px`,
+                  paddingTop: `${padY}px`,
+                  paddingBottom: `${padY}px`,
+                  paddingRight: `${padXRight}px`,
+                  paddingLeft: `${padXLeft}px`
                 }}
-                placeholder={placeholderForState(state, readiness)}
-                rows={1}
-              />
+                onMouseDown={onPillMouseDown}
+              >
+                {/* Context Attachments Indicators */}
+                {(selection || selectedEntity) && (
+                  <div className="flex items-center gap-1.5 shrink-0 select-none">
+                    {selection && (
+                      <div
+                        className="group relative flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all duration-150 cursor-pointer"
+                        style={{
+                          width: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
+                          height: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
+                          fontSize: `${Math.max(10, Math.min(13, pillHeight - 16))}px`
+                        }}
+                        onClick={() => setSelection(null)}
+                        title="Attached: Selected Region (Click to remove)"
+                      >
+                        <span>📸</span>
+                        <span className="absolute -top-1 -right-1 hidden group-hover:flex items-center justify-center w-3.5 h-3.5 rounded-full bg-[rgba(229,56,59,0.9)] text-[8px] font-bold text-white shadow-sm">
+                          ×
+                        </span>
+                      </div>
+                    )}
 
-              {active && (
-                <div
-                  className="context-progress-wrapper relative w-7 h-7 flex items-center justify-center ml-2 shrink-0 cursor-help select-none"
-                  style={{ '--ring-color': ringColor } as CSSProperties}
-                  title={`Context window: ${estimatedUsedTokens} / ${contextLimit} tokens used (${Math.round(remainingFraction * 100)}% remaining)`}
+                    {selectedEntity && (
+                      <div
+                        className="group relative flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all duration-150 cursor-pointer"
+                        style={{
+                          width: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
+                          height: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
+                          fontSize: `${Math.max(10, Math.min(13, pillHeight - 16))}px`
+                        }}
+                        onClick={() => setSelectedCuaEntityId(null)}
+                        title={`Attached: ${selectedEntity.kind} - ${selectedEntity.name || selectedEntity.text || 'UI Element'} (Click to remove)`}
+                      >
+                        <span>
+                          {selectedEntity.kind === 'text'
+                            ? '📝'
+                            : selectedEntity.kind === 'image'
+                              ? '🖼️'
+                              : selectedEntity.kind === 'window' || selectedEntity.kind === 'container'
+                                ? '💻'
+                                : '🎯'}
+                        </span>
+                        <span className="absolute -top-1 -right-1 hidden group-hover:flex items-center justify-center w-3.5 h-3.5 rounded-full bg-[rgba(229,56,59,0.9)] text-[8px] font-bold text-white shadow-sm">
+                          ×
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <textarea
+                  ref={inputRef}
+                  autoFocus
+                  className="bubble-input"
+                  style={{
+                    fontSize: `${inputFontSize}px`,
+                    lineHeight: '1.4',
+                    minHeight: `${Math.max(16, pillHeight - 12)}px`
+                  }}
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setSettingsOpen(false);
+                      window.openMagicPointer.cancelRun();
+                      window.openMagicPointer.deactivate();
+                      return;
+                    }
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      void submit();
+                    }
+                  }}
+                  placeholder={placeholderForState(state, readiness)}
+                  rows={1}
+                />
+
+                <button
+                  className="bubble-menu shrink-0 grid place-items-center rounded-full text-white/70 bg-transparent leading-none tracking-[1px] hover:bg-white/10 hover:text-white active:scale-95 transition-all duration-160 relative z-1"
+                  style={{
+                    width: `${menuSize}px`,
+                    height: `${menuSize}px`,
+                    fontSize: `${Math.max(10, Math.min(18, menuSize - 4))}px`
+                  }}
+                  title="Menu"
+                  onClick={() => setMenuOpen(!menuOpen)}
+                  aria-label="Menu"
                 >
-                  <svg className="w-full h-full" viewBox="0 0 32 32">
-                    <circle className="ring-track" cx="16" cy="16" r="10" />
-                    <circle className="ring-progress" cx="16" cy="16" r="10" strokeDasharray={62.8} strokeDashoffset={62.8 * (1 - remainingFraction)} />
-                  </svg>
-                  <span className="context-progress-text absolute text-[8px] font-bold text-white/70 tabular-nums">{Math.round(remainingFraction * 100)}%</span>
-                </div>
-              )}
+                  ···
+                </button>
 
-              {menuOpen && (
-                <div className="bubble-dropdown absolute top-[calc(100%+6px)] left-0 min-w-[200px] p-1.5 border border-glass-border rounded-[14px] bg-glass-bg-solid backdrop-blur-[40px] backdrop-saturate-180 shadow-[0_8px_32px_rgba(0,0,0,0.10)] animate-dropdown-appear z-10">
-                  <button
-                    className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140"
-                    onClick={startVoice}
-                  >
-                    <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">🎤</span>
-                    Voice input
-                  </button>
-                  <div className="h-px mx-2 my-1 bg-black/[0.06]" />
-                  <label className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140">
-                    <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">⚡</span>
-                    <select
-                      className="flex-1 min-w-0 h-7 border border-glass-border rounded-lg px-2 bg-white/80 text-ink text-xs font-medium"
-                      value={backend}
-                      onChange={(event) => setBackend(event.target.value as AgentBackendId)}
-                      title="Agent backend"
+                {menuOpen && (
+                  <div className="bubble-dropdown absolute top-[calc(100%+6px)] left-0 min-w-[200px] p-1.5 border border-glass-border rounded-[14px] bg-glass-bg-solid backdrop-blur-[40px] backdrop-saturate-180 shadow-[0_8px_32px_rgba(0,0,0,0.10)] animate-dropdown-appear z-10">
+                    <button
+                      className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140"
+                      onClick={startVoice}
                     >
-                      {selectableBackends.map((item) => (
-                        <option key={item} value={item}>
-                          {backendLabel(item)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button
-                    className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      setConversationId(null);
-                      setHistoryTurns([]);
-                      setEvents([]);
-                      setPrompt('');
-                    }}
-                  >
-                    <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">✨</span>
-                    New Conversation
-                  </button>
-                  <button
-                    className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      setHistoryOpen(true);
-                      window.openMagicPointer.getConversations().then(setConversationsList);
-                    }}
-                  >
-                    <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">🕒</span>
-                    History
-                  </button>
-                  <button
-                    className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140"
-                    onClick={() => {
-                      setMenuOpen(false);
-                      setSettingsOpen(true);
-                    }}
-                  >
-                    <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">⚙</span>
-                    Settings
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Capability indicators — only visible when backend detects capabilities */}
-            {(capabilities.hasSkills || capabilities.hasMcp || capabilities.hasCua) && (
-              <div className="flex items-center gap-1.5 mt-2 ml-2 animate-fade-up">
-                {capabilities.hasSkills && (
-                  <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(52,199,89,0.12)] text-success">
-                    Skills
-                  </span>
-                )}
-                {capabilities.hasMcp && (
-                  <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(255,59,48,0.10)] text-danger">
-                    MCP
-                  </span>
-                )}
-                {capabilities.hasCua && (
-                  <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(255,204,0,0.15)] text-warning">
-                    CUA
-                  </span>
+                      <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">🎤</span>
+                      Voice input
+                    </button>
+                    <div className="h-px mx-2 my-1 bg-black/[0.06]" />
+                    <label className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140">
+                      <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">⚡</span>
+                      <select
+                        className="flex-1 min-w-0 h-7 border border-glass-border rounded-lg px-2 bg-white/80 text-ink text-xs font-medium"
+                        value={backend}
+                        onChange={(event) => setBackend(event.target.value as AgentBackendId)}
+                        title="Agent backend"
+                      >
+                        {selectableBackends.map((item) => (
+                          <option key={item} value={item}>
+                            {backendLabel(item)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setConversationId(null);
+                        setHistoryTurns([]);
+                        setEvents([]);
+                        setPrompt('');
+                      }}
+                    >
+                      <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">✨</span>
+                      New Conversation
+                    </button>
+                    <button
+                      className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setHistoryOpen(true);
+                        window.openMagicPointer.getConversations().then(setConversationsList);
+                      }}
+                    >
+                      <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">🕒</span>
+                      History
+                    </button>
+                    <button
+                      className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140"
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setSettingsOpen(true);
+                      }}
+                    >
+                      <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">⚙</span>
+                      Settings
+                    </button>
+                  </div>
                 )}
               </div>
-            )}
 
-            {(state !== 'composing' || historyTurns.length > 0 || conversationId) && (
-              <div className={`stream-panel scrollbar-thin${detached ? ' dark:scrollbar-thin' : ''}`} style={streamPanelStyle} ref={streamPanelRef}>
-                <div className="flex justify-between gap-2.5 text-muted text-[11px] font-semibold uppercase tracking-[0.02em]">
-                  <span>{backendLabel(backend)}</span>
-                  <span>{statusLabel(state)}</span>
-                </div>
-                <div className="flex flex-col gap-4 mt-2.5 w-full">
-                  {historyTurns.map((turn) => {
-                    if (turn.role === 'user') {
-                      return (
-                        <div key={turn.id} className="flex flex-col w-full items-end">
-                          <div className="user-bubble max-w-[85%] bg-black/[0.05] rounded-[16px_16px_0_16px] py-2.5 px-3.5 text-sm leading-[1.45] text-ink break-words whitespace-pre-wrap shadow-[0_1px_2px_rgba(0,0,0,0.03)] dark:bg-white/[0.08]">
-                            {turn.text}
-                          </div>
-                        </div>
-                      );
-                    } else {
-                      return (
-                        <div key={turn.id} className="flex flex-col w-full items-start">
-                          <article className="agent-text text-sm markdown-body">
-                            <MarkdownRenderer value={turn.text} />
-                          </article>
-                        </div>
-                      );
-                    }
-                  })}
+              {/* Faint Horizontal Line and Integrated Stream Panel */}
+              {(state !== 'composing' || historyTurns.length > 0 || conversationId) && (
+                <>
+                  <div className="mx-4 h-px bg-white/12" />
+                  <div className="capsule-stream-panel scrollbar-capsule px-4 pb-4 pt-3" style={streamPanelStyle} ref={streamPanelRef}>
+                    <div className="flex justify-between gap-2.5 text-white/50 text-[11px] font-semibold uppercase tracking-[0.02em]">
+                      <span>{backendLabel(backend)}</span>
+                      <span>{statusLabel(state)}</span>
+                    </div>
+                    <div className="flex flex-col gap-4 mt-2.5 w-full">
+                      {historyTurns.map((turn) => {
+                        if (turn.role === 'user') {
+                          return (
+                            <div key={turn.id} className="flex flex-col w-full items-end">
+                              <div className="user-bubble max-w-[85%] rounded-[16px_16px_0_16px] py-2.5 px-3.5 text-sm leading-[1.45] break-words whitespace-pre-wrap">
+                                {turn.text}
+                              </div>
+                            </div>
+                          );
+                        } else {
+                          return (
+                            <div key={turn.id} className="flex flex-col w-full items-start">
+                              <article className="agent-text text-sm markdown-body">
+                                <MarkdownRenderer value={turn.text} />
+                              </article>
+                            </div>
+                          );
+                        }
+                      })}
 
-                  {/* Active turn streaming/thinking */}
-                  {((historyTurns.length === 0 && (state === 'submitting' || state === 'streaming' || state === 'approval')) ||
-                    (historyTurns.length > 0 && historyTurns[historyTurns.length - 1]?.role === 'user')) && (
-                    <div className="flex flex-col w-full items-start">
-                      {/* Thinking Block */}
-                      {thinkingTime > 0 && (
-                        <div className="my-2.5 flex flex-col items-start w-full">
-                          <div
-                            className={`inline-flex items-center gap-1.5 cursor-pointer select-none text-xs font-semibold text-muted py-1 px-2 rounded-[10px] bg-black/[0.03] hover:bg-black/[0.06] hover:text-ink transition-all duration-150 dark:bg-white/[0.04] dark:hover:bg-white/[0.08]${showTools ? ' [&>.arrow]:rotate-90' : ''}`}
-                            onClick={() => setShowTools(!showTools)}
-                          >
-                            <span>已思考 {thinkingTime}s</span>
-                            <span className="arrow inline-block text-[8px] rotate-0 transition-transform duration-150 leading-none">▶</span>
-                          </div>
-                          {showTools && (
-                            <div className="mt-1.5 pl-3 border-l-2 border-black/[0.06] w-full dark:border-white/10">
-                              {discovery && <p className="tool-discovery mt-2.5 text-muted text-[13px] leading-relaxed">{discovery.message}</p>}
-                              {toolEvents.length > 0 && <ToolRows events={toolEvents} />}
+                      {/* Active turn streaming/thinking */}
+                      {((historyTurns.length === 0 && (state === 'submitting' || state === 'streaming' || state === 'approval')) ||
+                        (historyTurns.length > 0 && historyTurns[historyTurns.length - 1]?.role === 'user')) && (
+                        <div className="flex flex-col w-full items-start">
+                          {/* Thinking Block */}
+                          {thinkingTime > 0 && (
+                            <div className="my-2.5 flex flex-col items-start w-full">
+                              <div
+                                className={`inline-flex items-center gap-1.5 cursor-pointer select-none text-xs font-semibold text-white/60 py-1 px-2 rounded-[10px] bg-white/5 hover:bg-white/10 hover:text-white transition-all duration-150${showTools ? ' [&>.arrow]:rotate-90' : ''}`}
+                                onClick={() => setShowTools(!showTools)}
+                              >
+                                <span>已思考 {thinkingTime}s</span>
+                                <span className="arrow inline-block text-[8px] rotate-0 transition-transform duration-150 leading-none">▶</span>
+                              </div>
+                              {showTools && (
+                                <div className="mt-1.5 pl-3 border-l-2 border-white/10 w-full">
+                                  {discovery && <p className="tool-discovery mt-2.5 text-white/60 text-[13px] leading-relaxed">{discovery.message}</p>}
+                                  {toolEvents.length > 0 && <ToolRows events={toolEvents} />}
+                                </div>
+                              )}
                             </div>
                           )}
+
+                          {/* Streaming Markdown Response */}
+                          {transcript && (
+                            <article className="agent-text text-sm markdown-body">
+                              <MarkdownRenderer value={transcript} />
+                            </article>
+                          )}
+
+                          {/* Other active states */}
+                          {approval && (
+                            <div className="approval-box mt-3 border border-[rgba(255,255,255,0.15)] rounded-[10px] bg-white/5 p-3">
+                              <strong className="text-white text-[13px]">{approval.tool ?? 'Agent'} requests approval</strong>
+                              <p className="mt-2.5 text-[13px] leading-relaxed text-white/80">{approval.reason}</p>
+                              <div className="flex gap-2 mt-2.5">
+                                <button
+                                  className="approval-button bg-white/15 text-white hover:bg-white/25 rounded-full px-3 py-1 text-xs font-semibold"
+                                  onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'approve')}
+                                >
+                                  Allow
+                                </button>
+                                <button
+                                  className="approval-button bg-white/15 text-white hover:bg-white/25 rounded-full px-3 py-1 text-xs font-semibold"
+                                  onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'deny')}
+                                >
+                                  Deny
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          {latestFailure && <p className="text-danger text-[13px] leading-relaxed mt-2.5">{latestFailure.error}</p>}
                         </div>
                       )}
-
-                      {/* Streaming Markdown Response */}
-                      {transcript && (
-                        <article className="agent-text text-sm markdown-body">
-                          <MarkdownRenderer value={transcript} />
-                        </article>
-                      )}
-
-                      {/* Other active states */}
-                      {approval && (
-                        <div className="approval-box mt-3 border border-[rgba(139,92,246,0.15)] rounded-[10px] bg-[rgba(139,92,246,0.04)] p-3">
-                          <strong className="text-ink text-[13px]">{approval.tool ?? 'Agent'} requests approval</strong>
-                          <p className="mt-2.5 text-[13px] leading-relaxed text-[#3c3c43]">{approval.reason}</p>
-                          <div className="flex gap-2 mt-2.5">
-                            <button className="approval-button" onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'approve')}>
-                              Allow
-                            </button>
-                            <button className="approval-button" onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'deny')}>
-                              Deny
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                      {latestFailure && <p className="text-danger text-[13px] leading-relaxed mt-2.5">{latestFailure.error}</p>}
                     </div>
-                  )}
-                </div>
-                {detached && <div className="resize-grip" onMouseDown={onResizeMouseDown} />}
-              </div>
-            )}
+                    {detached && <div className="resize-grip" onMouseDown={onResizeMouseDown} />}
+                  </div>
+                </>
+              )}
+            </div>
           </section>
         </>
       )}

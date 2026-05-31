@@ -8,7 +8,7 @@ const PANEL_COMFORT_HEIGHT = 360;
 const PANEL_MAX_HEIGHT = 520;
 const PANEL_MIN_HEIGHT = 160;
 
-export function computeShellPosition(cursorX: number, cursorY: number, shellWidth = 520, pillHeight = 44, hasPanel = false) {
+export function computeShellPosition(cursorX: number, cursorY: number, shellWidth = 520, pillHeight = 24, hasPanel = false) {
   const viewportW = window.innerWidth;
   const viewportH = window.innerHeight;
 
@@ -39,7 +39,7 @@ export function computeShellPosition(cursorX: number, cursorY: number, shellWidt
  * pill) down to the bottom margin. Keeps the panel scrolling internally instead
  * of being clipped off the bottom of the screen.
  */
-export function availablePanelHeight(shellY: number, pillHeight = 44): number {
+export function availablePanelHeight(shellY: number, pillHeight = 24): number {
   const available = window.innerHeight - shellY - pillHeight - SHELL_MARGIN;
   return Math.max(PANEL_MIN_HEIGHT, Math.min(PANEL_MAX_HEIGHT, available));
 }

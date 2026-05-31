@@ -45,7 +45,7 @@ const DEFAULTS: AppSettings = {
   longPressEnabled: true,
   voiceEnabled: true,
   pillWidth: 240,
-  pillHeight: 36,
+  pillHeight: 24,
   newDialogBehavior: 'continue',
   newDialogInterval: 300,
   localVlmContextWindow: 32768
@@ -86,7 +86,7 @@ export function getSettings(): AppSettings {
     codexAppServerUrl: envOverride(['OMP_CODEX_APP_SERVER_URL', 'OP_CODEX_APP_SERVER_URL']) || loaded.codexAppServerUrl || '',
     cuaMode: normalizeCuaMode(envOverride(['OMP_CUA_MODE', 'OP_CUA_MODE']) || loaded.cuaMode || DEFAULTS.cuaMode),
     pillWidth: clampNumber(loaded.pillWidth, 280, 900, DEFAULTS.pillWidth),
-    pillHeight: clampNumber(loaded.pillHeight, 36, 96, DEFAULTS.pillHeight),
+    pillHeight: clampNumber(loaded.pillHeight, 24, 96, DEFAULTS.pillHeight),
     newDialogBehavior: normalizeNewDialogBehavior(loaded.newDialogBehavior || DEFAULTS.newDialogBehavior),
     newDialogInterval: clampNumber(loaded.newDialogInterval, 10, 86400, DEFAULTS.newDialogInterval),
     localVlmContextWindow: clampNumber(loaded.localVlmContextWindow, 4096, 2000000, DEFAULTS.localVlmContextWindow),

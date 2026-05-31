@@ -140,7 +140,6 @@ export function CursorTrail({ x, y, enabled }: Props) {
           </>
         )}
       </svg>
-      <div className="cursor-halo" style={{ transform: `translate3d(${x - 24}px, ${y - 24}px, 0)` }} />
     </>
   );
 }

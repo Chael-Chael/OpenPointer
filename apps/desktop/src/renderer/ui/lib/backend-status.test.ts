@@ -23,7 +23,7 @@ function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
     longPressEnabled: false,
     voiceEnabled: false,
     pillWidth: 520,
-    pillHeight: 44,
+    pillHeight: 24,
     newDialogBehavior: 'continue',
     newDialogInterval: 300,
     localVlmContextWindow: 32768,
