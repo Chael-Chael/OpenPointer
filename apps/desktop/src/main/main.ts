@@ -1,6 +1,6 @@
 import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen } from 'electron';
 import { activeWindow } from 'get-windows';
-import { UiohookKey, uIOhook } from 'uiohook-napi';
+import { uIOhook } from 'uiohook-napi';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import {
@@ -26,6 +26,7 @@ const repoRoot = resolve(__dirname, '../../../..');
 loadLocalEnv(repoRoot);
 
 const windows = new Map<number, BrowserWindow>();
+const overlayInteractive = new Map<number, boolean>();
 let cursorTimer: NodeJS.Timeout | null = null;
 let active = false;
 let lastCursor: CursorPayload | null = null;
@@ -66,7 +67,11 @@ const hold = {
 const HOLD_MS = 650;
 const HOLD_RING_DELAY_MS = 180;
 const HOLD_MOVE_TOLERANCE_PX = 8;
+const OVERLAY_HIDE_SETTLE_MS = 80;
 const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173';
+let overlayHiddenDepth = 0;
+let overlayVisibilitySnapshot = new Map<number, boolean>();
+let overlayRestoreFocusDisplayId: number | null = null;
 
 async function createOverlay(display: Electron.Display): Promise<void> {
   const win = new BrowserWindow({
@@ -94,6 +99,7 @@ async function createOverlay(display: Electron.Display): Promise<void> {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setIgnoreMouseEvents(true, { forward: true });
   windows.set(display.id, win);
+  overlayInteractive.set(display.id, false);
   win.once('ready-to-show', () => win.showInactive());
   win.webContents.on('did-finish-load', () => {
     if (!win.isVisible()) win.showInactive();
@@ -111,7 +117,10 @@ async function createOverlay(display: Electron.Display): Promise<void> {
     await win.loadURL(`${devUrl}?displayId=${display.id}`);
   }
   if (!win.isVisible()) win.showInactive();
-  win.on('closed', () => windows.delete(display.id));
+  win.on('closed', () => {
+    windows.delete(display.id);
+    overlayInteractive.delete(display.id);
+  });
 }
 
 function cursorPayload(): CursorPayload {
@@ -133,9 +142,105 @@ function broadcast(channel: string, payload?: unknown): void {
   }
 }
 
+function setOverlayInteractive(displayId: number, value: boolean): void {
+  const win = windows.get(displayId);
+  if (!win || win.isDestroyed()) return;
+  win.setIgnoreMouseEvents(!value, { forward: true });
+  overlayInteractive.set(displayId, value);
+}
+
+function setWindowInteractive(win: BrowserWindow, value: boolean): void {
+  if (win.isDestroyed()) return;
+  win.setIgnoreMouseEvents(!value, { forward: true });
+  for (const [displayId, candidate] of windows) {
+    if (candidate === win) {
+      overlayInteractive.set(displayId, value);
+      break;
+    }
+  }
+}
+
+async function withOverlayHidden<T>(focusDisplayId: number | undefined, task: () => Promise<T>): Promise<T> {
+  if (focusDisplayId !== undefined) overlayRestoreFocusDisplayId = focusDisplayId;
+  if (overlayHiddenDepth === 0) {
+    overlayVisibilitySnapshot = new Map();
+    for (const [displayId, win] of windows) {
+      if (win.isDestroyed()) continue;
+      overlayVisibilitySnapshot.set(displayId, win.isVisible());
+      if (win.isVisible()) win.hide();
+    }
+    await wait(OVERLAY_HIDE_SETTLE_MS);
+  }
+
+  overlayHiddenDepth += 1;
+  try {
+    return await task();
+  } finally {
+    overlayHiddenDepth -= 1;
+    if (overlayHiddenDepth === 0) {
+      restoreHiddenOverlays();
+    }
+  }
+}
+
+function restoreHiddenOverlays(): void {
+  const focusDisplayId = overlayRestoreFocusDisplayId;
+  overlayRestoreFocusDisplayId = null;
+
+  for (const [displayId, win] of windows) {
+    if (win.isDestroyed() || !overlayVisibilitySnapshot.get(displayId)) continue;
+    win.showInactive();
+    win.setAlwaysOnTop(true, 'screen-saver');
+  }
+
+  if (active && focusDisplayId !== null) {
+    const activeWin = windows.get(focusDisplayId);
+    if (activeWin && !activeWin.isDestroyed() && overlayVisibilitySnapshot.get(focusDisplayId)) {
+      activeWin.show();
+      activeWin.focus();
+      activeWin.webContents.focus();
+    }
+  }
+
+  overlayVisibilitySnapshot.clear();
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Escape closes the overlay. We register it as a global shortcut only while
+// active so Electron exclusively captures the key (via RegisterHotKey on
+// Windows) and it never leaks through to the focused app's own Esc shortcuts.
+// Outside of the active session Esc is left untouched for every other app.
+let escRegistered = false;
+
+function registerEscapeShortcut(): void {
+  if (escRegistered) return;
+  try {
+    escRegistered = globalShortcut.register('Escape', () => {
+      if (active) deactivate();
+    });
+  } catch (error) {
+    console.warn('[omp] failed to register Escape shortcut', error);
+    escRegistered = false;
+  }
+}
+
+function unregisterEscapeShortcut(): void {
+  if (!escRegistered) return;
+  try {
+    globalShortcut.unregister('Escape');
+  } catch (error) {
+    console.warn('[omp] failed to unregister Escape shortcut', error);
+  }
+  escRegistered = false;
+}
+
 function activate(cursor = cursorPayload()): void {
   active = true;
   lastActivationCursor = cursor;
+  registerEscapeShortcut();
   const activeWin = windows.get(cursor.displayId);
   for (const win of windows.values()) {
     if (win.isDestroyed()) continue;
@@ -143,7 +248,7 @@ function activate(cursor = cursorPayload()): void {
     win.moveTop();
   }
   if (activeWin && !activeWin.isDestroyed()) {
-    activeWin.setIgnoreMouseEvents(false);
+    setOverlayInteractive(cursor.displayId, true);
     activeWin.show();
     activeWin.focus();
     activeWin.webContents.focus();
@@ -153,12 +258,13 @@ function activate(cursor = cursorPayload()): void {
 
 function deactivate(): void {
   active = false;
+  unregisterEscapeShortcut();
   activeAbort?.abort();
   activeAbort = null;
   activeBridge = null;
   broadcast(OMP_CHANNELS.Deactivate);
-  for (const win of windows.values()) {
-    if (!win.isDestroyed()) win.setIgnoreMouseEvents(true, { forward: true });
+  for (const [displayId, win] of windows) {
+    if (!win.isDestroyed()) setOverlayInteractive(displayId, false);
   }
 }
 
@@ -193,11 +299,11 @@ function startCursorLoop(): void {
 
 function startGlobalLongPress(): void {
   try {
-    uIOhook.on('keydown', (event) => {
-      if (event.keycode === UiohookKey.Escape && active) deactivate();
-    });
-
     uIOhook.on('mousedown', (event) => {
+      if (isSecondaryMouseButton(event.button)) {
+        handleGlobalContextMouseDown();
+        return;
+      }
       if (!getSettings().longPressEnabled || !isPrimaryMouseButton(event.button)) return;
       const cursor = cursorPayload();
       hold.active = true;
@@ -264,10 +370,28 @@ function isPrimaryMouseButton(button: unknown): boolean {
   return button === 1 || button === 0 || button === 'left';
 }
 
+function isSecondaryMouseButton(button: unknown): boolean {
+  return button === 2 || button === 'right';
+}
+
+function handleGlobalContextMouseDown(): void {
+  if (!active) return;
+  const cursor = cursorPayload();
+  const win = windows.get(cursor.displayId);
+  if (!win || win.isDestroyed()) return;
+  if (overlayInteractive.get(cursor.displayId)) return;
+
+  // When the transparent overlay is in pass-through mode, renderer
+  // `contextmenu` events never fire. Wake this display just long enough for
+  // the renderer to run the same edit-mode toggle path.
+  setOverlayInteractive(cursor.displayId, true);
+  win.webContents.send(OMP_CHANNELS.GlobalContextMenu, cursor);
+}
+
 function registerIpc(): void {
   ipcMain.on(OMP_CHANNELS.SetInteractive, (event, value: boolean) => {
     const win = BrowserWindow.fromWebContents(event.sender);
-    if (win) win.setIgnoreMouseEvents(!value, { forward: true });
+    if (win) setWindowInteractive(win, value);
   });
 
   ipcMain.on(OMP_CHANNELS.RequestDeactivate, () => deactivate());
@@ -313,7 +437,9 @@ function registerIpc(): void {
   ipcMain.handle(OMP_CHANNELS.RequestGrounding, async (_event, req: { cursor: CursorPayload }) => {
     const settings = getSettings();
     if (settings.cuaMode === 'off') return { status: 'fallback', entities: [], error: 'CUA mode is off.' };
-    return cuaGrounding.preview(req.cursor, await activeWindowInfo());
+    return withOverlayHidden(req.cursor.displayId, async () => {
+      return cuaGrounding.preview(req.cursor, await activeWindowInfo());
+    });
   });
   ipcMain.handle(OMP_CHANNELS.ApproveAgentRequest, async (_event, id: string, decision: 'approve' | 'deny') => {
     if (cuaBroker.hasPendingApproval(id)) {
@@ -454,12 +580,19 @@ async function capturePointerContext(cursor: CursorPayload, targetPath?: Point[]
   const withCua = Boolean(selectedEntity?.groundingRef);
   broadcast(OMP_CHANNELS.CaptureActivity, { phase: 'start', withCua });
   let capture: Awaited<ReturnType<typeof captureContextImage>>;
+  let windowInfo: PointerContext['window'];
   try {
-    capture = await captureContextImage(cursor, targetPath);
+    const hiddenResult = await withOverlayHidden(cursor.displayId, async () => {
+      return {
+        capture: await captureContextImage(cursor, targetPath),
+        windowInfo: await activeWindowInfo()
+      };
+    });
+    capture = hiddenResult.capture;
+    windowInfo = hiddenResult.windowInfo;
   } finally {
     broadcast(OMP_CHANNELS.CaptureActivity, { phase: 'end', withCua });
   }
-  const windowInfo = await activeWindowInfo();
 
   const manualEntities = targetPath && targetPath.length > 1 ? visualEntities(cursor, capture.crop, targetPath) : [];
 

@@ -4,6 +4,7 @@ export const OMP_CHANNELS = {
   RequestDeactivate: 'omp:deactivate:request',
   RendererReady: 'omp:renderer:ready',
   Cursor: 'omp:cursor',
+  GlobalContextMenu: 'omp:global-context-menu',
   HoldProgress: 'omp:hold:progress',
   SetInteractive: 'omp:overlay:set-interactive',
   RequestGrounding: 'omp:grounding:request',

@@ -210,6 +210,8 @@ export function App() {
   cursorRef.current = cursor;
   const activeRef = useRef(false);
   activeRef.current = active;
+  const lastInteractiveRef = useRef(false);
+  const lastGlobalContextMenuAtRef = useRef(0);
 
   useEffect(() => {
     void window.openMagicPointer.getSettings().then((value) => {
@@ -307,6 +309,7 @@ export function App() {
       setEvents([]);
       setHold(null);
       setMenuOpen(false);
+      setSettingsOpen(false);
       setConversationId(null);
       setHistoryTurns([]);
       setHistoryOpen(false);
@@ -369,8 +372,6 @@ export function App() {
   }, [conversationId, state]);
   // Dynamic interactive region logic
   useEffect(() => {
-    let lastInteractive = false;
-
     // We want to force interactive mode if dragging/selecting/detached etc.
     const forceInteractive =
       active && (detached || menuOpen || settingsOpen || historyOpen || Boolean(selection) || selecting || Boolean(selectionDrag) || Boolean(panelResizeDrag));
@@ -387,8 +388,8 @@ export function App() {
     }
 
     function updateInteractive(shouldCapture: boolean) {
-      if (shouldCapture !== lastInteractive) {
-        lastInteractive = shouldCapture;
+      if (shouldCapture !== lastInteractiveRef.current) {
+        lastInteractiveRef.current = shouldCapture;
         window.openMagicPointer.setInteractive(shouldCapture);
       }
     }
@@ -404,7 +405,6 @@ export function App() {
     window.addEventListener('mouseover', onMouseOver);
     window.addEventListener('mouseout', onMouseOut);
 
-    // Set initial state
     updateInteractive(forceInteractive);
 
     return () => {
@@ -413,29 +413,9 @@ export function App() {
     };
   }, [active, detached, menuOpen, settingsOpen, historyOpen, selection, selecting, selectionDrag, panelResizeDrag]);
 
-  // Esc = deactivate; Right-click = toggle detach/reattach or cancel local selection.
+  // Esc = deactivate; Right-click = toggle detach/reattach (enter/exit edit) or cancel local selection.
   useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      setSettingsOpen(false);
-      window.openMagicPointer.cancelRun();
-      window.openMagicPointer.deactivate();
-      /*
-          if (d) {
-            // Reattach — resume following
-            setDetachedPos(null);
-            setSelection(null);
-            return false;
-          }
-          // Detach — freeze shell position
-          const c = cursorRef.current;
-          setDetachedPos(computeShellPosition(c.localX, c.localY));
-          return true;
-        */
-    }
-    function onContextMenu(event: MouseEvent) {
-      event.preventDefault();
+    function toggleEditDialog(contextCursor = cursorRef.current) {
       if (menuOpen) {
         setMenuOpen(false);
         return;
@@ -448,26 +428,48 @@ export function App() {
         window.setTimeout(() => focusPromptInput(inputRef.current), 0);
         return;
       }
-      if (!active) return;
+      if (!activeRef.current) return;
       setDetached((d) => {
         if (d) {
-          // Reattach shell position.
+          // Reattach shell position (exit edit).
           setDetachedPos(null);
           setSelection(null);
           return false;
         }
-        const c = cursorRef.current;
-        setDetachedPos(computeShellPosition(c.localX, c.localY));
+        // Detach shell position (enter edit).
+        setDetachedPos(computeShellPosition(contextCursor.localX, contextCursor.localY));
         return true;
       });
     }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setSettingsOpen(false);
+      window.openMagicPointer.cancelRun();
+      window.openMagicPointer.deactivate();
+    }
+    // Toggle the edit dialog with the right mouse button. This is a pure
+    // toggle, so it can be triggered to enter/exit any number of times.
+    function onContextMenu(event: MouseEvent) {
+      // Always suppress the native right-click menu on the overlay.
+      event.preventDefault();
+      if (Date.now() - lastGlobalContextMenuAtRef.current < 300) return;
+      toggleEditDialog();
+    }
+    const offGlobalContextMenu = window.openMagicPointer.onGlobalContextMenu((payload) => {
+      lastGlobalContextMenuAtRef.current = Date.now();
+      setCursor(payload);
+      toggleEditDialog(payload);
+    });
     window.addEventListener('keydown', onKeyDown, { capture: true });
     window.addEventListener('contextmenu', onContextMenu, { capture: true });
     return () => {
+      offGlobalContextMenu();
       window.removeEventListener('keydown', onKeyDown, { capture: true });
       window.removeEventListener('contextmenu', onContextMenu, { capture: true });
     };
-  }, [active, menuOpen, selecting, selectionDrag]);
+  }, [menuOpen, selecting, selectionDrag]);
 
   // Live-update selection rectangle while selecting (cursor comes via IPC)
   useEffect(() => {
