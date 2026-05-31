@@ -61,6 +61,37 @@ function formatRect(rect: { x: number; y: number; width: number; height: number 
   return `${Math.round(rect.width)}x${Math.round(rect.height)} @ ${Math.round(rect.x)},${Math.round(rect.y)}`;
 }
 
+type LocalRect = { x: number; y: number; width: number; height: number };
+
+const CUA_HIGHLIGHT_RADIUS_X = 560;
+const CUA_HIGHLIGHT_RADIUS_Y = 420;
+const MAX_CUA_HIGHLIGHTS = 40;
+
+function rectsIntersect(a: LocalRect, b: LocalRect): boolean {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+function contextRegionAroundCursor(cursor: CursorPayload): LocalRect {
+  const viewportW = window.innerWidth;
+  const viewportH = window.innerHeight;
+  const width = Math.min(viewportW, CUA_HIGHLIGHT_RADIUS_X * 2);
+  const height = Math.min(viewportH, CUA_HIGHLIGHT_RADIUS_Y * 2);
+  return {
+    x: Math.max(0, Math.min(viewportW - width, cursor.localX - width / 2)),
+    y: Math.max(0, Math.min(viewportH - height, cursor.localY - height / 2)),
+    width,
+    height
+  };
+}
+
+function highlightRectForEntity(entity: PointerEntity): LocalRect | undefined {
+  const rect = entity.bbox;
+  if (!rect || !entity.groundingRef?.screenRect) return undefined;
+  if (rect.width < 3 || rect.height < 3) return undefined;
+  if (rect.width > window.innerWidth * 0.95 && rect.height > window.innerHeight * 0.75) return undefined;
+  return rect;
+}
+
 function defaultContextInstruction(hasSelectionContext: boolean, hasCuaContext: boolean): string {
   if (hasSelectionContext && hasCuaContext) return 'Analyze the current screenshot selection and CUA-recognized UI context.';
   if (hasSelectionContext) return 'Analyze the current screenshot selection.';
@@ -75,6 +106,7 @@ function PointerContextPreview({ context }: { context: PointerContext }) {
   const cropLabel = formatRect(context.visual?.crop);
   const targetLabel = target ? entityLabel(target) : undefined;
   const targetRect = formatRect(target?.bbox);
+  const windowLabel = context.window?.title || context.window?.app || context.window?.process;
 
   if (!imageSrc && !context.grounding && !target && cuaEntities.length === 0) return null;
 
@@ -83,6 +115,7 @@ function PointerContextPreview({ context }: { context: PointerContext }) {
       {imageSrc && <img className="pointer-context-image" src={imageSrc} alt="Captured pointer context" />}
       <div className="grid gap-2 p-2.5 text-[11px] leading-[1.35]">
         <div className="flex flex-wrap items-center gap-1.5">
+          <span className="context-chip">Text</span>
           {context.visual && <span className="context-chip">Screenshot{cropLabel ? ` ${cropLabel}` : ''}</span>}
           {context.grounding && (
             <span className={`context-chip ${context.grounding.status === 'matched' ? 'context-chip-cua' : ''}`}>
@@ -91,6 +124,16 @@ function PointerContextPreview({ context }: { context: PointerContext }) {
             </span>
           )}
         </div>
+
+        {windowLabel && (
+          <div className="context-row">
+            <span className="context-row-label">Window</span>
+            <span className="min-w-0 truncate">
+              {windowLabel}
+              {context.window?.app && context.window.title ? ` - ${context.window.app}` : ''}
+            </span>
+          </div>
+        )}
 
         {targetLabel && (
           <div className="context-row">
@@ -104,9 +147,9 @@ function PointerContextPreview({ context }: { context: PointerContext }) {
 
         {context.grounding && (
           <div className="context-row">
-            <span className="context-row-label">Grounding</span>
+            <span className="context-row-label">CUA</span>
             <span className="min-w-0 truncate">
-              {context.grounding.provider}
+              {context.grounding.status}
               {context.grounding.pid ? ` pid ${context.grounding.pid}` : ''}
               {context.grounding.windowId ? ` window ${context.grounding.windowId}` : ''}
               {context.grounding.error ? ` - ${context.grounding.error}` : ''}
@@ -116,6 +159,7 @@ function PointerContextPreview({ context }: { context: PointerContext }) {
 
         {cuaEntities.length > 0 && (
           <div className="grid gap-1">
+            <div className="text-white/[0.52] font-semibold uppercase tracking-[0.03em]">Recognized UI</div>
             {cuaEntities.slice(0, 5).map((entity) => (
               <div key={entity.id} className="context-entity-row">
                 <span className="truncate">{entityLabel(entity)}</span>
@@ -165,12 +209,14 @@ export function App() {
   const [cuaEntities, setCuaEntities] = useState<PointerEntity[]>([]);
   const [hoveredCuaEntityId, setHoveredCuaEntityId] = useState<string | null>(null);
   const [selectedCuaEntityId, setSelectedCuaEntityId] = useState<string | null>(null);
-  const [groundingActive, setGroundingActive] = useState(false);
+  const [selectedCuaEntity, setSelectedCuaEntity] = useState<PointerEntity | null>(null);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const conversationIdRef = useRef<string | null>(null);
   conversationIdRef.current = conversationId;
   const lastConversationIdRef = useRef<string | null>(null);
   const lastDeactivatedAtRef = useRef<number>(0);
+  const newConversationRequestedRef = useRef(false);
+  const conversationRestoreEpochRef = useRef(0);
   const [panelHeight, setPanelHeight] = useState<number | null>(null);
   const [panelResizeDrag, setPanelResizeDrag] = useState<{ startY: number; startHeight: number } | null>(null);
   const [thinkingTime, setThinkingTime] = useState<number>(0);
@@ -178,7 +224,7 @@ export function App() {
   const thinkingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const thinkingStartRef = useRef<number>(0);
   const streamPanelRef = useRef<HTMLDivElement | null>(null);
-  const lastGroundingPointRef = useRef<{ x: number; y: number } | null>(null);
+  const groundingRequestSeqRef = useRef(0);
   // Submit-time screenshot signal from the main process (see CaptureActivity IPC).
   const [captureActivity, setCaptureActivity] = useState<{ active: boolean; withCua: boolean }>({ active: false, withCua: false });
   const [historyTurns, setHistoryTurns] = useState<import('@openmagicpointer/core').ChatTurn[]>([]);
@@ -260,7 +306,15 @@ export function App() {
     const offActivate = window.openMagicPointer.onActivate((payload) => {
       setCursor(payload);
       setActive(true);
+      const restoreEpoch = conversationRestoreEpochRef.current;
       window.openMagicPointer.getSettings().then(async (currentSettings) => {
+        setSettings(currentSettings);
+        if (newConversationRequestedRef.current || restoreEpoch !== conversationRestoreEpochRef.current) {
+          setConversationId(null);
+          setHistoryTurns([]);
+          return;
+        }
+
         const behavior = currentSettings?.newDialogBehavior ?? 'continue';
         const interval = currentSettings?.newDialogInterval ?? 300;
 
@@ -291,13 +345,19 @@ export function App() {
           }
         }
 
+        if (newConversationRequestedRef.current || restoreEpoch !== conversationRestoreEpochRef.current) return;
+
         if (shouldRestore && restoreId) {
+          conversationIdRef.current = restoreId;
+          lastConversationIdRef.current = restoreId;
+          lastDeactivatedAtRef.current = lastDeactivatedAt;
           setConversationId(restoreId);
           const conv = await window.openMagicPointer.getConversation(restoreId);
-          if (conv) {
+          if (!newConversationRequestedRef.current && restoreEpoch === conversationRestoreEpochRef.current && conversationIdRef.current === restoreId && conv) {
             setHistoryTurns(conv.turns);
           }
         } else {
+          conversationIdRef.current = null;
           setConversationId(null);
           setHistoryTurns([]);
         }
@@ -310,6 +370,9 @@ export function App() {
       if (conversationIdRef.current) {
         lastConversationIdRef.current = conversationIdRef.current;
         lastDeactivatedAtRef.current = Date.now();
+      } else if (newConversationRequestedRef.current) {
+        lastConversationIdRef.current = null;
+        lastDeactivatedAtRef.current = 0;
       }
       setActive(false);
       setState('idle');
@@ -327,7 +390,7 @@ export function App() {
       setCuaEntities([]);
       setHoveredCuaEntityId(null);
       setSelectedCuaEntityId(null);
-      setGroundingActive(false);
+      setSelectedCuaEntity(null);
       setDetachedPos(null);
       setSelecting(false);
       setSelectionOrigin(null);
@@ -370,7 +433,7 @@ export function App() {
       window.openMagicPointer
         .getConversation(conversationId)
         .then((conv) => {
-          if (!cancelled && conv) setHistoryTurns(conv.turns);
+          if (!cancelled && conversationIdRef.current === conversationId && conv) setHistoryTurns(conv.turns);
         })
         .catch(() => {
           /* transient IPC failure; history simply isn't refreshed */
@@ -563,60 +626,54 @@ export function App() {
   }, [pillDrag, pillWidth, pillHeight]);
 
   useEffect(() => {
-    if (state === 'composing' && active && !selecting && !selectionDrag && !settingsOpen && !groundingActive && !captureActivity.active) {
+    if (state === 'composing' && active && !selecting && !selectionDrag && !settingsOpen && !captureActivity.active) {
       const requestId = window.requestAnimationFrame(() => focusPromptInput(inputRef.current));
       return () => window.cancelAnimationFrame(requestId);
     }
-  }, [active, selecting, selectionDrag, settingsOpen, groundingActive, captureActivity.active, state]);
+  }, [active, selecting, selectionDrag, settingsOpen, captureActivity.active, state]);
 
   useEffect(() => {
-    if (!active || settings?.cuaMode === 'off' || selecting || selectionDrag || settingsOpen || historyOpen || menuOpen || selection || selectedCuaEntityId) {
-      if (!selectedCuaEntityId) {
-        setCuaEntities([]);
-        setHoveredCuaEntityId(null);
-        lastGroundingPointRef.current = null;
-      }
-      setGroundingActive(false);
+    if (!active || state !== 'composing' || settings?.cuaMode === 'off' || selecting || selectionDrag || settingsOpen || historyOpen || menuOpen || selection) {
+      setCuaEntities([]);
+      setHoveredCuaEntityId(null);
       return;
     }
-    // Settle-based throttle: only ground after the cursor has been still for
-    // GROUNDING_SETTLE_MS, and skip re-grounding when it barely moved since the
-    // last successful preview (dead zone). This avoids hammering CUA on every
-    // pixel of cursor movement.
-    const GROUNDING_SETTLE_MS = 350;
-    const GROUNDING_MOVE_DEADZONE_PX = 24;
-    const last = lastGroundingPointRef.current;
-    if (last && Math.hypot(cursor.localX - last.x, cursor.localY - last.y) < GROUNDING_MOVE_DEADZONE_PX) {
-      return;
-    }
+    // Traverse the current window's actionable accessibility tree immediately
+    // after activation, then refresh on a modest cadence so dynamic pages keep
+    // their CUA context current without hammering the driver.
+    const INITIAL_GROUNDING_DELAY_MS = 80;
+    const GROUNDING_REFRESH_MS = 1800;
     let cancelled = false;
-    const timer = window.setTimeout(() => {
-      const point = { x: cursorRef.current.localX, y: cursorRef.current.localY };
-      setGroundingActive(true);
+    let inFlight = false;
+    const requestSeq = ++groundingRequestSeqRef.current;
+    const refreshGrounding = () => {
+      if (cancelled || inFlight) return;
+      inFlight = true;
       void window.openMagicPointer
         .requestGrounding({ cursor: cursorRef.current })
         .then((preview) => {
-          if (cancelled) return;
-          lastGroundingPointRef.current = point;
+          if (cancelled || groundingRequestSeqRef.current !== requestSeq) return;
           setCuaEntities(preview.entities);
-          setHoveredCuaEntityId(preview.hoveredEntityId ?? null);
+          setHoveredCuaEntityId(selectedCuaEntityId ?? preview.hoveredEntityId ?? null);
         })
         .catch(() => {
-          if (cancelled) return;
-          lastGroundingPointRef.current = null;
+          if (cancelled || groundingRequestSeqRef.current !== requestSeq) return;
           setCuaEntities([]);
           setHoveredCuaEntityId(null);
         })
         .finally(() => {
-          if (!cancelled) setGroundingActive(false);
+          inFlight = false;
         });
-    }, GROUNDING_SETTLE_MS);
+    };
+    const timer = window.setTimeout(refreshGrounding, INITIAL_GROUNDING_DELAY_MS);
+    const interval = window.setInterval(refreshGrounding, GROUNDING_REFRESH_MS);
     return () => {
       cancelled = true;
+      groundingRequestSeqRef.current += 1;
       window.clearTimeout(timer);
-      setGroundingActive(false);
+      window.clearInterval(interval);
     };
-  }, [active, cursor.localX, cursor.localY, selecting, selectionDrag, settings?.cuaMode, settingsOpen, historyOpen, menuOpen, selection, selectedCuaEntityId]);
+  }, [active, state, selecting, selectionDrag, settings?.cuaMode, settingsOpen, historyOpen, menuOpen, selection, selectedCuaEntityId]);
 
   // Track submit-time screenshot capture so the pointer can tint while it runs.
   useEffect(() => {
@@ -736,7 +793,7 @@ export function App() {
   function onResizeMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
     event.stopPropagation();
-    const panelEl = event.currentTarget.parentElement;
+    const panelEl = streamPanelRef.current;
     const currentHeight = panelEl ? panelEl.getBoundingClientRect().height : 320;
     setPanelResizeDrag({
       startY: event.clientY,
@@ -746,9 +803,11 @@ export function App() {
 
   async function submit(mode: 'text' | 'voice' = 'text', overrideText = prompt) {
     const text = overrideText.trim();
-    const selectedEntity = selectedCuaEntityId ? cuaEntities.find((entity) => entity.id === selectedCuaEntityId) : undefined;
+    const selectedEntity = selectedCuaEntity ?? (selectedCuaEntityId ? cuaEntities.find((entity) => entity.id === selectedCuaEntityId) : undefined);
     const hasSelectionContext = Boolean(selection);
-    const hasCuaContext = Boolean(selectedEntity || cuaEntities.length > 0);
+    const cuaEnabled = settings?.cuaMode !== 'off';
+    const hasCuaContext = Boolean(selectedEntity);
+    const submittedCuaEntities = selectedEntity ? [selectedEntity] : [];
     const instructionText = text || defaultContextInstruction(hasSelectionContext, hasCuaContext);
     if ((!text && !hasSelectionContext && !hasCuaContext) || state === 'submitting') return;
     if (!readiness.configured) {
@@ -778,11 +837,14 @@ export function App() {
       : undefined;
     setSelection(null);
     setSelectedCuaEntityId(null);
+    setSelectedCuaEntity(null);
     setHoveredCuaEntityId(null);
+    setCuaEntities([]);
     // Clear the composer now that the message has been sent, so its text does
     // not linger in the input box after submission.
     setPrompt('');
     try {
+      const currentConversationId = conversationIdRef.current;
       const res = await window.openMagicPointer.submitInstruction({
         text: instructionText,
         mode,
@@ -790,11 +852,18 @@ export function App() {
         cursor,
         targetPath: selectedEntity ? undefined : targetPath,
         selectedEntity,
-        conversationId: conversationId ?? undefined
+        includeScreenshot: hasSelectionContext,
+        includeCua: cuaEnabled && hasCuaContext,
+        cuaEntities: submittedCuaEntities,
+        conversationId: currentConversationId ?? undefined
       });
+      newConversationRequestedRef.current = false;
+      conversationIdRef.current = res.conversationId;
+      lastConversationIdRef.current = res.conversationId;
+      lastDeactivatedAtRef.current = Date.now();
       setConversationId(res.conversationId);
       const conv = await window.openMagicPointer.getConversation(res.conversationId);
-      if (conv) setHistoryTurns(conv.turns);
+      if (conversationIdRef.current === res.conversationId && conv) setHistoryTurns(conv.turns);
     } catch (error) {
       // Without this the UI is stuck in the submitting state forever (no agent
       // events arrive when the submit IPC itself fails) and the thinking timer
@@ -903,9 +972,41 @@ export function App() {
     });
   }
 
+  function startNewConversation() {
+    conversationRestoreEpochRef.current += 1;
+    newConversationRequestedRef.current = true;
+    conversationIdRef.current = null;
+    lastConversationIdRef.current = null;
+    lastDeactivatedAtRef.current = 0;
+    window.openMagicPointer.cancelRun();
+    if (thinkingTimerRef.current) {
+      clearInterval(thinkingTimerRef.current);
+      thinkingTimerRef.current = null;
+    }
+    setMenuOpen(false);
+    setConversationId(null);
+    setHistoryTurns([]);
+    setEvents([]);
+    setPrompt('');
+    setState('composing');
+    setSelection(null);
+    setSelectionDrag(null);
+    setSelectedCuaEntityId(null);
+    setSelectedCuaEntity(null);
+    setHoveredCuaEntityId(null);
+    setThinkingTime(0);
+    setShowTools(false);
+    window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+  }
+
   async function loadConversation(id: string) {
     const conv = await window.openMagicPointer.getConversation(id);
     if (conv) {
+      conversationRestoreEpochRef.current += 1;
+      newConversationRequestedRef.current = false;
+      conversationIdRef.current = conv.id;
+      lastConversationIdRef.current = conv.id;
+      lastDeactivatedAtRef.current = conv.updatedAt;
       setConversationId(conv.id);
       setHistoryTurns(conv.turns);
       setEvents([]);
@@ -922,6 +1023,9 @@ export function App() {
     const list = await window.openMagicPointer.getConversations();
     setConversationsList(list);
     if (conversationId === id) {
+      conversationIdRef.current = null;
+      lastConversationIdRef.current = null;
+      lastDeactivatedAtRef.current = 0;
       setConversationId(null);
       setHistoryTurns([]);
     }
@@ -947,6 +1051,7 @@ export function App() {
     setSelection(null);
     setSelectionDrag(null);
     setSelectedCuaEntityId(null);
+    setSelectedCuaEntity(null);
     window.setTimeout(() => focusPromptInput(inputRef.current), 0);
   }
 
@@ -954,6 +1059,7 @@ export function App() {
     event.preventDefault();
     event.stopPropagation();
     setSelectedCuaEntityId(entity.id);
+    setSelectedCuaEntity(entity);
     setHoveredCuaEntityId(entity.id);
     setSelection(null);
     window.setTimeout(() => focusPromptInput(inputRef.current), 0);
@@ -965,8 +1071,25 @@ export function App() {
   }, [cuaEntities, hoveredCuaEntityId, selectedCuaEntityId]);
 
   const selectedEntity = useMemo(() => {
-    return selectedCuaEntityId ? cuaEntities.find((entity) => entity.id === selectedCuaEntityId) : undefined;
-  }, [cuaEntities, selectedCuaEntityId]);
+    return selectedCuaEntity ?? (selectedCuaEntityId ? cuaEntities.find((entity) => entity.id === selectedCuaEntityId) : undefined);
+  }, [cuaEntities, selectedCuaEntity, selectedCuaEntityId]);
+
+  const cuaHighlightRegion = useMemo(() => contextRegionAroundCursor(cursor), [cursor]);
+  const visibleCuaCandidates = useMemo(
+    () =>
+      cuaEntities
+        .filter((entity) => {
+          const rect = highlightRectForEntity(entity);
+          return rect ? rectsIntersect(rect, cuaHighlightRegion) : false;
+        })
+        .sort((a, b) => {
+          const aRect = highlightRectForEntity(a)!;
+          const bRect = highlightRectForEntity(b)!;
+          return aRect.width * aRect.height - bRect.width * bRect.height;
+        })
+        .slice(0, MAX_CUA_HIGHLIGHTS),
+    [cuaEntities, cuaHighlightRegion]
+  );
 
   // Pointer tint state, by actual timing/priority:
   //   'both'    teal   – submit-time screenshot taken with a selected CUA element
@@ -985,9 +1108,16 @@ export function App() {
     return '#0D6FFF';
   }, [pointerActivity]);
   const modalOpen = settingsOpen || historyOpen;
-  const shellHiddenForContextCapture = selecting || Boolean(selectionDrag) || groundingActive || captureActivity.active;
+  const shellHiddenForContextCapture = selecting || Boolean(selectionDrag) || captureActivity.active;
   const overlayNeedsPointerEvents =
-    detached || menuOpen || modalOpen || selecting || Boolean(selection) || Boolean(selectionDrag) || Boolean(highlightedCuaEntity);
+    detached ||
+    menuOpen ||
+    modalOpen ||
+    selecting ||
+    Boolean(selection) ||
+    Boolean(selectionDrag) ||
+    Boolean(highlightedCuaEntity) ||
+    visibleCuaCandidates.length > 0;
   const menuStyle = useMemo<CSSProperties>(() => {
     const width = 220;
     const estimatedHeight = 232;
@@ -1035,17 +1165,40 @@ export function App() {
             </defs>
           </svg>
 
-          {highlightedCuaEntity?.bbox && (
+          {visibleCuaCandidates.map((entity) => {
+            const rect = highlightRectForEntity(entity);
+            if (!rect) return null;
+            const isSelected = selectedCuaEntityId === entity.id;
+            const isHovered = hoveredCuaEntityId === entity.id;
+            return (
+              <div
+                key={entity.id}
+                className={`cua-element-highlight cua-element-candidate${isSelected ? ' is-selected' : ''}${isHovered ? ' is-hovered' : ''}`}
+                style={{
+                  left: rect.x,
+                  top: rect.y,
+                  width: rect.width,
+                  height: rect.height
+                }}
+                title={entity.text ?? entity.name ?? entity.role ?? 'CUA element'}
+                onMouseEnter={() => setHoveredCuaEntityId(entity.id)}
+                onMouseLeave={() => setHoveredCuaEntityId(selectedCuaEntityId)}
+                onMouseDown={(event) => selectCuaEntity(entity, event)}
+              />
+            );
+          })}
+
+          {selectedEntity && !visibleCuaCandidates.some((entity) => entity.id === selectedEntity.id) && highlightRectForEntity(selectedEntity) && (
             <div
-              className={`cua-element-highlight${selectedCuaEntityId ? ' border-accent-deep bg-[rgba(52,120,246,0.09)] shadow-[0_0_0_1px_rgba(255,255,255,0.58)_inset,0_0_0_2px_rgba(52,120,246,0.18),0_10px_30px_rgba(37,99,235,0.16)] z-6' : ''}`}
+              className="cua-element-highlight cua-element-candidate is-selected"
               style={{
-                left: highlightedCuaEntity.bbox.x,
-                top: highlightedCuaEntity.bbox.y,
-                width: highlightedCuaEntity.bbox.width,
-                height: highlightedCuaEntity.bbox.height
+                left: highlightRectForEntity(selectedEntity)!.x,
+                top: highlightRectForEntity(selectedEntity)!.y,
+                width: highlightRectForEntity(selectedEntity)!.width,
+                height: highlightRectForEntity(selectedEntity)!.height
               }}
-              title={highlightedCuaEntity.text ?? highlightedCuaEntity.role ?? 'CUA element'}
-              onMouseDown={(event) => selectCuaEntity(highlightedCuaEntity, event)}
+              title={selectedEntity.text ?? selectedEntity.name ?? selectedEntity.role ?? 'CUA element'}
+              onMouseDown={(event) => selectCuaEntity(selectedEntity, event)}
             />
           )}
 
@@ -1294,7 +1447,7 @@ export function App() {
                   onMouseDown={onPillMouseDown}
                 >
                   {/* Context Attachments Indicators */}
-                  {showFullContext && (selection || selectedEntity || cuaEntities.length > 0) && (
+                  {showFullContext && (selection || selectedEntity) && (
                     <div className="flex items-center gap-1.5 shrink-0 select-none">
                       {selection && (
                         <div
@@ -1337,6 +1490,7 @@ export function App() {
                           onClick={(e) => {
                             e.stopPropagation();
                             setSelectedCuaEntityId(null);
+                            setSelectedCuaEntity(null);
                             setHoveredAttachment(null);
                           }}
                           onMouseEnter={() => setHoveredAttachment('entity')}
@@ -1358,22 +1512,6 @@ export function App() {
                         </div>
                       )}
 
-                      {cuaEntities.length > 0 && (
-                        <div
-                          className="relative flex items-center justify-center rounded-full bg-white/10 text-white transition-all duration-150 animate-elastic-pop font-bold"
-                          style={{
-                            minWidth: `${Math.max(32, Math.min(44, pillHeight + 12))}px`,
-                            height: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
-                            paddingInline: '8px',
-                            fontSize: `${Math.max(9, Math.min(11, pillHeight - 14))}px`
-                          }}
-                          onMouseEnter={() => setHoveredAttachment('cua')}
-                          onMouseLeave={() => setHoveredAttachment(null)}
-                          title={`${cuaEntities.length} CUA elements recognized`}
-                        >
-                          CUA {cuaEntities.length}
-                        </div>
-                      )}
                     </div>
                   )}
 
@@ -1425,7 +1563,7 @@ export function App() {
                 {showFullContext && (
                   <>
                     <div className="mx-4 h-px bg-white/12" />
-                    <div className="capsule-stream-panel scrollbar-capsule px-4 pb-4 pt-3" style={streamPanelStyle} ref={streamPanelRef}>
+                    <div className="capsule-stream-panel scrollbar-capsule px-4 pb-5 pt-3" style={streamPanelStyle} ref={streamPanelRef}>
                       <div className="flex justify-between gap-2.5 text-white/50 text-[11px] font-semibold uppercase tracking-[0.02em]">
                         <span>{backendLabel(backend)}</span>
                         <span>{statusLabel(state)}</span>
@@ -1507,8 +1645,8 @@ export function App() {
                           </div>
                         )}
                       </div>
-                      {detached && <div className="resize-grip" onMouseDown={onResizeMouseDown} />}
                     </div>
+                    <div className="resize-grip" onMouseDown={onResizeMouseDown} />
                   </>
                 )}
               </div>
@@ -1539,13 +1677,7 @@ export function App() {
               </label>
               <button
                 className="bubble-dropdown-item"
-                onClick={() => {
-                  setMenuOpen(false);
-                  setConversationId(null);
-                  setHistoryTurns([]);
-                  setEvents([]);
-                  setPrompt('');
-                }}
+                onClick={startNewConversation}
               >
                 <span className="bubble-dropdown-icon">N</span>
                 New Conversation

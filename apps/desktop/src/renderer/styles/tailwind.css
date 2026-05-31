@@ -369,6 +369,36 @@
   animation: selection-appear 120ms ease;
 }
 
+.cua-element-candidate {
+  background: rgba(20, 184, 166, 0.1);
+  border-color: rgba(20, 184, 166, 0.72);
+}
+
+.cua-element-candidate::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 6px;
+  border: 1px solid rgba(20, 184, 166, 0.18);
+  pointer-events: none;
+}
+
+.cua-element-candidate.is-hovered {
+  background: rgba(20, 184, 166, 0.16);
+  border-color: rgba(20, 184, 166, 0.95);
+  z-index: 6;
+}
+
+.cua-element-candidate.is-selected {
+  background: rgba(52, 120, 246, 0.12);
+  border-color: rgba(52, 120, 246, 0.95);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.62) inset,
+    0 0 0 2px rgba(52, 120, 246, 0.2),
+    0 10px 30px rgba(37, 99, 235, 0.18);
+  z-index: 7;
+}
+
 /* ── Hold Ring (SVG) ── */
 
 @utility hold-ring {
