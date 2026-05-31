@@ -72,6 +72,7 @@ const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173';
 let overlayHiddenDepth = 0;
 let overlayVisibilitySnapshot = new Map<number, boolean>();
 let overlayRestoreFocusDisplayId: number | null = null;
+let overlayHideReady: Promise<void> | null = null;
 
 async function createOverlay(display: Electron.Display): Promise<void> {
   const win = new BrowserWindow({
@@ -163,24 +164,30 @@ function setWindowInteractive(win: BrowserWindow, value: boolean): void {
 async function withOverlayHidden<T>(focusDisplayId: number | undefined, task: () => Promise<T>): Promise<T> {
   if (focusDisplayId !== undefined) overlayRestoreFocusDisplayId = focusDisplayId;
   if (overlayHiddenDepth === 0) {
-    overlayVisibilitySnapshot = new Map();
-    for (const [displayId, win] of windows) {
-      if (win.isDestroyed()) continue;
-      overlayVisibilitySnapshot.set(displayId, win.isVisible());
-      if (win.isVisible()) win.hide();
-    }
-    await wait(OVERLAY_HIDE_SETTLE_MS);
+    overlayHideReady = hideOverlaysForDesktopRead();
   }
-
   overlayHiddenDepth += 1;
+  await overlayHideReady;
+
   try {
     return await task();
   } finally {
     overlayHiddenDepth -= 1;
     if (overlayHiddenDepth === 0) {
       restoreHiddenOverlays();
+      overlayHideReady = null;
     }
   }
+}
+
+async function hideOverlaysForDesktopRead(): Promise<void> {
+  overlayVisibilitySnapshot = new Map();
+  for (const [displayId, win] of windows) {
+    if (win.isDestroyed()) continue;
+    overlayVisibilitySnapshot.set(displayId, win.isVisible());
+    if (win.isVisible()) win.hide();
+  }
+  await wait(OVERLAY_HIDE_SETTLE_MS);
 }
 
 function restoreHiddenOverlays(): void {
