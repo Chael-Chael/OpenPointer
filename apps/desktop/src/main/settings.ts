@@ -44,8 +44,8 @@ const DEFAULTS: AppSettings = {
   activationHotkey: 'CommandOrControl+Shift+Space',
   longPressEnabled: true,
   voiceEnabled: true,
-  pillWidth: 520,
-  pillHeight: 44,
+  pillWidth: 240,
+  pillHeight: 36,
   newDialogBehavior: 'continue',
   newDialogInterval: 300,
   localVlmContextWindow: 32768
