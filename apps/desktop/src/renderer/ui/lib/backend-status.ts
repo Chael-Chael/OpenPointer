@@ -37,8 +37,12 @@ export function backendReadiness(settings: AppSettings | null, backend: AgentBac
   }
   if (backend === 'claude-agent') {
     if (!settings.claudeAgentEnabled) return { configured: false, label: 'Missing config', detail: 'Claude Agent is disabled.', tone: 'missing' };
-    if (!settings.hasClaudeAgentApiKey) return { configured: false, label: 'Missing config', detail: 'Add a Claude Agent API key.', tone: 'missing' };
-    return { configured: true, label: 'Ready', detail: 'Claude Agent is enabled with a configured key.', tone: 'ready' };
+    return {
+      configured: true,
+      label: 'Ready',
+      detail: settings.hasClaudeAgentApiKey ? 'Claude Agent enabled with API key.' : 'Claude Agent enabled; using local Claude Code auth.',
+      tone: 'ready'
+    };
   }
   if (backend === 'codex') {
     if (!settings.codexAppServerUrl.trim()) return { configured: false, label: 'Missing config', detail: 'Add a Codex app-server URL.', tone: 'missing' };

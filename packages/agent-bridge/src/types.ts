@@ -34,6 +34,8 @@ export type HttpAgentBridgeConfig = {
 export type ClaudeAgentBridgeConfig = {
   enabled: boolean;
   apiKey?: string;
+  baseUrl?: string;
+  executable?: string;
   sdk?: {
     query(args: unknown): AsyncIterable<unknown>;
   };

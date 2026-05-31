@@ -13,5 +13,8 @@
   "dependencies": {
     "@openmagicpointer/backends": "0.1.0",
     "@openmagicpointer/core": "0.1.0"
+  },
+  "optionalDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "*"
   }
 }

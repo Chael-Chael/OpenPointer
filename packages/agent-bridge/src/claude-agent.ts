@@ -1,6 +1,31 @@
 import type { AgentContextEnvelope, AgentEvent } from '@openmagicpointer/core';
+import { execSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
 import { buildAgentInput, buildAgentInstructions, buildToolDiscoveryEvent } from './prompt.js';
 import type { AgentBridge, AgentRunOptions, ClaudeAgentBridgeConfig } from './types.js';
+
+let cachedClaudePath: string | undefined;
+
+// Hardcoded default paths per platform (npm global install locations)
+const DEFAULT_PATHS: Record<string, string[]> = {
+  win32: [
+    join(process.env.APPDATA || '', 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'),
+    join(process.env.LOCALAPPDATA || '', 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'),
+    'C:\\Program Files\\nodejs\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe'
+  ],
+  darwin: [
+    '/opt/homebrew/bin/claude',
+    '/usr/local/bin/claude',
+    join(process.env.HOME || '', '.npm-global', 'bin', 'claude'),
+    join(process.env.HOME || '', '.nvm', 'current', 'bin', 'claude')
+  ],
+  linux: [
+    '/usr/local/bin/claude',
+    join(process.env.HOME || '', '.npm-global', 'bin', 'claude'),
+    join(process.env.HOME || '', '.nvm', 'current', 'bin', 'claude')
+  ]
+};
 
 export class ClaudeAgentBridge implements AgentBridge {
   id = 'claude-agent' as const;
@@ -9,11 +34,7 @@ export class ClaudeAgentBridge implements AgentBridge {
 
   async *run(envelope: AgentContextEnvelope, options: AgentRunOptions = {}): AsyncIterable<AgentEvent> {
     if (!this.config?.enabled) {
-      yield { type: 'run.failed', error: 'Claude Agent bridge is disabled. Enable it and configure the Anthropic API key.', recoverable: true };
-      return;
-    }
-    if (!this.config.apiKey && !process.env.ANTHROPIC_API_KEY) {
-      yield { type: 'run.failed', error: 'Claude Agent bridge needs ANTHROPIC_API_KEY or a configured API key.', recoverable: true };
+      yield { type: 'run.failed', error: 'Claude Agent bridge is disabled.', recoverable: true };
       return;
     }
     const sdk = this.config.sdk ?? (await loadClaudeSdk());
@@ -22,6 +43,7 @@ export class ClaudeAgentBridge implements AgentBridge {
       return;
     }
 
+    const claudePath = findClaudeExecutable(this.config);
     yield buildToolDiscoveryEvent(envelope);
     const runId = `claude-agent-${Date.now()}`;
     yield { type: 'run.started', runId, backend: this.id };
@@ -32,7 +54,9 @@ export class ClaudeAgentBridge implements AgentBridge {
           allowedTools: allowedToolsForEnvelope(envelope),
           includePartialMessages: true,
           maxTurns: 12,
-          abortController: options.signal
+          abortController: options.signal,
+          env: buildSdkEnv(this.config),
+          pathToClaudeCodeExecutable: claudePath
         }
       })) {
         yield mapClaudeMessage(raw);
@@ -42,6 +66,114 @@ export class ClaudeAgentBridge implements AgentBridge {
       yield { type: 'run.failed', error: error instanceof Error ? error.message : String(error), recoverable: true };
     }
   }
+}
+
+function getRealBinaryPath(inputPath: string): string | undefined {
+  if (!inputPath) return undefined;
+  const resolved = resolve(inputPath);
+  if (!existsSync(resolved)) return undefined;
+
+  const ext = process.platform === 'win32' ? '.exe' : '';
+
+  // If it's already a native executable file, return it
+  if (resolved.toLowerCase().endsWith(ext) && !resolved.toLowerCase().endsWith('.js') && !resolved.toLowerCase().endsWith('.cmd') && !resolved.toLowerCase().endsWith('.ps1') && !resolved.toLowerCase().endsWith('.bat')) {
+    return resolved;
+  }
+
+  // If it's a directory, check common binary locations inside it
+  const isDir = existsSync(resolved) && existsSync(join(resolved, '..')) && !resolved.toLowerCase().endsWith('.cmd') && !resolved.toLowerCase().endsWith('.ps1') && !resolved.toLowerCase().endsWith('.bat') && !resolved.toLowerCase().endsWith('.js');
+  if (isDir) {
+    const candidates = [
+      join(resolved, `claude${ext}`),
+      join(resolved, 'bin', `claude${ext}`),
+      join(resolved, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', `claude${ext}`),
+      join(resolved, 'node_modules', '@anthropic-ai', 'claude-code-win32-x64', 'bin', `claude${ext}`),
+      join(resolved, 'node_modules', '@anthropic-ai', 'claude-code', 'node_modules', '@anthropic-ai', 'claude-code-win32-x64', 'bin', `claude${ext}`)
+    ];
+    for (const cand of candidates) {
+      if (existsSync(cand)) return cand;
+    }
+  } else {
+    // It's a wrapper file (e.g. claude.cmd, claude.ps1, claude.bat, claude.js, or extensionless wrapper)
+    // Check siblings and children of the parent directory
+    const parentDir = dirname(resolved);
+    const candidates = [
+      join(parentDir, `claude${ext}`),
+      join(parentDir, 'bin', `claude${ext}`),
+      join(parentDir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', `claude${ext}`),
+      join(parentDir, 'node_modules', '@anthropic-ai', 'claude-code-win32-x64', 'bin', `claude${ext}`),
+      join(parentDir, 'node_modules', '@anthropic-ai', 'claude-code', 'node_modules', '@anthropic-ai', 'claude-code-win32-x64', 'bin', `claude${ext}`)
+    ];
+    for (const cand of candidates) {
+      if (existsSync(cand)) return cand;
+    }
+  }
+
+  return resolved; // Fallback to whatever exists
+}
+
+function findClaudeExecutable(config?: ClaudeAgentBridgeConfig): string | undefined {
+  const ext = process.platform === 'win32' ? '.exe' : '';
+
+  // 1) User-provided path from settings - ALWAYS evaluate fresh, do not globally cache!
+  const userPath = config?.executable?.trim();
+  if (userPath) {
+    const realPath = getRealBinaryPath(userPath);
+    if (realPath) return realPath;
+  }
+
+  // 2) Environment variable override
+  const envPath = process.env.OMP_CLAUDE_EXECUTABLE || process.env.OP_CLAUDE_EXECUTABLE;
+  if (envPath) {
+    const realPath = getRealBinaryPath(envPath);
+    if (realPath) return realPath;
+  }
+
+  // 3) Cached auto-discovered path
+  if (cachedClaudePath && existsSync(cachedClaudePath)) return cachedClaudePath;
+
+  // 4) Find via `where` / `which` (resolves PATH)
+  try {
+    const cmd = process.platform === 'win32' ? 'where' : 'which';
+    const result = execSync(`${cmd} claude`, { encoding: 'utf-8', timeout: 5000 }).trim().split('\n')[0];
+    if (result) {
+      const realPath = getRealBinaryPath(result);
+      if (realPath) {
+        cachedClaudePath = realPath;
+        return realPath;
+      }
+    }
+  } catch {
+    /* ignore error if command not found */
+  }
+
+  // 5) Check hardcoded default paths for this platform
+  const defaults = DEFAULT_PATHS[process.platform] || [];
+  for (const p of defaults) {
+    const realPath = getRealBinaryPath(p);
+    if (realPath) {
+      cachedClaudePath = realPath;
+      return realPath;
+    }
+  }
+
+  // 6) Walk up from npm wrapper to find the real binary
+  try {
+    const cmd = process.platform === 'win32' ? 'where' : 'which';
+    const wrapper = execSync(`${cmd} claude`, { encoding: 'utf-8', timeout: 5000 }).trim().split('\n')[0];
+    if (wrapper) {
+      const candidate = join(dirname(wrapper), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', `claude${ext}`);
+      const realPath = getRealBinaryPath(candidate);
+      if (realPath) {
+        cachedClaudePath = realPath;
+        return realPath;
+      }
+    }
+  } catch {
+    /* ignore error if npm wrapper cannot be resolved */
+  }
+
+  return undefined;
 }
 
 async function loadClaudeSdk(): Promise<ClaudeAgentBridgeConfig['sdk'] | null> {
@@ -88,4 +220,17 @@ function extractText(msg: Record<string, unknown>): string {
       .join('');
   }
   return JSON.stringify(msg);
+}
+
+function buildSdkEnv(config: ClaudeAgentBridgeConfig | undefined): Record<string, string> | undefined {
+  if (!config) return undefined;
+  const env: Record<string, string> = {};
+  if (config.apiKey) env.ANTHROPIC_API_KEY = config.apiKey;
+  if (config.baseUrl) env.ANTHROPIC_BASE_URL = config.baseUrl;
+  if (Object.keys(env).length === 0) return undefined;
+  const inherited: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v !== undefined) inherited[k] = v;
+  }
+  return { ...inherited, ...env };
 }

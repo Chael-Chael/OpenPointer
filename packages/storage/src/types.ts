@@ -11,6 +11,8 @@ export type AppSettings = {
   hasOpenCodeApiKey: boolean;
   opencodeBaseUrl: string;
   claudeAgentEnabled: boolean;
+  claudeAgentBaseUrl: string;
+  claudeAgentExecutable: string;
   hasClaudeAgentApiKey: boolean;
   hasCodexApiKey: boolean;
   codexAppServerUrl: string;
