@@ -36,6 +36,8 @@ const DEFAULTS: AppSettings = {
   hasOpenCodeApiKey: false,
   opencodeBaseUrl: '',
   claudeAgentEnabled: false,
+  claudeAgentBaseUrl: '',
+  claudeAgentExecutable: '',
   hasClaudeAgentApiKey: false,
   hasCodexApiKey: false,
   codexAppServerUrl: '',
@@ -83,6 +85,8 @@ export function getSettings(): AppSettings {
       envOverride(['OMP_CLAUDE_AGENT_ENABLED', 'OP_CLAUDE_AGENT_ENABLED']),
       loaded.claudeAgentEnabled ?? DEFAULTS.claudeAgentEnabled
     ),
+    claudeAgentBaseUrl: envOverride(['OMP_CLAUDE_AGENT_BASE_URL', 'OP_CLAUDE_AGENT_BASE_URL']) || loaded.claudeAgentBaseUrl || DEFAULTS.claudeAgentBaseUrl,
+    claudeAgentExecutable: envOverride(['OMP_CLAUDE_EXECUTABLE', 'OP_CLAUDE_EXECUTABLE']) || loaded.claudeAgentExecutable || DEFAULTS.claudeAgentExecutable,
     codexAppServerUrl: envOverride(['OMP_CODEX_APP_SERVER_URL', 'OP_CODEX_APP_SERVER_URL']) || loaded.codexAppServerUrl || '',
     cuaMode: normalizeCuaMode(envOverride(['OMP_CUA_MODE', 'OP_CUA_MODE']) || loaded.cuaMode || DEFAULTS.cuaMode),
     pillWidth: clampNumber(loaded.pillWidth, 280, 900, DEFAULTS.pillWidth),

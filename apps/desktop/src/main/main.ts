@@ -575,7 +575,7 @@ function bridgeConfig(settings = getSettings()): AgentBridgeRegistryConfig {
       : undefined,
     hermes: settings.hermesBaseUrl ? { baseUrl: settings.hermesBaseUrl, apiKey: getHermesApiKey() } : undefined,
     opencode: settings.opencodeBaseUrl ? { baseUrl: settings.opencodeBaseUrl, apiKey: getOpenCodeApiKey() } : undefined,
-    claudeAgent: { enabled: settings.claudeAgentEnabled, apiKey: getClaudeAgentApiKey() },
+    claudeAgent: { enabled: settings.claudeAgentEnabled, apiKey: getClaudeAgentApiKey(), baseUrl: settings.claudeAgentBaseUrl || undefined, executable: settings.claudeAgentExecutable || undefined },
     codex: settings.codexAppServerUrl ? { baseUrl: settings.codexAppServerUrl, apiKey: getCodexApiKey() } : undefined
   };
 }

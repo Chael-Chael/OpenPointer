@@ -183,8 +183,20 @@ export function SettingsPanel(props: SettingsPanelProps) {
               <input type="checkbox" checked={settings.claudeAgentEnabled} onChange={(event) => updateSettings({ claudeAgentEnabled: event.target.checked })} />
               <span>Enabled</span>
             </label>
+            <TextField
+              label="Claude executable (optional)"
+              value={settings.claudeAgentExecutable}
+              onChange={(value) => updateSettings({ claudeAgentExecutable: value })}
+              placeholder="Auto-detect if empty"
+            />
+            <TextField
+              label="Base URL (optional)"
+              value={settings.claudeAgentBaseUrl}
+              onChange={(value) => updateSettings({ claudeAgentBaseUrl: value })}
+              placeholder="Leave empty to use local Claude Code auth"
+            />
             <SecretField
-              label="API key"
+              label="API key (optional)"
               value={secretDrafts.claudeAgentApiKey}
               configured={secretConfigured(settings.hasClaudeAgentApiKey, secretDrafts.claudeAgentApiKey, clearSecrets.claudeAgentApiKey)}
               clearQueued={clearSecrets.claudeAgentApiKey}

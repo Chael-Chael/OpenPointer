@@ -22,7 +22,25 @@ import { HoldRing, ToolRows } from './components/fields';
 import { SettingsPanel } from './components/SettingsPanel';
 import { HistoryPanel } from './components/HistoryPanel';
 
-function CameraIcon({ size = 14 }: { size?: number }) {
+function CodexIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.4}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="4" y="4" width="16" height="16" rx="1" />
+    </svg>
+  );
+}
+
+function OpenCodeIcon({ size = 14 }: { size?: number }) {
   return (
     <svg
       width={size}
@@ -35,13 +53,13 @@ function CameraIcon({ size = 14 }: { size?: number }) {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-      <circle cx="12" cy="13" r="4" />
+      <path d="M19 16.9A5 5 0 0 0 18 7h-1.26a8 8 0 1 0-11.62 8.58" />
+      <path d="M9 11l2 1.5-2 1.5M12.5 14h2.5" />
     </svg>
   );
 }
 
-function TextIcon({ size = 14 }: { size?: number }) {
+function HermesIcon({ size = 14 }: { size?: number }) {
   return (
     <svg
       width={size}
@@ -54,16 +72,35 @@ function TextIcon({ size = 14 }: { size?: number }) {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="16" y1="13" x2="8" y2="13" />
-      <line x1="16" y1="17" x2="8" y2="17" />
-      <polyline points="10 9 9 9 8 9" />
+      <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1M9 10l-2 2 2 2M15 10l2 2-2 2" />
     </svg>
   );
 }
 
-function ImageIcon({ size = 14 }: { size?: number }) {
+function ClaudeAgentIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M16 4c-1.5-1.5-4-2-7-1.5-3.5.5-6 3.5-6 7.5 0 2.5.5 5 1.5 7" />
+      <path d="M7.5 5c1 .5 2 1.5 2.5 3.5.5-2 2-3 3.5-3.5" />
+      <path d="M10 8c1 0 1.5.5 1.5 1.5s-.5 1-1.5 1.5c-1 0-1.5-.5-1.5-1.5S8.5 8 10 8z" />
+      <path d="M11.5 9.5c.5.5.8 1.2.8 2 0 1.5-1 2.5-2.5 2.5s-2-.5-2.5-1" />
+      <path d="M14 6.5c1 1.5 2 3.5 2 5.5 0 3.5-1.5 6-3 7.5" />
+      <path d="M4 14c.5 1.5 1 2.5 2 3.5" />
+    </svg>
+  );
+}
+
+function LocalVlmIcon({ size = 14 }: { size?: number }) {
   return (
     <svg
       width={size}
@@ -76,14 +113,17 @@ function ImageIcon({ size = 14 }: { size?: number }) {
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-      <circle cx="8.5" cy="8.5" r="1.5" />
-      <polyline points="21 15 16 10 5 21" />
+      <path d="M8 5l-2-3M16 5l2-3" />
+      <circle cx="12" cy="13" r="6" />
+      <circle cx="10" cy="12" r="0.75" fill="currentColor" />
+      <circle cx="14" cy="12" r="0.75" fill="currentColor" />
+      <path d="M6 13H3M18 13h3" />
+      <path d="M10 19v2M14 19v2" />
     </svg>
   );
 }
 
-function WindowIcon({ size = 14 }: { size?: number }) {
+function AutoIcon({ size = 14 }: { size?: number }) {
   return (
     <svg
       width={size}
@@ -91,20 +131,17 @@ function WindowIcon({ size = 14 }: { size?: number }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={2.2}
+      strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
     >
-      <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-      <line x1="2" y1="10" x2="22" y2="10" />
-      <path d="M8 21h8" />
-      <path d="M12 17v4" />
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
     </svg>
   );
 }
 
-function TargetIcon({ size = 14 }: { size?: number }) {
+function MockIcon({ size = 14 }: { size?: number }) {
   return (
     <svg
       width={size}
@@ -112,14 +149,56 @@ function TargetIcon({ size = 14 }: { size?: number }) {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth={2.2}
+      strokeWidth={2}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
     >
       <circle cx="12" cy="12" r="10" />
-      <circle cx="12" cy="12" r="6" />
-      <circle cx="12" cy="12" r="2" />
+      <line x1="8" y1="12" x2="16" y2="12" />
+    </svg>
+  );
+}
+
+function getBackendIcon(backend: AgentBackendId, size = 12) {
+  switch (backend) {
+    case 'codex':
+      return <CodexIcon size={size} />;
+    case 'local-vlm':
+      return <LocalVlmIcon size={size} />;
+    case 'claude-agent':
+      return <ClaudeAgentIcon size={size} />;
+    case 'hermes':
+      return <HermesIcon size={size} />;
+    case 'opencode':
+      return <OpenCodeIcon size={size} />;
+    case 'auto':
+      return <AutoIcon size={size} />;
+    case 'mock':
+      return <MockIcon size={size} />;
+    default:
+      return <AutoIcon size={size} />;
+  }
+}
+
+function ChevronIcon({ size = 8, isOpen = false }: { size?: number; isOpen?: boolean }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={3}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{
+        transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+        transition: 'transform 180ms ease'
+      }}
+      aria-hidden="true"
+    >
+      <polyline points="6 9 12 15 18 9" />
     </svg>
   );
 }
@@ -140,6 +219,8 @@ export function App() {
   const padY = Math.max(2, Math.min(8, (pillHeight - menuSize) / 2));
   const padXRight = Math.max(12, Math.min(24, pillHeight / 1.5));
   const padXLeft = Math.max(8, Math.min(12, pillHeight / 3));
+  const smallPillHeight = Math.max(22, Math.min(28, pillHeight - 2));
+  const previewCardBottom = 12 + smallPillHeight;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [secretDrafts, setSecretDrafts] = useState<SecretDrafts>(emptySecretDrafts);
   const [clearSecrets, setClearSecrets] = useState<ClearSecretFlags>(emptyClearSecretFlags);
@@ -149,6 +230,7 @@ export function App() {
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [backend, setBackend] = useState<AgentBackendId>('auto');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [backendDropdownOpen, setBackendDropdownOpen] = useState(false);
   const [detached, setDetached] = useState(false);
   const [selection, setSelection] = useState<SelectionRect | null>(null);
   const [detachedPos, setDetachedPos] = useState<{ x: number; y: number } | null>(null);
@@ -310,6 +392,7 @@ export function App() {
       setHold(null);
       setMenuOpen(false);
       setSettingsOpen(false);
+      setBackendDropdownOpen(false);
       setConversationId(null);
       setHistoryTurns([]);
       setHistoryOpen(false);
@@ -374,7 +457,16 @@ export function App() {
   useEffect(() => {
     // We want to force interactive mode if dragging/selecting/detached etc.
     const forceInteractive =
-      active && (detached || menuOpen || settingsOpen || historyOpen || Boolean(selection) || selecting || Boolean(selectionDrag) || Boolean(panelResizeDrag));
+      active &&
+      (detached ||
+        menuOpen ||
+        backendDropdownOpen ||
+        settingsOpen ||
+        historyOpen ||
+        Boolean(selection) ||
+        selecting ||
+        Boolean(selectionDrag) ||
+        Boolean(panelResizeDrag));
 
     function checkTarget(target: EventTarget | null) {
       if (forceInteractive) return true;
@@ -407,11 +499,14 @@ export function App() {
 
     updateInteractive(forceInteractive);
 
+    // Ensure window has keyboard focus when interactive UI is open
+    if (forceInteractive) window.focus();
+
     return () => {
       window.removeEventListener('mouseover', onMouseOver);
       window.removeEventListener('mouseout', onMouseOut);
     };
-  }, [active, detached, menuOpen, settingsOpen, historyOpen, selection, selecting, selectionDrag, panelResizeDrag]);
+  }, [active, detached, menuOpen, backendDropdownOpen, settingsOpen, historyOpen, selection, selecting, selectionDrag, panelResizeDrag]);
 
   // Esc = deactivate; Right-click = toggle detach/reattach (enter/exit edit) or cancel local selection.
   useEffect(() => {
@@ -604,6 +699,19 @@ export function App() {
     window.addEventListener('click', onClick, { capture: true });
     return () => window.removeEventListener('click', onClick, { capture: true });
   }, [menuOpen]);
+
+  // Close backend dropdown when clicking outside
+  useEffect(() => {
+    if (!backendDropdownOpen) return;
+    function onClick(event: MouseEvent) {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.backend-dropdown') && !target.closest('.small-pill')) {
+        setBackendDropdownOpen(false);
+      }
+    }
+    window.addEventListener('click', onClick, { capture: true });
+    return () => window.removeEventListener('click', onClick, { capture: true });
+  }, [backendDropdownOpen]);
 
   const hasPanel = state !== 'composing' || historyTurns.length > 0 || Boolean(conversationId);
   const shellPosition = useMemo(
@@ -1039,13 +1147,14 @@ export function App() {
           >
             {/* Context attachment preview card */}
             {hoveredAttachment === 'selection' && selection && (
-              <div className="absolute bottom-[calc(100%+10px)] left-4 z-10 w-[240px] p-3 text-white bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] border border-glass-border rounded-[18px] flex flex-col gap-1.5 pointer-events-none animate-elastic-pop origin-bottom-left">
+              <div
+                className="absolute left-0 z-10 w-[240px] p-3 text-white bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] border border-glass-border rounded-[18px] flex flex-col gap-1.5 pointer-events-none animate-elastic-pop origin-bottom-left"
+                style={{ bottom: `calc(100% + ${previewCardBottom}px)` }}
+              >
                 {/* Inner Shadow Layer covering the ENTIRE card, inheriting border-radius */}
                 <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
                 <div className="flex items-center gap-2">
-                  <span className="text-base text-white/90">
-                    <CameraIcon size={15} />
-                  </span>
+                  <span className="text-base text-white/90">📸</span>
                   <div className="flex flex-col">
                     <span className="text-[12px] font-bold text-white/95 leading-tight">截图区域</span>
                     <span className="text-[9px] text-white/60 leading-none">Selected Region</span>
@@ -1066,20 +1175,15 @@ export function App() {
             )}
 
             {hoveredAttachment === 'entity' && selectedEntity && (
-              <div className="absolute bottom-[calc(100%+10px)] left-4 z-10 w-[280px] p-3 text-white bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] border border-glass-border rounded-[18px] flex flex-col gap-1.5 pointer-events-none animate-elastic-pop origin-bottom-left">
+              <div
+                className="absolute left-0 z-10 w-[280px] p-3 text-white bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] border border-glass-border rounded-[18px] flex flex-col gap-1.5 pointer-events-none animate-elastic-pop origin-bottom-left"
+                style={{ bottom: `calc(100% + ${previewCardBottom}px)` }}
+              >
                 {/* Inner Shadow Layer covering the ENTIRE card, inheriting border-radius */}
                 <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
                 <div className="flex items-center gap-2">
                   <span className="text-base text-white/90">
-                    {selectedEntity.kind === 'text' ? (
-                      <TextIcon size={15} />
-                    ) : selectedEntity.kind === 'image' ? (
-                      <ImageIcon size={15} />
-                    ) : selectedEntity.kind === 'container' ? (
-                      <WindowIcon size={15} />
-                    ) : (
-                      <TargetIcon size={15} />
-                    )}
+                    {selectedEntity.kind === 'text' ? '📝' : selectedEntity.kind === 'image' ? '🖼️' : selectedEntity.kind === 'container' ? '💻' : '🎯'}
                   </span>
                   <div className="flex flex-col">
                     <span className="text-[12px] font-bold text-white/95 leading-tight">
@@ -1121,6 +1225,58 @@ export function App() {
                     <span>置信度: {Math.round(selectedEntity.confidence * 100)}%</span>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* Small Pill above the main capsule to switch backend source */}
+            <div
+              className="small-pill absolute bottom-[calc(100%+6px)] left-0 z-10 flex items-center gap-1.5 px-3 py-1 bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_4px_12px_rgba(0,0,0,0.08)] border border-glass-border rounded-full w-fit cursor-pointer hover:bg-[rgba(13,111,255,0.95)] hover:scale-[1.02] active:scale-[0.98] transition-all duration-150 text-white font-semibold select-none animate-elastic-pop origin-bottom-left"
+              style={{
+                height: `${smallPillHeight}px`,
+                fontSize: `${Math.max(9, Math.min(11, pillHeight - 14))}px`
+              }}
+              onClick={() => setBackendDropdownOpen(!backendDropdownOpen)}
+            >
+              {/* Inner Shadow Layer covering the ENTIRE small pill, inheriting border-radius */}
+              <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_1.5px_2px_2px_-2px_rgba(255,255,255,0.55),inset_0px_-0.5px_0.5px_0px_rgba(255,255,255,0.2),inset_0px_0.5px_0.5px_0px_rgba(255,255,255,0.2)]" />
+              <span className="flex items-center gap-1">
+                {getBackendIcon(backend, Math.max(10, Math.min(12, pillHeight - 14)))}
+                <span>{backendLabel(backend)}</span>
+              </span>
+              <ChevronIcon size={7} isOpen={backendDropdownOpen} />
+            </div>
+
+            {/* Custom glassmorphic backend selector dropdown list, hovering above the small pill */}
+            {backendDropdownOpen && (
+              <div
+                className="backend-dropdown absolute left-0 z-10 min-w-[140px] p-1 border border-glass-border rounded-[14px] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] animate-dropdown-appear flex flex-col gap-0.5"
+                style={{ bottom: `calc(100% + ${previewCardBottom}px)` }}
+              >
+                {/* Inner Shadow Layer covering the ENTIRE dropdown, inheriting border-radius */}
+                <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
+                {selectableBackends.map((item) => {
+                  const isSelected = backend === item;
+                  return (
+                    <button
+                      key={item}
+                      type="button"
+                      className={`flex items-center justify-between w-full py-1.5 px-3 border-0 rounded-[10px] bg-transparent text-left cursor-pointer transition-colors duration-140 font-semibold text-[11px] relative z-1 ${
+                        isSelected ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]' : 'text-white/80 hover:bg-white/10 hover:text-white'
+                      }`}
+                      onClick={() => {
+                        setBackend(item);
+                        setBackendDropdownOpen(false);
+                        window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+                      }}
+                    >
+                      <span className="flex items-center gap-1.5">
+                        {getBackendIcon(item, 11)}
+                        <span>{backendLabel(item)}</span>
+                      </span>
+                      {isSelected && <span className="text-[9px] font-bold">✓</span>}
+                    </button>
+                  );
+                })}
               </div>
             )}
 
@@ -1170,8 +1326,11 @@ export function App() {
                         onMouseLeave={() => setHoveredAttachment(null)}
                         title="Attached: Selected Region (Click to remove)"
                       >
-                        <span className="group-hover:hidden flex items-center justify-center text-white/90">
-                          <CameraIcon size={Math.max(10, Math.min(13, pillHeight - 14))} />
+                        <span
+                          className="group-hover:hidden flex items-center justify-center text-white/90"
+                          style={{ fontSize: `${Math.max(10, Math.min(13, pillHeight - 14))}px` }}
+                        >
+                          📸
                         </span>
                         <span
                           className="hidden group-hover:flex items-center justify-center text-white"
@@ -1198,16 +1357,11 @@ export function App() {
                         onMouseLeave={() => setHoveredAttachment(null)}
                         title={`Attached: ${selectedEntity.kind} - ${selectedEntity.name || selectedEntity.text || 'UI Element'} (Click to remove)`}
                       >
-                        <span className="group-hover:hidden flex items-center justify-center text-white/90">
-                          {selectedEntity.kind === 'text' ? (
-                            <TextIcon size={Math.max(10, Math.min(13, pillHeight - 14))} />
-                          ) : selectedEntity.kind === 'image' ? (
-                            <ImageIcon size={Math.max(10, Math.min(13, pillHeight - 14))} />
-                          ) : selectedEntity.kind === 'container' ? (
-                            <WindowIcon size={Math.max(10, Math.min(13, pillHeight - 14))} />
-                          ) : (
-                            <TargetIcon size={Math.max(10, Math.min(13, pillHeight - 14))} />
-                          )}
+                        <span
+                          className="group-hover:hidden flex items-center justify-center text-white/90"
+                          style={{ fontSize: `${Math.max(10, Math.min(13, pillHeight - 14))}px` }}
+                        >
+                          {selectedEntity.kind === 'text' ? '📝' : selectedEntity.kind === 'image' ? '🖼️' : selectedEntity.kind === 'container' ? '💻' : '🎯'}
                         </span>
                         <span
                           className="hidden group-hover:flex items-center justify-center text-white"

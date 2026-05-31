@@ -14,6 +14,8 @@ function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
     hasOpenCodeApiKey: false,
     opencodeBaseUrl: '',
     claudeAgentEnabled: false,
+    claudeAgentBaseUrl: '',
+    claudeAgentExecutable: '',
     hasClaudeAgentApiKey: false,
     hasCodexApiKey: false,
     codexAppServerUrl: '',
@@ -51,6 +53,12 @@ describe('backendReadiness', () => {
     const ready = makeSettings({ hermesBaseUrl: 'http://x/v1' });
     expect(backendReadiness(ready, 'auto').configured).toBe(true);
     expect(backendReadiness(makeSettings(), 'auto').configured).toBe(false);
+  });
+
+  it('claude-agent is ready when enabled, api key optional', () => {
+    expect(backendReadiness(makeSettings(), 'claude-agent').configured).toBe(false);
+    expect(backendReadiness(makeSettings({ claudeAgentEnabled: true }), 'claude-agent').configured).toBe(true);
+    expect(backendReadiness(makeSettings({ claudeAgentEnabled: true, hasClaudeAgentApiKey: true }), 'claude-agent').configured).toBe(true);
   });
 });
 
