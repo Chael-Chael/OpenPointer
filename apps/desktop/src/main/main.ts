@@ -1,5 +1,5 @@
 import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen } from 'electron';
-import activeWindow from 'active-win';
+import { activeWindow } from 'get-windows';
 import { UiohookKey, uIOhook } from 'uiohook-napi';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
