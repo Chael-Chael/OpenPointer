@@ -36,6 +36,10 @@
   --animate-bubble-pop: bubble-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
   --animate-bubble-tuck: bubble-tuck 260ms cubic-bezier(0.2, 0.9, 0.2, 1) forwards;
   --animate-fade-up: fade-up 280ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-pill-unfold: pill-unfold 360ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-pill-unfold-geometry: pill-unfold-geometry 360ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-pill-glow: pill-glow-appear 420ms cubic-bezier(0.22, 1, 0.36, 1) 360ms both, glow-breathe 2.4s ease-in-out 780ms infinite;
+  --animate-elastic-pop: scale-up 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
   --animate-modal-fade: modal-fade 200ms ease;
   --animate-modal-rise: modal-rise 280ms cubic-bezier(0.16, 1, 0.3, 1);
   --animate-selection-appear: selection-appear 120ms ease;
@@ -126,6 +130,66 @@
   100% {
     opacity: 1;
     transform: scale(1) translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes pill-unfold {
+  0% {
+    opacity: 0;
+    transform: scaleX(0.08) scaleY(0.9);
+    filter: blur(8px);
+  }
+  55% {
+    opacity: 1;
+    transform: scaleX(1.02) scaleY(0.98);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    transform: scaleX(1) scaleY(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes pill-unfold-geometry {
+  0% {
+    transform: scaleX(0.08) scaleY(0.9);
+  }
+  55% {
+    transform: scaleX(1.02) scaleY(0.98);
+  }
+  100% {
+    transform: scaleX(1) scaleY(1);
+  }
+}
+
+@keyframes pill-glow-appear {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 0.9;
+  }
+}
+
+@keyframes scale-up {
+  0% {
+    opacity: 0;
+    transform: scale(0.72);
+    filter: blur(6px);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.08);
+    filter: blur(0);
+  }
+  78% {
+    transform: scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
     filter: blur(0);
   }
 }
@@ -296,6 +360,20 @@
 
 @utility handle-corner-alt {
   cursor: nesw-resize;
+}
+
+/* ── Selection Active State ── */
+
+.is-selecting .command-bubble {
+  animation: bubble-tuck 260ms cubic-bezier(0.2, 0.9, 0.2, 1) forwards;
+  transform-origin: left center;
+}
+
+.is-selecting .stream-panel {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease;
 }
 
 /* ── CUA Element Highlight ── */
@@ -988,4 +1066,193 @@
   .context-progress-text {
     color: rgba(255, 255, 255, 0.7);
   }
+}
+
+/* ================================================================
+   Unified Stream Panel and White Markdown Body
+   ================================================================ */
+
+.stream-panel-unified {
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+
+.stream-panel-unified::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.16) !important;
+}
+
+.stream-panel-unified::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28) !important;
+}
+
+.stream-panel-unified .markdown-body {
+  color: rgba(255, 255, 255, 0.95);
+}
+
+.stream-panel-unified .markdown-body h1,
+.stream-panel-unified .markdown-body h2,
+.stream-panel-unified .markdown-body h3 {
+  color: #ffffff;
+}
+
+.stream-panel-unified .markdown-body a {
+  color: #93c5fd;
+}
+
+.stream-panel-unified .markdown-body a:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+.stream-panel-unified .markdown-body blockquote {
+  color: rgba(255, 255, 255, 0.7);
+  border-left-color: rgba(255, 255, 255, 0.3);
+}
+
+.stream-panel-unified .markdown-body table th {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.stream-panel-unified .markdown-body table td,
+.stream-panel-unified .markdown-body table th {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.stream-panel-unified .markdown-body inline-code {
+  background: rgba(255, 255, 255, 0.1);
+  color: #93c5fd;
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.stream-panel-unified .markdown-body p,
+.stream-panel-unified .markdown-body li {
+  line-height: 1.5;
+}
+
+/* ================================================================
+   Pill-style Modal and Form Elements Overrides
+   ================================================================ */
+
+.modal-card {
+  background: rgba(13, 111, 255, 0.92) !important;
+  backdrop-filter: blur(15px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  box-shadow: inset 2px 3px 3px -3px rgba(255,255,255,0.6), 0 24px 64px rgba(0, 0, 0, 0.25) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.modal-card h2,
+.modal-card h3 {
+  color: #ffffff !important;
+}
+
+.modal-card .text-ink {
+  color: #ffffff !important;
+}
+
+.modal-card .text-accent {
+  color: #93c5fd !important;
+}
+
+.modal-card .text-muted {
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+
+.modal-card .ghost-button {
+  color: rgba(255, 255, 255, 0.8) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+}
+
+.modal-card .ghost-button:hover {
+  color: #ffffff !important;
+  background: rgba(255, 255, 255, 0.15) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+.modal-card .primary-button {
+  background: #ffffff !important;
+  color: #0d6fff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+}
+
+.modal-card .primary-button:hover {
+  background: rgba(255, 255, 255, 0.9) !important;
+  transform: translateY(-0.5px) !important;
+}
+
+/* Settings Inputs, Sliders, Cards, Toggles */
+
+.modal-card .backend-card {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.modal-card .settings-section {
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+.modal-card .field span {
+  color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.modal-card select,
+.modal-card input[type="text"],
+.modal-card input[type="number"],
+.modal-card input[type="password"] {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+  color: #ffffff !important;
+  outline: none !important;
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+}
+
+.modal-card select option {
+  background: #0d6fff !important;
+  color: #ffffff !important;
+}
+
+.modal-card select:focus,
+.modal-card input:focus {
+  border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+.modal-card .slider-track {
+  background: rgba(255, 255, 255, 0.2) !important;
+}
+
+.modal-card .slider-fill {
+  background: #ffffff !important;
+}
+
+.modal-card .slider-thumb {
+  background: #ffffff !important;
+  border-color: #0d6fff !important;
+}
+
+.modal-card .slider-value {
+  color: #ffffff !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+/* History Items */
+
+.modal-card .history-item {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+.modal-card .history-item:hover {
+  background: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+  transform: translateY(-0.5px) !important;
+}
+
+.modal-card .history-item-btn {
+  font-size: 11px !important;
+  padding: 4px 10px !important;
+  height: 28px !important;
 }

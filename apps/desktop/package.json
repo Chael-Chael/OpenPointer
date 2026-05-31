@@ -19,6 +19,7 @@
     "@openmagicpointer/grounding": "0.1.0",
     "@openmagicpointer/storage": "0.1.0",
     "@openmagicpointer/voice": "0.1.0",
+    "@tailwindcss/vite": "^4.3.0",
     "active-win": "^8.2.1",
     "electron": "^42.2.0",
     "katex": "^0.17.0",
@@ -29,12 +30,14 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "tailwindcss": "^4.3.0",
     "uiohook-napi": "^1.5.5"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "concurrently": "^8.2.2",
+    "koffi": "^3.0.2",
     "wait-on": "^7.2.0"
   }
 }

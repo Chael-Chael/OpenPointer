@@ -79,68 +79,65 @@ export function CursorTrail({ x, y, enabled }: Props) {
   if (!enabled) return null;
 
   return (
-    <>
-      <svg className="cursor-trail" aria-hidden="true">
-        <defs>
-          <linearGradient id="ompTrail" gradientUnits="userSpaceOnUse" x1={points[0]?.x ?? x} y1={points[0]?.y ?? y} x2={x} y2={y}>
-            <stop offset="0%" stopColor="rgba(52, 120, 246, 0)" />
-            <stop offset="48%" stopColor="rgba(74, 163, 255, 0.26)" />
-            <stop offset="100%" stopColor="rgba(0, 132, 255, 0.95)" />
-          </linearGradient>
-          <filter id="ompTrailBlur" x="-60%" y="-60%" width="220%" height="220%">
-            <feGaussianBlur stdDeviation="7" />
-          </filter>
-        </defs>
-        {segments.length > 0 && (
-          <>
-            {/* Outer Glow Layer */}
-            <g opacity="0.26" filter="url(#ompTrailBlur)">
-              {segments.map((seg, idx) => (
-                <path
-                  key={idx}
-                  d={seg.d}
-                  stroke="url(#ompTrail)"
-                  strokeWidth={28 * Math.pow(seg.ratio, 1.2)}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  fill="none"
-                />
-              ))}
-            </g>
+    <svg className="cursor-trail" aria-hidden="true">
+      <defs>
+        <linearGradient id="ompTrail" gradientUnits="userSpaceOnUse" x1={points[0]?.x ?? x} y1={points[0]?.y ?? y} x2={x} y2={y}>
+          <stop offset="0%" stopColor="rgba(52, 120, 246, 0)" />
+          <stop offset="48%" stopColor="rgba(74, 163, 255, 0.26)" />
+          <stop offset="100%" stopColor="rgba(0, 132, 255, 0.95)" />
+        </linearGradient>
+        <filter id="ompTrailBlur" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur stdDeviation="7" />
+        </filter>
+      </defs>
+      {segments.length > 0 && (
+        <>
+          {/* Outer Glow Layer */}
+          <g opacity="0.26" filter="url(#ompTrailBlur)">
+            {segments.map((seg, idx) => (
+              <path
+                key={idx}
+                d={seg.d}
+                stroke="url(#ompTrail)"
+                strokeWidth={28 * Math.pow(seg.ratio, 1.2)}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+              />
+            ))}
+          </g>
 
-            {/* Medium Glow Layer */}
-            <g opacity="0.34" filter="url(#ompTrailBlur)">
-              {segments.map((seg, idx) => (
-                <path
-                  key={idx}
-                  d={seg.d}
-                  stroke="url(#ompTrail)"
-                  strokeWidth={11 * Math.pow(seg.ratio, 1.2)}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  fill="none"
-                />
-              ))}
-            </g>
+          {/* Medium Glow Layer */}
+          <g opacity="0.34" filter="url(#ompTrailBlur)">
+            {segments.map((seg, idx) => (
+              <path
+                key={idx}
+                d={seg.d}
+                stroke="url(#ompTrail)"
+                strokeWidth={11 * Math.pow(seg.ratio, 1.2)}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+              />
+            ))}
+          </g>
 
-            {/* Sharp Core Layer */}
-            <g opacity="0.92">
-              {segments.map((seg, idx) => (
-                <path
-                  key={idx}
-                  d={seg.d}
-                  stroke="url(#ompTrail)"
-                  strokeWidth={4.5 * Math.pow(seg.ratio, 1.2)}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  fill="none"
-                />
-              ))}
-            </g>
-          </>
-        )}
-      </svg>
-      <div className="cursor-halo" style={{ transform: `translate3d(${x - 24}px, ${y - 24}px, 0)` }} />
-    </>
+          {/* Sharp Core Layer */}
+          <g opacity="0.92">
+            {segments.map((seg, idx) => (
+              <path
+                key={idx}
+                d={seg.d}
+                stroke="url(#ompTrail)"
+                strokeWidth={4.5 * Math.pow(seg.ratio, 1.2)}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+              />
+            ))}
+          </g>
+        </>
+      )}
+    </svg>
   );
 }

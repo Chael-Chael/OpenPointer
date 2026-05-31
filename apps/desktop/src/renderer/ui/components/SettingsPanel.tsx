@@ -243,7 +243,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           <NumberSlider
             label="Pill height"
             value={pillHeight}
-            min={36}
+            min={24}
             max={96}
             step={2}
             unit="px"

@@ -29,16 +29,23 @@ export function ToolRows({ events }: { events: Array<Extract<AgentEvent, { type:
 }
 
 export function BackendCard({ title, status, children }: { title: string; status: BackendReadiness; children: ReactNode }) {
+  const toneColor: Record<string, string> = {
+    ready: 'text-success',
+    missing: 'text-warning',
+    working: 'text-accent',
+    failed: 'text-danger',
+    approval: 'text-approval',
+  };
   return (
     <section className="backend-card">
-      <header>
+      <header className="flex justify-between items-start gap-3 mb-3">
         <div>
-          <h3>{title}</h3>
-          <p>{status.detail}</p>
+          <h3 className="m-0 text-[15px] font-bold leading-tight text-ink">{title}</h3>
+          <p className="mt-1 text-muted text-[13px] leading-relaxed">{status.detail}</p>
         </div>
-        <span className={`config-status tone-${status.tone}`}>{status.label}</span>
+        <span className={`config-status ${toneColor[status.tone] ?? ''}`}>{status.label}</span>
       </header>
-      <div className="backend-fields">{children}</div>
+      <div className="grid gap-2.5">{children}</div>
     </section>
   );
 }
@@ -74,7 +81,7 @@ export function NumberSlider({
   }
 
   return (
-    <label className="field slider-field">
+    <label className="field">
       <span>
         {label}
         <em>{value}{unit}</em>
@@ -103,7 +110,7 @@ export function SecretField({
   onClear(): void;
 }) {
   return (
-    <label className="field secret-field">
+    <label className="field">
       <span>
         {label}
         <em>{clearQueued ? 'Will clear' : configured ? 'Configured' : 'Not configured'}</em>
@@ -115,7 +122,7 @@ export function SecretField({
           onChange={(event) => onChange(event.target.value)}
           placeholder={configured && !clearQueued ? 'Configured - paste to replace' : 'Paste key or token'}
         />
-        <button type="button" onClick={onClear} disabled={!configured && !value}>Clear</button>
+        <button type="button" className="ghost-button" onClick={onClear} disabled={!configured && !value}>Clear</button>
       </div>
     </label>
   );

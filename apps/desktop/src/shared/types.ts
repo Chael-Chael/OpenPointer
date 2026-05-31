@@ -86,4 +86,6 @@ export type DesktopApi = {
   getConversation(id: string): Promise<import('@openmagicpointer/core').Conversation | null>;
   deleteConversation(id: string): Promise<void>;
   fetchVisionModels(req: { baseUrl: string; apiKey: string }): Promise<{ success: boolean; models?: string[]; error?: string }>;
+  captureRegion(rect: { x1: number; y1: number; x2: number; y2: number }): Promise<string>;
+  onRefocusInput(cb: () => void): () => void;
 };

@@ -56,7 +56,7 @@ export function placeholderForState(state: UiState, readiness: BackendReadiness)
   if (state === 'submitting') return 'Connecting...';
   if (state === 'streaming') return 'Ask a follow-up...';
   if (state === 'failed') return 'Try again...';
-  return 'Input text...';
+  return 'Ask something...';
 }
 
 export function backendLabel(backend: AgentBackendId): string {

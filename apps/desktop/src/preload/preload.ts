@@ -38,7 +38,9 @@ const api: DesktopApi = {
   getConversations: () => ipcRenderer.invoke(OMP_CHANNELS.GetConversations),
   getConversation: (id) => ipcRenderer.invoke(OMP_CHANNELS.GetConversation, id),
   deleteConversation: (id) => ipcRenderer.invoke(OMP_CHANNELS.DeleteConversation, id),
-  fetchVisionModels: (req) => ipcRenderer.invoke(OMP_CHANNELS.FetchVisionModels, req)
+  fetchVisionModels: (req) => ipcRenderer.invoke(OMP_CHANNELS.FetchVisionModels, req),
+  captureRegion: (rect) => ipcRenderer.invoke(OMP_CHANNELS.CaptureRegion, rect),
+  onRefocusInput: (cb) => on<void>(OMP_CHANNELS.RefocusInput, () => cb())
 };
 
 contextBridge.exposeInMainWorld('openMagicPointer', api);

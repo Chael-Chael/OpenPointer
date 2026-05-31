@@ -38,12 +38,33 @@ import { HistoryPanel } from './components/HistoryPanel';
 
 const initialCursor: CursorPayload = { x: 300, y: 300, localX: 300, localY: 300, displayId: 0, dpr: 1 };
 
+const ImageIcon = () => (
+  <svg className="w-3.5 h-3.5 text-white/90 animate-elastic-pop" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+  </svg>
+);
+
+const TargetIcon = () => (
+  <svg className="w-3.5 h-3.5 text-white/90 animate-elastic-pop" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M15.042 21.672L13.684 16.6m0 0l-2.51 2.225.569-9.47 5.227 7.917-3.286-.672zM12 2.25V4.5m0 0a7.5 7.5 0 100 15 7.5 7.5 0 000-15zm0 0V2.25m0 4.5V3" />
+  </svg>
+);
+
 export function App() {
   const [cursor, setCursor] = useState<CursorPayload>(initialCursor);
   const [hold, setHold] = useState<HoldProgressPayload | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const pillWidth = clampNumber(settings?.pillWidth, 280, 900, 520);
-  const pillHeight = clampNumber(settings?.pillHeight, 36, 96, 44);
+  const pillHeight = clampNumber(settings?.pillHeight, 24, 96, 30);
+
+  // Dynamic sizing responsive to pillHeight
+  const menuSize = Math.max(20, Math.min(32, pillHeight - 6));
+  const progressSize = Math.max(16, Math.min(28, pillHeight - 8));
+  const inputFontSize = Math.max(12, Math.min(14, pillHeight - 12));
+  const gap = Math.max(8, Math.min(24, pillHeight - 12));
+  const padY = Math.max(2, Math.min(8, (pillHeight - menuSize) / 2));
+  const padXRight = Math.max(8, Math.min(12, pillHeight / 3));
+  const padXLeft = Math.max(12, Math.min(24, pillHeight / 1.5));
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [secretDrafts, setSecretDrafts] = useState<SecretDrafts>(emptySecretDrafts);
   const [clearSecrets, setClearSecrets] = useState<ClearSecretFlags>(emptyClearSecretFlags);
@@ -71,6 +92,34 @@ export function App() {
   const [panelResizeDrag, setPanelResizeDrag] = useState<{ startY: number; startHeight: number } | null>(null);
   const [thinkingTime, setThinkingTime] = useState<number>(0);
   const [showTools, setShowTools] = useState<boolean>(false);
+  const [showPreview, setShowPreview] = useState(false);
+  const [selectionImg, setSelectionImg] = useState<string | null>(null);
+  const selectionRef = useRef<SelectionRect | null>(null);
+  selectionRef.current = selection;
+
+  const updateSelectionImage = useRef((rect: SelectionRect | null) => {
+    if (!rect) {
+      setSelectionImg(null);
+      return;
+    }
+    const width = Math.abs(rect.x2 - rect.x1);
+    const height = Math.abs(rect.y2 - rect.y1);
+    if (width <= 0 || height <= 0) {
+      setSelectionImg(null);
+      return;
+    }
+    window.openMagicPointer.captureRegion({
+      x1: rect.x1,
+      y1: rect.y1,
+      x2: rect.x2,
+      y2: rect.y2
+    }).then((imgBase64) => {
+      setSelectionImg(imgBase64 || null);
+    }).catch(() => {
+      setSelectionImg(null);
+    });
+  });
+
   const thinkingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const thinkingStartRef = useRef<number>(0);
   const streamPanelRef = useRef<HTMLDivElement | null>(null);
@@ -246,6 +295,7 @@ export function App() {
       setHistoryOpen(false);
       setDetached(false);
       setSelection(null);
+      setSelectionImg(null);
       setCuaEntities([]);
       setHoveredCuaEntityId(null);
       setSelectedCuaEntityId(null);
@@ -307,7 +357,7 @@ export function App() {
     // and sending setInteractive(false) here would immediately undo that,
     // breaking keyboard focus.  Only start managing the state after the
     // delayed RefocusInput signal has arrived.
-    let lastInteractive: boolean = refocusReceivedRef.current;
+    let lastInteractive = false;
 
     // We want to force interactive mode if dragging/selecting/detached etc.
     const forceInteractive = active && (detached || menuOpen || settingsOpen || historyOpen || Boolean(selection) || selecting || Boolean(selectionDrag) || Boolean(panelResizeDrag));
@@ -383,17 +433,13 @@ export function App() {
         return;
       }
       if (!active) return;
-      setDetached((d) => {
-        if (d) {
-          // Reattach shell position.
-          setDetachedPos(null);
-          setSelection(null);
-          return false;
-        }
-        const c = cursorRef.current;
-        setDetachedPos(computeShellPosition(c.localX, c.localY));
-        return true;
-      });
+      // Right-click only enters non-follow (detached) mode from follow mode.
+      // Once detached, right-click is disabled. Re-entering follow mode (via Esc)
+      // disables right-click again.
+      if (detached) return;
+      const c = cursorRef.current;
+      setDetachedPos(computeShellPosition(c.localX, c.localY));
+      setDetached(true);
     }
     window.addEventListener('keydown', onKeyDown, { capture: true });
     window.addEventListener('contextmenu', onContextMenu, { capture: true });
@@ -401,7 +447,7 @@ export function App() {
       window.removeEventListener('keydown', onKeyDown, { capture: true });
       window.removeEventListener('contextmenu', onContextMenu, { capture: true });
     };
-  }, [active, menuOpen, selecting, selectionDrag]);
+  }, [active, detached, menuOpen, selecting, selectionDrag]);
 
   // Live-update selection rectangle while selecting (cursor comes via IPC)
   useEffect(() => {
@@ -422,6 +468,9 @@ export function App() {
       setSelectionOrigin(null);
       setDetachedPos(null); // Unfreeze shell, resume following
       // selection rect stays visible until submit or dismissed
+      if (selectionRef.current) {
+        updateSelectionImage.current(selectionRef.current);
+      }
       window.setTimeout(() => focusPromptInput(inputRef.current), 0);
     }
     window.addEventListener('mouseup', onMouseUp);
@@ -436,6 +485,9 @@ export function App() {
     }
     function onMouseUp() {
       setSelectionDrag(null);
+      if (selectionRef.current) {
+        updateSelectionImage.current(selectionRef.current);
+      }
       window.setTimeout(() => focusPromptInput(inputRef.current), 0);
     }
     window.addEventListener('mousemove', onMouseMove);
@@ -540,6 +592,7 @@ export function App() {
     [cursor.localX, cursor.localY, pillWidth, pillHeight, hasPanel]
   );
   const effectiveShellPos = detachedPos ?? shellPosition;
+  const shouldUseLagFollow = active && !detachedPos && !pillDrag && !panelResizeDrag && !selecting && !selectionDrag;
   const transcript = useMemo(() => events.filter((event) => event.type === 'assistant.delta').map((event) => event.text).join(''), [events]);
   const readiness = useMemo(() => backendReadiness(settings, backend), [backend, settings]);
   const draftAwareSettings = useMemo(() => settings
@@ -650,6 +703,7 @@ export function App() {
       : undefined;
     const selectedEntity = selectedCuaEntityId ? cuaEntities.find((entity) => entity.id === selectedCuaEntityId) : undefined;
     setSelection(null);
+    setSelectionImg(null);
     setSelectedCuaEntityId(null);
     setHoveredCuaEntityId(null);
     // Clear the composer now that the message has been sent, so its text does
@@ -811,6 +865,7 @@ export function App() {
     event.preventDefault();
     event.stopPropagation();
     setSelection(null);
+    setSelectionImg(null);
     setSelectionDrag(null);
     setSelectedCuaEntityId(null);
     window.setTimeout(() => focusPromptInput(inputRef.current), 0);
@@ -841,6 +896,12 @@ export function App() {
     return 'none';
   }, [captureActivity.active, captureActivity.withCua, cuaEntities.length]);
 
+  const glowFillColor = useMemo(() => {
+    if (pointerActivity === 'capture') return '#8b5cf6';
+    if (pointerActivity === 'cua' || pointerActivity === 'both') return '#14b8a6';
+    return '#0D6FFF';
+  }, [pointerActivity]);
+
   return (
     <div className={`fixed inset-0 text-ink pointer-events-none${detached ? ' pointer-events-auto cursor-crosshair' : ''}${selecting ? ' cursor-crosshair' : ''}`}>
       {hold?.state === 'holding' && <HoldRing cursor={hold.cursor} progress={hold.progress} />}
@@ -848,7 +909,35 @@ export function App() {
       {active && (
         <>
           <CursorTrail x={cursor.localX} y={cursor.localY} enabled={active} />
-          <div className={`cursor-glow state-${state} activity-${pointerActivity}`} style={{ left: cursor.localX - 14, top: cursor.localY - 14 }} />
+          <svg
+            className="absolute pointer-events-none z-0 animate-glow-breathe"
+            style={{
+              left: cursor.localX - 40,
+              top: cursor.localY - 40,
+              width: 80,
+              height: 80,
+            }}
+            viewBox="0 0 80 80"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <g filter="url(#filter0_f_42_128)">
+              <circle
+                cx="40"
+                cy="40"
+                r="14"
+                fill={glowFillColor}
+                style={{ transition: 'fill 160ms ease' }}
+              />
+            </g>
+            <defs>
+              <filter id="filter0_f_42_128" x="0" y="0" width="80" height="80" filterUnits="userSpaceOnUse" colorInterpolationFilters="sRGB">
+                <feFlood floodOpacity="0" result="BackgroundImageFix" />
+                <feBlend mode="normal" in="SourceGraphic" in2="BackgroundImageFix" result="shape" />
+                <feGaussianBlur stdDeviation="6.75" result="effect1_foregroundBlur_42_128" />
+              </filter>
+            </defs>
+          </svg>
 
           {highlightedCuaEntity?.bbox && (
             <div
@@ -901,191 +990,356 @@ export function App() {
           )}
 
           <section
-            className={`absolute left-0 top-0 pointer-events-auto will-change-transform w-[min(var(--pill-width,520px),calc(100vw-32px))] state-${state}${selecting ? ' is-selecting' : ''}`}
+            className={`absolute left-0 top-0 ${selecting ? 'pointer-events-none' : 'pointer-events-auto'} will-change-transform w-[min(var(--pill-width,520px),calc(100vw-32px))] state-${state}${selecting ? ' is-selecting' : ''}`}
             style={{
               transform: `translate3d(${effectiveShellPos.x}px, ${effectiveShellPos.y}px, 0)`,
+              transition: shouldUseLagFollow ? 'transform 180ms cubic-bezier(0.22, 1, 0.36, 1)' : 'none',
               '--pill-width': `${pillWidth}px`,
               '--pill-height': `${pillHeight}px`
             } as CSSProperties}
           >
-            {/* Blur glow layer — always matches pill shape/size */}
-            <div className="absolute inset-0 rounded-full bg-[rgba(13,111,255,0.56)] blur-[23.9px] z-0 pointer-events-none" />
-
-            <div className="command-bubble relative z-4 flex items-start gap-6 min-h-[var(--pill-height,36px)] py-3 pr-6 pl-3 rounded-full bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] animate-bubble-pop origin-left" onMouseDown={onPillMouseDown}>
-              <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
-              <button className="bubble-menu shrink-0 grid place-items-center w-8 h-8 rounded-full text-white/70 bg-transparent text-lg leading-none tracking-[1px] hover:bg-white/10 hover:text-white active:scale-95 transition-all duration-160 relative z-1" title="Menu" onClick={() => setMenuOpen(!menuOpen)} aria-label="Menu">
-                ···
-              </button>
-
-              <textarea
-                ref={inputRef}
-                autoFocus
-                className="bubble-input"
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setSettingsOpen(false);
-                    window.openMagicPointer.cancelRun();
-                    window.openMagicPointer.deactivate();
-                    return;
-                  }
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    void submit();
-                  }
-                }}
-                placeholder={placeholderForState(state, readiness)}
-                rows={1}
-              />
-
-              {active && (
+            {/* Hover Preview Box */}
+            {showPreview && (selection || selectedCuaEntityId) && (
+              <div className="absolute bottom-[calc(100%+10px)] left-3 z-10 animate-fade-up pointer-events-none w-max">
                 <div
-                  className="context-progress-wrapper relative w-7 h-7 flex items-center justify-center ml-2 shrink-0 cursor-help select-none"
-                  style={{ '--ring-color': ringColor } as CSSProperties}
-                  title={`Context window: ${estimatedUsedTokens} / ${contextLimit} tokens used (${Math.round(remainingFraction * 100)}% remaining)`}
+                  className="relative overflow-hidden flex flex-col bg-[rgba(13,111,255,0.92)] backdrop-blur-[15px] border border-white/20 shadow-[0_12px_40px_rgba(0,0,0,0.25)] p-3.5 rounded-[16px] text-white min-w-[200px] max-w-[320px]"
+                  style={{
+                    boxShadow: 'inset 2px 3px 3px -3px rgba(255,255,255,0.6), 0 12px 40px rgba(0,0,0,0.25)',
+                  }}
                 >
-                  <svg className="w-full h-full" viewBox="0 0 32 32">
-                    <circle className="ring-track" cx="16" cy="16" r="10" />
-                    <circle
-                      className="ring-progress"
-                      cx="16"
-                      cy="16"
-                      r="10"
-                      strokeDasharray={62.8}
-                      strokeDashoffset={62.8 * (1 - remainingFraction)}
-                    />
-                  </svg>
-                  <span className="context-progress-text absolute text-[8px] font-bold text-white/70 tabular-nums">{Math.round(remainingFraction * 100)}%</span>
-                </div>
-              )}
-
-              {menuOpen && (
-                <div className="bubble-dropdown absolute top-[calc(100%+6px)] left-0 min-w-[200px] p-1.5 border border-glass-border rounded-[14px] bg-glass-bg-solid backdrop-blur-[40px] backdrop-saturate-180 shadow-[0_8px_32px_rgba(0,0,0,0.10)] animate-dropdown-appear z-10">
-                  <button className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140" onClick={startVoice}>
-                    <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">🎤</span>
-                    Voice input
-                  </button>
-                  <div className="h-px mx-2 my-1 bg-black/[0.06]" />
-                  <label className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140">
-                    <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">⚡</span>
-                    <select className="flex-1 min-w-0 h-7 border border-glass-border rounded-lg px-2 bg-white/80 text-ink text-xs font-medium" value={backend} onChange={(event) => setBackend(event.target.value as AgentBackendId)} title="Agent backend">
-                      {selectableBackends.map((item) => <option key={item} value={item}>{backendLabel(item)}</option>)}
-                    </select>
-                  </label>
-                  <button className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140" onClick={() => {
-                    setMenuOpen(false);
-                    setConversationId(null);
-                    setHistoryTurns([]);
-                    setEvents([]);
-                    setPrompt('');
-                  }}>
-                    <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">✨</span>
-                    New Conversation
-                  </button>
-                  <button className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140" onClick={() => {
-                    setMenuOpen(false);
-                    setHistoryOpen(true);
-                    window.openMagicPointer.getConversations().then(setConversationsList);
-                  }}>
-                    <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">🕒</span>
-                    History
-                  </button>
-                  <button className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140" onClick={() => {
-                    setMenuOpen(false);
-                    setSettingsOpen(true);
-                  }}>
-                    <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">⚙</span>
-                    Settings
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Capability indicators — only visible when backend detects capabilities */}
-            {(capabilities.hasSkills || capabilities.hasMcp || capabilities.hasCua) && (
-              <div className="flex items-center gap-1.5 mt-2 ml-2 animate-fade-up">
-                {capabilities.hasSkills && <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(52,199,89,0.12)] text-success">Skills</span>}
-                {capabilities.hasMcp && <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(255,59,48,0.10)] text-danger">MCP</span>}
-                {capabilities.hasCua && <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(255,204,0,0.15)] text-warning">CUA</span>}
-              </div>
-            )}
-
-            {(state !== 'composing' || historyTurns.length > 0 || conversationId) && (
-              <div className={`stream-panel scrollbar-thin${detached ? ' dark:scrollbar-thin' : ''}`} style={streamPanelStyle} ref={streamPanelRef}>
-                <div className="flex justify-between gap-2.5 text-muted text-[11px] font-semibold uppercase tracking-[0.02em]">
-                  <span>{backendLabel(backend)}</span>
-                  <span>{statusLabel(state)}</span>
-                </div>
-                <div className="flex flex-col gap-4 mt-2.5 w-full">
-                  {historyTurns.map((turn) => {
-                    if (turn.role === 'user') {
-                      return (
-                        <div key={turn.id} className="flex flex-col w-full items-end">
-                          <div className="user-bubble max-w-[85%] bg-black/[0.05] rounded-[16px_16px_0_16px] py-2.5 px-3.5 text-sm leading-[1.45] text-ink break-words whitespace-pre-wrap shadow-[0_1px_2px_rgba(0,0,0,0.03)] dark:bg-white/[0.08]">{turn.text}</div>
+                  <div className="absolute inset-0 bg-white/5 pointer-events-none rounded-[inherit]" />
+                  
+                  {selection ? (
+                    <div className="flex flex-col gap-1.5 z-1">
+                      <div className="flex items-center gap-2 border-b border-white/10 pb-1.5 mb-1">
+                        <span className="text-base leading-none">🖼️</span>
+                        <span className="text-xs font-bold uppercase tracking-wider text-white/90">区域截图附件</span>
+                      </div>
+                      
+                      {selectionImg && (
+                        <div className="relative w-full h-24 rounded-[8px] overflow-hidden border border-white/10 mb-1.5 bg-black/25 flex items-center justify-center">
+                          <img
+                            src={selectionImg}
+                            alt="Screenshot region preview"
+                            className="max-w-full max-h-full object-contain"
+                          />
                         </div>
-                      );
-                    } else {
-                      return (
-                        <div key={turn.id} className="flex flex-col w-full items-start">
-                          <article className="agent-text text-sm markdown-body">
-                            <MarkdownRenderer value={turn.text} />
-                          </article>
-                        </div>
-                      );
-                    }
-                  })}
+                      )}
 
-                  {/* Active turn streaming/thinking */}
-                  {((historyTurns.length === 0 && (state === 'submitting' || state === 'streaming' || state === 'approval')) ||
-                    (historyTurns.length > 0 && historyTurns[historyTurns.length - 1]?.role === 'user')) && (
-                    <div className="flex flex-col w-full items-start">
-                      {/* Thinking Block */}
-                      {thinkingTime > 0 && (
-                        <div className="my-2.5 flex flex-col items-start w-full">
-                          <div
-                            className={`inline-flex items-center gap-1.5 cursor-pointer select-none text-xs font-semibold text-muted py-1 px-2 rounded-[10px] bg-black/[0.03] hover:bg-black/[0.06] hover:text-ink transition-all duration-150 dark:bg-white/[0.04] dark:hover:bg-white/[0.08]${showTools ? ' [&>.arrow]:rotate-90' : ''}`}
-                            onClick={() => setShowTools(!showTools)}
-                          >
-                            <span>已思考 {thinkingTime}s</span>
-                            <span className="arrow inline-block text-[8px] rotate-0 transition-transform duration-150 leading-none">▶</span>
+                      <div className="flex flex-col gap-1.5 text-[11px] text-white/80 font-mono">
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-white/50">尺寸:</span>
+                          <span className="font-bold text-white">{selection.x2 - selection.x1}px × {selection.y2 - selection.y1}px</span>
+                        </div>
+                        <div className="flex justify-between border-b border-white/5 pb-1">
+                          <span className="text-white/50">起点:</span>
+                          <span>X: {selection.x1}, Y: {selection.y1}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-white/50">终点:</span>
+                          <span>X: {selection.x2}, Y: {selection.y2}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    highlightedCuaEntity && (
+                      <div className="flex flex-col gap-1.5 z-1">
+                        <div className="flex items-center gap-2 border-b border-white/10 pb-1.5 mb-1">
+                          <span className="text-base leading-none">🎯</span>
+                          <span className="text-xs font-bold uppercase tracking-wider text-white/90">UI 元素附件</span>
+                        </div>
+                        <div className="flex flex-col gap-1.5 text-[11px] text-white/80 font-mono">
+                          <div className="flex justify-between gap-4 border-b border-white/5 pb-1">
+                            <span className="text-white/50 shrink-0">角色:</span>
+                            <span className="font-bold text-white capitalize bg-white/10 px-1.5 py-0.5 rounded text-[10px]">{highlightedCuaEntity.role || '未知 UI'}</span>
                           </div>
-                          {showTools && (
-                            <div className="mt-1.5 pl-3 border-l-2 border-black/[0.06] w-full dark:border-white/10">
-                              {discovery && <p className="tool-discovery mt-2.5 text-muted text-[13px] leading-relaxed">{discovery.message}</p>}
-                              {toolEvents.length > 0 && <ToolRows events={toolEvents} />}
+                          {highlightedCuaEntity.text && (
+                            <div className="flex flex-col gap-1 border-b border-white/5 pb-1">
+                              <span className="text-white/50 text-[10px]">文本内容:</span>
+                              <span className="font-medium bg-white/5 p-1.5 rounded text-[10px] break-all leading-normal text-left text-white/95 max-h-[80px] overflow-y-auto scrollbar-thin">
+                                "{highlightedCuaEntity.text}"
+                              </span>
+                            </div>
+                          )}
+                          {highlightedCuaEntity.bbox && (
+                            <div className="flex flex-col gap-1">
+                              <div className="flex justify-between border-b border-white/5 pb-1">
+                                <span className="text-white/50">大小:</span>
+                                <span className="text-white">{Math.round(highlightedCuaEntity.bbox.width)} × {Math.round(highlightedCuaEntity.bbox.height)} px</span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span className="text-white/50">位置:</span>
+                                <span>X: {Math.round(highlightedCuaEntity.bbox.x)}, Y: {Math.round(highlightedCuaEntity.bbox.y)}</span>
+                              </div>
                             </div>
                           )}
                         </div>
-                      )}
-
-                      {/* Streaming Markdown Response */}
-                      {transcript && (
-                        <article className="agent-text text-sm markdown-body">
-                          <MarkdownRenderer value={transcript} />
-                        </article>
-                      )}
-
-                      {/* Other active states */}
-                      {approval && (
-                        <div className="approval-box mt-3 border border-[rgba(139,92,246,0.15)] rounded-[10px] bg-[rgba(139,92,246,0.04)] p-3">
-                          <strong className="text-ink text-[13px]">{approval.tool ?? 'Agent'} requests approval</strong>
-                          <p className="mt-2.5 text-[13px] leading-relaxed text-[#3c3c43]">{approval.reason}</p>
-                          <div className="flex gap-2 mt-2.5">
-                            <button className="approval-button" onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'approve')}>Allow</button>
-                            <button className="approval-button" onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'deny')}>Deny</button>
-                          </div>
-                        </div>
-                      )}
-                      {latestFailure && <p className="text-danger text-[13px] leading-relaxed mt-2.5">{latestFailure.error}</p>}
-                    </div>
+                      </div>
+                    )
                   )}
                 </div>
-                {detached && (
-                  <div className="resize-grip" onMouseDown={onResizeMouseDown} />
+              </div>
+            )}
+
+            {/* Unified Glow Layer — wraps both input and panel if open */}
+            <div
+              className="absolute inset-0 z-0 pointer-events-none animate-pill-unfold-geometry origin-left"
+              style={{
+                borderRadius: hasPanel ? '24px' : `${pillHeight / 2}px`,
+                transition: 'border-radius 260ms cubic-bezier(0.16, 1, 0.3, 1)',
+              }}
+            >
+              <div className="absolute inset-0 rounded-[inherit] bg-[rgba(13,111,255,0.56)] blur-[23.9px] animate-pill-glow" />
+            </div>
+
+            {/* Unified Card Container */}
+            <div
+              className="relative z-4 overflow-hidden flex flex-col bg-[rgba(13,111,255,0.85)] backdrop-blur-[15px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] animate-pill-unfold origin-left"
+              style={{
+                borderRadius: hasPanel ? '20px' : `${pillHeight / 2}px`,
+                border: hasPanel ? '1px solid rgba(255, 255, 255, 0.15)' : 'none',
+                transition: 'border-radius 260ms cubic-bezier(0.16, 1, 0.3, 1)',
+              }}
+            >
+              {/* Input Area (Command Bubble) */}
+              <div
+                className="command-bubble flex items-center bg-transparent relative"
+                style={{
+                  minHeight: `${pillHeight}px`,
+                  gap: `${gap}px`,
+                  paddingTop: `${padY}px`,
+                  paddingBottom: `${padY}px`,
+                  paddingRight: `${padXRight}px`,
+                  paddingLeft: `${padXLeft}px`,
+                }}
+                onMouseDown={onPillMouseDown}
+              >
+                <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
+                
+                {/* Context Attachment Icon — rendered before input area */}
+                {(selection || selectedCuaEntityId) && (
+                  <div
+                    className="relative flex items-center justify-center rounded-full shrink-0 bg-white/10 hover:bg-white/20 border border-white/10 transition-all duration-150 cursor-pointer group animate-elastic-pop z-1"
+                    style={{
+                      width: `${menuSize}px`,
+                      height: `${menuSize}px`,
+                    }}
+                    onMouseEnter={() => setShowPreview(true)}
+                    onMouseLeave={() => setShowPreview(false)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setShowPreview(false);
+                      if (selection) {
+                        setSelection(null);
+                        setSelectionDrag(null);
+                      }
+                      if (selectedCuaEntityId) {
+                        setSelectedCuaEntityId(null);
+                      }
+                      window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+                    }}
+                    title="点击清除附件 / Click to clear attachment"
+                  >
+                    {selection ? <ImageIcon /> : <TargetIcon />}
+                    
+                    {/* Hover subtle red "x" overlay */}
+                    <div className="absolute inset-0 flex items-center justify-center bg-red-500/90 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                      <span className="text-[10px] font-bold text-white leading-none">×</span>
+                    </div>
+                  </div>
                 )}
+
+                <textarea
+                  ref={inputRef}
+                  autoFocus
+                  className="bubble-input"
+                  style={{
+                    fontSize: `${inputFontSize}px`,
+                    lineHeight: '1.4',
+                    minHeight: `${Math.max(16, pillHeight - 12)}px`,
+                  }}
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setSettingsOpen(false);
+                      window.openMagicPointer.cancelRun();
+                      window.openMagicPointer.deactivate();
+                      return;
+                    }
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                      event.preventDefault();
+                      void submit();
+                    }
+                  }}
+                  placeholder={placeholderForState(state, readiness)}
+                  rows={1}
+                />
+
+                <button
+                  className="bubble-menu shrink-0 grid place-items-center rounded-full text-white/70 bg-transparent leading-none tracking-[1px] hover:bg-white/10 hover:text-white active:scale-95 transition-all duration-160 relative z-1 cursor-pointer"
+                  style={{
+                    width: `${menuSize}px`,
+                    height: `${menuSize}px`,
+                    fontSize: `${Math.max(10, Math.min(18, menuSize - 4))}px`,
+                  }}
+                  title="Menu"
+                  onMouseDown={(event) => {
+                    event.stopPropagation();
+                    event.preventDefault();
+                    setMenuOpen(!menuOpen);
+                  }}
+                  aria-label="Menu"
+                >
+                  ···
+                </button>
+
+                {menuOpen && (
+                  <div className="bubble-dropdown absolute top-[calc(100%+6px)] right-[12px] min-w-[200px] p-1.5 border border-white/20 rounded-[14px] bg-[rgba(13,111,255,0.92)] backdrop-blur-[15px] shadow-[0_8px_32px_rgba(0,0,0,0.15)] animate-dropdown-appear z-10">
+                    <button className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-white/90 text-[13px] font-medium text-left cursor-pointer hover:bg-white/10 hover:text-white transition-colors duration-140" onClick={startVoice}>
+                      <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">🎤</span>
+                      Voice input
+                    </button>
+                    <div className="h-px mx-2 my-1 bg-white/15" />
+                    <label className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-white/90 text-[13px] font-medium text-left cursor-pointer hover:bg-white/10 hover:text-white transition-colors duration-140">
+                      <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">⚡</span>
+                      <select className="flex-1 min-w-0 h-7 border border-white/15 rounded-lg px-2 bg-white/10 text-white text-xs font-medium outline-none cursor-pointer focus:border-white/30 [&>option]:bg-[#0d6fff] [&>option]:text-white" value={backend} onChange={(event) => setBackend(event.target.value as AgentBackendId)} title="Agent backend">
+                        {selectableBackends.map((item) => <option key={item} value={item}>{backendLabel(item)}</option>)}
+                      </select>
+                    </label>
+                    <button className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-white/90 text-[13px] font-medium text-left cursor-pointer hover:bg-white/10 hover:text-white transition-colors duration-140" onClick={() => {
+                      setMenuOpen(false);
+                      setConversationId(null);
+                      setHistoryTurns([]);
+                      setEvents([]);
+                      setPrompt('');
+                    }}>
+                      <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">✨</span>
+                      New Conversation
+                    </button>
+                    <button className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-white/90 text-[13px] font-medium text-left cursor-pointer hover:bg-white/10 hover:text-white transition-colors duration-140" onClick={() => {
+                      setMenuOpen(false);
+                      setHistoryOpen(true);
+                      window.openMagicPointer.getConversations().then(setConversationsList);
+                    }}>
+                      <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">🕒</span>
+                      History
+                    </button>
+                    <button className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-white/90 text-[13px] font-medium text-left cursor-pointer hover:bg-white/10 hover:text-white transition-colors duration-140" onClick={() => {
+                      setMenuOpen(false);
+                      setSettingsOpen(true);
+                    }}>
+                      <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">⚙</span>
+                      Settings
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Faint Horizontal Divider Line */}
+              {hasPanel && (
+                <div className="h-px w-full bg-white/15 shrink-0" />
+              )}
+
+              {/* Conversation Stream Panel */}
+              {hasPanel && (
+                <div
+                  className={`stream-panel-unified scrollbar-thin flex-grow overflow-y-auto w-full`}
+                  style={{
+                    ...streamPanelStyle,
+                    background: 'transparent',
+                    border: 'none',
+                    boxShadow: 'none',
+                    padding: '16px',
+                    borderRadius: '0',
+                    margin: '0',
+                  }}
+                  ref={streamPanelRef}
+                >
+                  <div className="flex justify-between gap-2.5 text-white/50 text-[10px] font-bold uppercase tracking-[0.04em] mb-3">
+                    <span>{backendLabel(backend)}</span>
+                    <span>{statusLabel(state)}</span>
+                  </div>
+                  <div className="flex flex-col gap-4 mt-2.5 w-full">
+                    {historyTurns.map((turn) => {
+                      if (turn.role === 'user') {
+                        return (
+                          <div key={turn.id} className="flex flex-col w-full items-end">
+                            <div className="user-bubble max-w-[85%] bg-white/10 border border-white/5 rounded-[16px_16px_0_16px] py-2 px-3 text-sm leading-[1.4] text-white break-words whitespace-pre-wrap shadow-[0_2px_8px_rgba(0,0,0,0.05)]">
+                              {turn.text}
+                            </div>
+                          </div>
+                        );
+                      } else {
+                        return (
+                          <div key={turn.id} className="flex flex-col w-full items-start text-white/90">
+                            <article className="agent-text text-sm markdown-body w-full">
+                              <MarkdownRenderer value={turn.text} />
+                            </article>
+                          </div>
+                        );
+                      }
+                    })}
+
+                    {/* Active turn streaming/thinking */}
+                    {((historyTurns.length === 0 && (state === 'submitting' || state === 'streaming' || state === 'approval')) ||
+                      (historyTurns.length > 0 && historyTurns[historyTurns.length - 1]?.role === 'user')) && (
+                      <div className="flex flex-col w-full items-start text-white/90">
+                        {/* Thinking Block */}
+                        {thinkingTime > 0 && (
+                          <div className="my-2.5 flex flex-col items-start w-full">
+                            <div
+                              className={`inline-flex items-center gap-1.5 cursor-pointer select-none text-xs font-semibold text-white/60 py-1 px-2 rounded-[10px] bg-white/5 border border-white/5 hover:bg-white/10 hover:text-white transition-all duration-150${showTools ? ' [&>.arrow]:rotate-90' : ''}`}
+                              onClick={() => setShowTools(!showTools)}
+                            >
+                              <span>已思考 {thinkingTime}s</span>
+                              <span className="arrow inline-block text-[8px] rotate-0 transition-transform duration-150 leading-none">▶</span>
+                            </div>
+                            {showTools && (
+                              <div className="mt-1.5 pl-3 border-l-2 border-white/15 w-full">
+                                {discovery && <p className="tool-discovery mt-2.5 text-white/60 text-[13px] leading-relaxed">{discovery.message}</p>}
+                                {toolEvents.length > 0 && <ToolRows events={toolEvents} />}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Streaming Markdown Response */}
+                        {transcript && (
+                          <article className="agent-text text-sm markdown-body w-full">
+                            <MarkdownRenderer value={transcript} />
+                          </article>
+                        )}
+
+                        {/* Other active states */}
+                        {approval && (
+                          <div className="approval-box mt-3 border border-[rgba(255,255,255,0.15)] rounded-[10px] bg-white/5 p-3 w-full">
+                            <strong className="text-white text-[13px]">{approval.tool ?? 'Agent'} requests approval</strong>
+                            <p className="mt-2.5 text-[13px] leading-relaxed text-white/80">{approval.reason}</p>
+                            <div className="flex gap-2 mt-2.5">
+                              <button className="approval-button px-3 py-1.5 rounded-full bg-white/10 text-white text-xs font-semibold hover:bg-white/20 active:scale-95 transition-all" onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'approve')}>Allow</button>
+                              <button className="approval-button px-3 py-1.5 rounded-full bg-white/10 text-white text-xs font-semibold hover:bg-white/20 active:scale-95 transition-all" onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'deny')}>Deny</button>
+                            </div>
+                          </div>
+                        )}
+                        {latestFailure && <p className="text-red-400 text-[13px] leading-relaxed mt-2.5">{latestFailure.error}</p>}
+                      </div>
+                    )}
+                  </div>
+                  {detached && (
+                    <div className="resize-grip" onMouseDown={onResizeMouseDown} />
+                  )}
+                </div>
+              )}
+            </div>
+            {/* Capability indicators — only visible when backend detects capabilities */}
+            {(capabilities.hasSkills || capabilities.hasMcp || capabilities.hasCua) && (
+              <div className="flex items-center gap-1.5 mt-2 ml-2">
+                {capabilities.hasSkills && <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(52,199,89,0.12)] text-success animate-elastic-pop">Skills</span>}
+                {capabilities.hasMcp && <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(255,59,48,0.10)] text-danger animate-elastic-pop">MCP</span>}
+                {capabilities.hasCua && <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(255,204,0,0.15)] text-warning animate-elastic-pop">CUA</span>}
               </div>
             )}
           </section>

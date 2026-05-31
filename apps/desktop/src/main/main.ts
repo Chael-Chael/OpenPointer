@@ -20,6 +20,7 @@ import { CuaSidecarManager } from './cua-sidecar.js';
 import { loadLocalEnv } from './env.js';
 import { getClaudeAgentApiKey, getCodexApiKey, getHermesApiKey, getLocalVlmApiKey, getOpenCodeApiKey, getSettings, saveSettings } from './settings.js';
 import { ChatHistoryManager } from './history.js';
+import { forceForeground } from './win-focus.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '../../../..');
@@ -134,6 +135,7 @@ function broadcast(channel: string, payload?: unknown): void {
 }
 
 function activate(cursor = cursorPayload()): void {
+  const wasActive = active;
   active = true;
   lastActivationCursor = cursor;
   const activeWin = windows.get(cursor.displayId);
@@ -145,10 +147,30 @@ function activate(cursor = cursorPayload()): void {
   if (activeWin && !activeWin.isDestroyed()) {
     activeWin.setIgnoreMouseEvents(false);
     activeWin.show();
-    activeWin.focus();
-    activeWin.webContents.focus();
+    if (!wasActive) {
+      activeWin.focus();
+      activeWin.webContents.focus();
+      // Only steal OS-level keyboard focus on the transition from inactive to
+      // active. Re-running this while the user is holding the mouse to start a
+      // region selection can interrupt the drag chain.
+      forceForeground(activeWin);
+    }
   }
   broadcast(OMP_CHANNELS.Activate, cursor);
+  if (!wasActive) {
+    // On Windows, the overlay window may not have settled OS-level keyboard
+    // focus by the time the renderer runs its focus-on-activate logic. Send a
+    // delayed re-focus signal so the textarea can reliably capture keypresses.
+    const target = activeWin;
+    setTimeout(() => {
+      if (target && !target.isDestroyed()) {
+        forceForeground(target);
+        target.focus();
+        target.webContents.focus();
+        target.webContents.send(OMP_CHANNELS.RefocusInput);
+      }
+    }, 100);
+  }
 }
 
 function deactivate(): void {
@@ -317,6 +339,40 @@ function registerIpc(): void {
     if (settings.cuaMode === 'off') return { status: 'fallback', entities: [], error: 'CUA mode is off.' };
     return cuaGrounding.preview(req.cursor, await activeWindowInfo());
   });
+  ipcMain.handle(OMP_CHANNELS.CaptureRegion, async (_event, rect: { x1: number; y1: number; x2: number; y2: number }) => {
+    try {
+      const x = Math.min(rect.x1, rect.x2);
+      const y = Math.min(rect.y1, rect.y2);
+      const width = Math.abs(rect.x2 - rect.x1);
+      const height = Math.abs(rect.y2 - rect.y1);
+      if (width <= 0 || height <= 0) return '';
+      const display = screen.getDisplayMatching({ x, y, width, height });
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: {
+          width: Math.round(display.size.width * display.scaleFactor),
+          height: Math.round(display.size.height * display.scaleFactor)
+        }
+      });
+      const source = sources.find((item) => item.display_id === String(display.id)) ?? sources[0];
+      if (!source || source.thumbnail.isEmpty()) return '';
+      const image = source.thumbnail;
+      const size = image.getSize();
+      const localX = Math.round((x - display.bounds.x) * display.scaleFactor);
+      const localY = Math.round((y - display.bounds.y) * display.scaleFactor);
+      const cropW = Math.round(width * display.scaleFactor);
+      const cropH = Math.round(height * display.scaleFactor);
+      const clampX = Math.max(0, Math.min(size.width - 1, localX));
+      const clampY = Math.max(0, Math.min(size.height - 1, localY));
+      const clampW = Math.max(1, Math.min(size.width - clampX, cropW));
+      const clampH = Math.max(1, Math.min(size.height - clampY, cropH));
+      const jpeg = image.crop({ x: clampX, y: clampY, width: clampW, height: clampH }).toJPEG(85);
+      return `data:image/jpeg;base64,${jpeg.toString('base64')}`;
+    } catch (e) {
+      console.error('Failed to capture region:', e);
+      return '';
+    }
+  });
   ipcMain.handle(OMP_CHANNELS.ApproveAgentRequest, async (_event, id: string, decision: 'approve' | 'deny') => {
     if (cuaBroker.hasPendingApproval(id)) {
       cuaBroker.approve(id, decision);
@@ -396,6 +452,35 @@ async function streamBridgeEvents(
     sender.send(OMP_CHANNELS.AgentEvent, agentEvent);
     if (agentEvent.type === 'run.completed' || agentEvent.type === 'run.failed') sawTerminal = true;
   };
+
+  // --- debug: log the context being sent to the backend ---
+  const ctx = envelope.pointerContext;
+  const debugSummary = {
+    requestId: envelope.requestId,
+    backend: envelope.routing.backend,
+    instruction: envelope.instruction.text.slice(0, 200),
+    mode: envelope.instruction.mode,
+    toolPolicy: envelope.routing.toolPolicy,
+    preferredTools: envelope.routing.preferredTools,
+    requiredCapabilities: envelope.routing.requiredCapabilities,
+    conversationId: envelope.conversationId,
+    historyLength: envelope.history?.length ?? 0,
+    pointerContext: {
+      source: ctx.source,
+      cursor: ctx.cursor,
+      window: ctx.window,
+      target: ctx.target ? { id: ctx.target.id, kind: ctx.target.kind, text: ctx.target.text?.slice(0, 100) } : undefined,
+      entityCount: ctx.entities.length,
+      nearbyCount: ctx.nearby.length,
+      grounding: ctx.grounding,
+      hasVisual: Boolean(ctx.visual?.imageBase64),
+      gesture: ctx.gesture ? { kind: ctx.gesture.kind, pointCount: ctx.gesture.path.length } : undefined
+    },
+    attachments: envelope.attachments.map((a) => ({ type: a.type, mimeType: a.mimeType, hasData: Boolean(a.dataUrl) })),
+    cuaDirective: envelope.cuaDirective ?? null,
+    toolServers: envelope.toolServers ?? null
+  };
+  console.log('[OMP → backend]', JSON.stringify(debugSummary, null, 2));
 
   for await (const agentEvent of bridge.run(envelope, { signal: controller.signal, sessionKey: sessionKeyForContext(envelope.pointerContext) })) {
     if (agentEvent.type === 'run.failed' && agentEvent.recoverable && allowLocalFallback && !emittedStarted) {
