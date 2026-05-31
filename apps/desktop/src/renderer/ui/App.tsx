@@ -22,6 +22,108 @@ import { HoldRing, ToolRows } from './components/fields';
 import { SettingsPanel } from './components/SettingsPanel';
 import { HistoryPanel } from './components/HistoryPanel';
 
+function CameraIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+      <circle cx="12" cy="13" r="4" />
+    </svg>
+  );
+}
+
+function TextIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="16" y1="13" x2="8" y2="13" />
+      <line x1="16" y1="17" x2="8" y2="17" />
+      <polyline points="10 9 9 9 8 9" />
+    </svg>
+  );
+}
+
+function ImageIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <polyline points="21 15 16 10 5 21" />
+    </svg>
+  );
+}
+
+function WindowIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+      <line x1="2" y1="10" x2="22" y2="10" />
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
+    </svg>
+  );
+}
+
+function TargetIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="12" r="6" />
+      <circle cx="12" cy="12" r="2" />
+    </svg>
+  );
+}
+
 const initialCursor: CursorPayload = { x: 300, y: 300, localX: 300, localY: 300, displayId: 0, dpr: 1 };
 
 export function App() {
@@ -79,6 +181,7 @@ export function App() {
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [fetchModelsError, setFetchModelsError] = useState<string | null>(null);
+  const [hoveredAttachment, setHoveredAttachment] = useState<'selection' | 'entity' | null>(null);
 
   async function fetchModels() {
     if (!settings?.localVlmBaseUrl) return;
@@ -932,6 +1035,93 @@ export function App() {
               } as CSSProperties
             }
           >
+            {/* Context attachment preview card */}
+            {hoveredAttachment === 'selection' && selection && (
+              <div className="absolute bottom-[calc(100%+10px)] left-4 z-10 w-[240px] p-3 text-white bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] border border-glass-border rounded-[18px] flex flex-col gap-1.5 pointer-events-none animate-elastic-pop origin-bottom-left">
+                {/* Inner Shadow Layer covering the ENTIRE card, inheriting border-radius */}
+                <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
+                <div className="flex items-center gap-2">
+                  <span className="text-base text-white/90">
+                    <CameraIcon size={15} />
+                  </span>
+                  <div className="flex flex-col">
+                    <span className="text-[12px] font-bold text-white/95 leading-tight">截图区域</span>
+                    <span className="text-[9px] text-white/60 leading-none">Selected Region</span>
+                  </div>
+                </div>
+                <div className="h-px bg-white/12 my-0.5" />
+                <div className="flex flex-col gap-0.5 text-[11px] text-white/85 font-mono">
+                  <div>宽度: {selection.x2 - selection.x1} px</div>
+                  <div>高度: {selection.y2 - selection.y1} px</div>
+                  <div className="text-[9px] text-white/50 mt-0.5">
+                    X: {selection.x1} - {selection.x2}
+                  </div>
+                  <div className="text-[9px] text-white/50">
+                    Y: {selection.y1} - {selection.y2}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {hoveredAttachment === 'entity' && selectedEntity && (
+              <div className="absolute bottom-[calc(100%+10px)] left-4 z-10 w-[280px] p-3 text-white bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] border border-glass-border rounded-[18px] flex flex-col gap-1.5 pointer-events-none animate-elastic-pop origin-bottom-left">
+                {/* Inner Shadow Layer covering the ENTIRE card, inheriting border-radius */}
+                <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
+                <div className="flex items-center gap-2">
+                  <span className="text-base text-white/90">
+                    {selectedEntity.kind === 'text' ? (
+                      <TextIcon size={15} />
+                    ) : selectedEntity.kind === 'image' ? (
+                      <ImageIcon size={15} />
+                    ) : selectedEntity.kind === 'container' ? (
+                      <WindowIcon size={15} />
+                    ) : (
+                      <TargetIcon size={15} />
+                    )}
+                  </span>
+                  <div className="flex flex-col">
+                    <span className="text-[12px] font-bold text-white/95 leading-tight">
+                      {selectedEntity.kind === 'text'
+                        ? '已附带文本'
+                        : selectedEntity.kind === 'image'
+                          ? '已附带图像'
+                          : selectedEntity.kind === 'container'
+                            ? '已附带窗口'
+                            : '已附带元素'}
+                    </span>
+                    <span className="text-[9px] text-white/60 leading-none">Attached Context</span>
+                  </div>
+                </div>
+                <div className="h-px bg-white/12 my-0.5" />
+                <div className="flex flex-col gap-1 text-[11px] text-white/85">
+                  {selectedEntity.name && (
+                    <div>
+                      <span className="text-white/50">名称:</span> {selectedEntity.name}
+                    </div>
+                  )}
+                  {selectedEntity.role && (
+                    <div>
+                      <span className="text-white/50">角色:</span> {selectedEntity.role}
+                    </div>
+                  )}
+                  {selectedEntity.text && (
+                    <div className="max-h-[80px] overflow-hidden text-ellipsis line-clamp-4 bg-white/5 p-1.5 rounded-lg text-white/90 leading-[1.4] select-text pointer-events-auto break-all font-sans">
+                      {selectedEntity.text}
+                    </div>
+                  )}
+                  {selectedEntity.bbox && (
+                    <div className="font-mono text-[9px] text-white/55 mt-1 border-t border-white/5 pt-1">
+                      BBox: {Math.round(selectedEntity.bbox.width)}x{Math.round(selectedEntity.bbox.height)} px
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between text-[9px] text-white/50 mt-1">
+                    <span>来源: {selectedEntity.origin}</span>
+                    <span>置信度: {Math.round(selectedEntity.confidence * 100)}%</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Blur glow layer — always matches pill shape/size */}
             <div
               className="absolute inset-0 bg-[rgba(13,111,255,0.56)] blur-[23.9px] z-0 pointer-events-none animate-pill-glow"
@@ -964,17 +1154,27 @@ export function App() {
                   <div className="flex items-center gap-1.5 shrink-0 select-none">
                     {selection && (
                       <div
-                        className="group relative flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all duration-150 cursor-pointer animate-elastic-pop"
+                        className="group relative flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-[rgba(229,56,59,0.95)] transition-all duration-150 cursor-pointer animate-elastic-pop font-bold"
                         style={{
                           width: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
-                          height: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
-                          fontSize: `${Math.max(10, Math.min(13, pillHeight - 16))}px`
+                          height: `${Math.max(20, Math.min(28, pillHeight - 8))}px`
                         }}
-                        onClick={() => setSelection(null)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelection(null);
+                          setHoveredAttachment(null);
+                        }}
+                        onMouseEnter={() => setHoveredAttachment('selection')}
+                        onMouseLeave={() => setHoveredAttachment(null)}
                         title="Attached: Selected Region (Click to remove)"
                       >
-                        <span>📸</span>
-                        <span className="absolute -top-1 -right-1 hidden group-hover:flex items-center justify-center w-3.5 h-3.5 rounded-full bg-[rgba(229,56,59,0.9)] text-[8px] font-bold text-white shadow-sm">
+                        <span className="group-hover:hidden flex items-center justify-center text-white/90">
+                          <CameraIcon size={Math.max(10, Math.min(13, pillHeight - 14))} />
+                        </span>
+                        <span
+                          className="hidden group-hover:flex items-center justify-center text-white"
+                          style={{ fontSize: `${Math.max(12, Math.min(14, pillHeight - 14))}px` }}
+                        >
                           ×
                         </span>
                       </div>
@@ -982,25 +1182,35 @@ export function App() {
 
                     {selectedEntity && (
                       <div
-                        className="group relative flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all duration-150 cursor-pointer animate-elastic-pop"
+                        className="group relative flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-[rgba(229,56,59,0.95)] transition-all duration-150 cursor-pointer animate-elastic-pop font-bold"
                         style={{
                           width: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
-                          height: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
-                          fontSize: `${Math.max(10, Math.min(13, pillHeight - 16))}px`
+                          height: `${Math.max(20, Math.min(28, pillHeight - 8))}px`
                         }}
-                        onClick={() => setSelectedCuaEntityId(null)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedCuaEntityId(null);
+                          setHoveredAttachment(null);
+                        }}
+                        onMouseEnter={() => setHoveredAttachment('entity')}
+                        onMouseLeave={() => setHoveredAttachment(null)}
                         title={`Attached: ${selectedEntity.kind} - ${selectedEntity.name || selectedEntity.text || 'UI Element'} (Click to remove)`}
                       >
-                        <span>
-                          {selectedEntity.kind === 'text'
-                            ? '📝'
-                            : selectedEntity.kind === 'image'
-                              ? '🖼️'
-                              : selectedEntity.kind === 'container'
-                                ? '💻'
-                                : '🎯'}
+                        <span className="group-hover:hidden flex items-center justify-center text-white/90">
+                          {selectedEntity.kind === 'text' ? (
+                            <TextIcon size={Math.max(10, Math.min(13, pillHeight - 14))} />
+                          ) : selectedEntity.kind === 'image' ? (
+                            <ImageIcon size={Math.max(10, Math.min(13, pillHeight - 14))} />
+                          ) : selectedEntity.kind === 'container' ? (
+                            <WindowIcon size={Math.max(10, Math.min(13, pillHeight - 14))} />
+                          ) : (
+                            <TargetIcon size={Math.max(10, Math.min(13, pillHeight - 14))} />
+                          )}
                         </span>
-                        <span className="absolute -top-1 -right-1 hidden group-hover:flex items-center justify-center w-3.5 h-3.5 rounded-full bg-[rgba(229,56,59,0.9)] text-[8px] font-bold text-white shadow-sm">
+                        <span
+                          className="hidden group-hover:flex items-center justify-center text-white"
+                          style={{ fontSize: `${Math.max(12, Math.min(14, pillHeight - 14))}px` }}
+                        >
                           ×
                         </span>
                       </div>
