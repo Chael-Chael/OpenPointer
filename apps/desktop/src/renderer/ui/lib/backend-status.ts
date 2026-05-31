@@ -19,11 +19,21 @@ export function backendReadiness(settings: AppSettings | null, backend: AgentBac
   }
   if (backend === 'hermes') {
     if (!settings.hermesBaseUrl.trim()) return { configured: false, label: 'Missing config', detail: 'Add a Hermes base URL.', tone: 'missing' };
-    return { configured: true, label: 'Ready', detail: settings.hasHermesApiKey ? 'Base URL and token are configured.' : 'Base URL configured; token optional.', tone: 'ready' };
+    return {
+      configured: true,
+      label: 'Ready',
+      detail: settings.hasHermesApiKey ? 'Base URL and token are configured.' : 'Base URL configured; token optional.',
+      tone: 'ready'
+    };
   }
   if (backend === 'opencode') {
     if (!settings.opencodeBaseUrl.trim()) return { configured: false, label: 'Missing config', detail: 'Add an OpenCode base URL.', tone: 'missing' };
-    return { configured: true, label: 'Ready', detail: settings.hasOpenCodeApiKey ? 'Base URL and token are configured.' : 'Base URL configured; token optional.', tone: 'ready' };
+    return {
+      configured: true,
+      label: 'Ready',
+      detail: settings.hasOpenCodeApiKey ? 'Base URL and token are configured.' : 'Base URL configured; token optional.',
+      tone: 'ready'
+    };
   }
   if (backend === 'claude-agent') {
     if (!settings.claudeAgentEnabled) return { configured: false, label: 'Missing config', detail: 'Claude Agent is disabled.', tone: 'missing' };
@@ -32,7 +42,12 @@ export function backendReadiness(settings: AppSettings | null, backend: AgentBac
   }
   if (backend === 'codex') {
     if (!settings.codexAppServerUrl.trim()) return { configured: false, label: 'Missing config', detail: 'Add a Codex app-server URL.', tone: 'missing' };
-    return { configured: true, label: 'Ready', detail: settings.hasCodexApiKey ? 'Server URL and token are configured.' : 'Server URL configured; token optional.', tone: 'ready' };
+    return {
+      configured: true,
+      label: 'Ready',
+      detail: settings.hasCodexApiKey ? 'Server URL and token are configured.' : 'Server URL configured; token optional.',
+      tone: 'ready'
+    };
   }
   return { configured: true, label: 'Ready', detail: 'Backend is available.', tone: 'ready' };
 }

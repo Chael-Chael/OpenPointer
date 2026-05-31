@@ -18,18 +18,7 @@ type PendingApproval = {
   timeout: NodeJS.Timeout;
 };
 
-const STATE_CHANGING_TOOLS = new Set([
-  'click',
-  'double_click',
-  'right_click',
-  'type_text',
-  'press_key',
-  'hotkey',
-  'scroll',
-  'drag',
-  'set_value',
-  'focus'
-]);
+const STATE_CHANGING_TOOLS = new Set(['click', 'double_click', 'right_click', 'type_text', 'press_key', 'hotkey', 'scroll', 'drag', 'set_value', 'focus']);
 
 export class CuaBroker {
   private server: Server | null = null;

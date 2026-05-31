@@ -231,7 +231,7 @@
 
 /* ── Selection Rectangle ── */
 
-@utility selection-rect {
+.selection-rect {
   position: fixed;
   border: 1.5px solid var(--color-accent);
   background: rgba(52, 120, 246, 0.06);
@@ -247,7 +247,7 @@
   min-height: 2px;
 }
 
-@utility selection-handle {
+.selection-handle {
   position: absolute;
   width: 10px;
   height: 10px;
@@ -258,7 +258,7 @@
   box-shadow: 0 2px 8px rgba(37, 99, 235, 0.18);
 }
 
-@utility selection-clear {
+.selection-clear {
   position: absolute;
   top: -28px;
   right: -8px;
@@ -278,29 +278,29 @@
 
 /* ── Handle positions ── */
 
-@utility handle-ns {
+.handle-ns {
   left: 50%;
   transform: translateX(-50%);
   cursor: ns-resize;
 }
 
-@utility handle-ew {
+.handle-ew {
   top: 50%;
   transform: translateY(-50%);
   cursor: ew-resize;
 }
 
-@utility handle-corner {
+.handle-corner {
   cursor: nwse-resize;
 }
 
-@utility handle-corner-alt {
+.handle-corner-alt {
   cursor: nesw-resize;
 }
 
 /* ── CUA Element Highlight ── */
 
-@utility cua-element-highlight {
+.cua-element-highlight {
   position: fixed;
   border: 1px solid var(--color-teal);
   border-radius: 4px;

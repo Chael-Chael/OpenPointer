@@ -71,11 +71,18 @@ export function getSettings(): AppSettings {
     ...loaded,
     agentBackend: normalizeBackend(envOverride(['OMP_AGENT_BACKEND', 'OP_AGENT_BACKEND']) || loaded.agentBackend || DEFAULTS.agentBackend),
     localVlmEnabled: readBoolean(envOverride(['OMP_LOCAL_VLM_ENABLED', 'OP_LOCAL_VLM_ENABLED']), loaded.localVlmEnabled ?? DEFAULTS.localVlmEnabled),
-    localVlmBaseUrl: envOverride(['OMP_LOCAL_VLM_BASE_URL', 'OMP_OPENAI_COMPAT_BASE_URL', 'OP_LOCAL_VLM_BASE_URL', 'OP_OPENAI_COMPAT_BASE_URL']) || loaded.localVlmBaseUrl || DEFAULTS.localVlmBaseUrl,
-    localVlmModel: envOverride(['OMP_LOCAL_VLM_MODEL', 'OMP_OPENAI_COMPAT_MODEL', 'OP_LOCAL_VLM_MODEL', 'OP_OPENAI_COMPAT_MODEL']) || loaded.localVlmModel || '',
+    localVlmBaseUrl:
+      envOverride(['OMP_LOCAL_VLM_BASE_URL', 'OMP_OPENAI_COMPAT_BASE_URL', 'OP_LOCAL_VLM_BASE_URL', 'OP_OPENAI_COMPAT_BASE_URL']) ||
+      loaded.localVlmBaseUrl ||
+      DEFAULTS.localVlmBaseUrl,
+    localVlmModel:
+      envOverride(['OMP_LOCAL_VLM_MODEL', 'OMP_OPENAI_COMPAT_MODEL', 'OP_LOCAL_VLM_MODEL', 'OP_OPENAI_COMPAT_MODEL']) || loaded.localVlmModel || '',
     hermesBaseUrl: envOverride(['OMP_HERMES_BASE_URL', 'OP_HERMES_BASE_URL']) || loaded.hermesBaseUrl || DEFAULTS.hermesBaseUrl,
     opencodeBaseUrl: envOverride(['OMP_OPENCODE_BASE_URL', 'OP_OPENCODE_BASE_URL']) || loaded.opencodeBaseUrl || '',
-    claudeAgentEnabled: readBoolean(envOverride(['OMP_CLAUDE_AGENT_ENABLED', 'OP_CLAUDE_AGENT_ENABLED']), loaded.claudeAgentEnabled ?? DEFAULTS.claudeAgentEnabled),
+    claudeAgentEnabled: readBoolean(
+      envOverride(['OMP_CLAUDE_AGENT_ENABLED', 'OP_CLAUDE_AGENT_ENABLED']),
+      loaded.claudeAgentEnabled ?? DEFAULTS.claudeAgentEnabled
+    ),
     codexAppServerUrl: envOverride(['OMP_CODEX_APP_SERVER_URL', 'OP_CODEX_APP_SERVER_URL']) || loaded.codexAppServerUrl || '',
     cuaMode: normalizeCuaMode(envOverride(['OMP_CUA_MODE', 'OP_CUA_MODE']) || loaded.cuaMode || DEFAULTS.cuaMode),
     pillWidth: clampNumber(loaded.pillWidth, 280, 900, DEFAULTS.pillWidth),
@@ -152,21 +159,25 @@ function readStored(): StoredSettings {
   const path = settingsPath();
   if (!existsSync(path)) return { ...DEFAULTS };
   try {
-    return migrateStored(JSON.parse(readFileSync(path, 'utf8')) as Partial<StoredSettings> & {
-      encryptedApiKey?: string;
-      openAICompatibleBaseUrl?: string;
-      openAICompatibleModel?: string;
-    });
+    return migrateStored(
+      JSON.parse(readFileSync(path, 'utf8')) as Partial<StoredSettings> & {
+        encryptedApiKey?: string;
+        openAICompatibleBaseUrl?: string;
+        openAICompatibleModel?: string;
+      }
+    );
   } catch {
     return { ...DEFAULTS };
   }
 }
 
-function migrateStored(loaded: Partial<StoredSettings> & {
-  encryptedApiKey?: string;
-  openAICompatibleBaseUrl?: string;
-  openAICompatibleModel?: string;
-}): StoredSettings {
+function migrateStored(
+  loaded: Partial<StoredSettings> & {
+    encryptedApiKey?: string;
+    openAICompatibleBaseUrl?: string;
+    openAICompatibleModel?: string;
+  }
+): StoredSettings {
   const migrated = {
     ...DEFAULTS,
     ...loaded,
@@ -207,10 +218,13 @@ function firstEnv(keys: string[]): string | undefined {
   return undefined;
 }
 
-function readSecret(envKeys: string[], storedField: keyof Pick<
-  StoredSettings,
-  'encryptedLocalVlmApiKey' | 'encryptedHermesApiKey' | 'encryptedOpenCodeApiKey' | 'encryptedClaudeAgentApiKey' | 'encryptedCodexApiKey'
->): string {
+function readSecret(
+  envKeys: string[],
+  storedField: keyof Pick<
+    StoredSettings,
+    'encryptedLocalVlmApiKey' | 'encryptedHermesApiKey' | 'encryptedOpenCodeApiKey' | 'encryptedClaudeAgentApiKey' | 'encryptedCodexApiKey'
+  >
+): string {
   const envValue = firstEnv(envKeys);
   if (envValue) return envValue;
   const encrypted = readStored()[storedField];
@@ -241,19 +255,13 @@ function writeSecret(
 }
 
 function normalizeBackend(value: string): AppSettings['agentBackend'] {
-  return ['auto', 'local-vlm', 'hermes', 'opencode', 'claude-agent', 'codex'].includes(value)
-    ? value as AppSettings['agentBackend']
-    : 'auto';
+  return ['auto', 'local-vlm', 'hermes', 'opencode', 'claude-agent', 'codex'].includes(value) ? (value as AppSettings['agentBackend']) : 'auto';
 }
 
 function normalizeCuaMode(value: string): AppSettings['cuaMode'] {
-  return ['off', 'prefer', 'require-on-explicit-command'].includes(value)
-    ? value as AppSettings['cuaMode']
-    : 'prefer';
+  return ['off', 'prefer', 'require-on-explicit-command'].includes(value) ? (value as AppSettings['cuaMode']) : 'prefer';
 }
 
 function normalizeNewDialogBehavior(value: string): AppSettings['newDialogBehavior'] {
-  return ['new', 'continue', 'interval'].includes(value)
-    ? value as AppSettings['newDialogBehavior']
-    : 'continue';
+  return ['new', 'continue', 'interval'].includes(value) ? (value as AppSettings['newDialogBehavior']) : 'continue';
 }

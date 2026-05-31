@@ -302,11 +302,9 @@ function registerIpc(): void {
       if (!response.ok) {
         throw new Error(`Failed to fetch models: ${response.status} ${response.statusText}`);
       }
-      const data = await response.json() as { data?: Array<{ id: string }> };
-      const models = data.data?.map(m => m.id) ?? [];
-      const visionModels = models.filter(name => 
-        /vision|vl|multimodal|gpt-4o|claude-3|gemini|minicpm|internvl|llama-3\.2.*vision|deepseek-vl/i.test(name)
-      );
+      const data = (await response.json()) as { data?: Array<{ id: string }> };
+      const models = data.data?.map((m) => m.id) ?? [];
+      const visionModels = models.filter((name) => /vision|vl|multimodal|gpt-4o|claude-3|gemini|minicpm|internvl|llama-3\.2.*vision|deepseek-vl/i.test(name));
       return { success: true, models: visionModels.length > 0 ? visionModels : models };
     } catch (e: unknown) {
       return { success: false, error: e instanceof Error ? e.message : String(e) };
@@ -330,7 +328,7 @@ function registerIpc(): void {
     const settings = getSettings();
     const cursor = req.cursor ?? lastActivationCursor ?? lastCursor ?? cursorPayload();
     const context = await capturePointerContext(cursor, req.targetPath, req.selectedEntity, settings.cuaMode !== 'off');
-    
+
     const conversationId = req.conversationId || `conv-${Date.now()}`;
     await chatHistory.appendTurn(conversationId, {
       id: `turn-${Date.now()}-user`,
@@ -353,24 +351,27 @@ function registerIpc(): void {
     }
     const config = bridgeConfig(settings);
     const backend = resolveBackendForEnvelope(initialEnvelope, config);
-    const cuaBrokerSession = context.grounding?.status === 'matched'
-      ? await cuaBroker.ensureStarted({
-          requireApprovalBeforeCua: settings.requireApprovalBeforeCua,
-          allowedTools: CUA_AGENT_TOOLS,
-          emit: (agentEvent) => event.sender.send(OMP_CHANNELS.AgentEvent, agentEvent)
-        })
-      : undefined;
+    const cuaBrokerSession =
+      context.grounding?.status === 'matched'
+        ? await cuaBroker.ensureStarted({
+            requireApprovalBeforeCua: settings.requireApprovalBeforeCua,
+            allowedTools: CUA_AGENT_TOOLS,
+            emit: (agentEvent) => event.sender.send(OMP_CHANNELS.AgentEvent, agentEvent)
+          })
+        : undefined;
     const envelope: AgentContextEnvelope = {
       ...initialEnvelope,
       routing: { ...initialEnvelope.routing, backend },
       toolServers: cuaBrokerSession
-        ? [{
-            id: 'cua',
-            transport: 'local-http',
-            sessionId: cuaBrokerSession.sessionId,
-            endpoint: cuaBrokerSession.endpoint,
-            tools: CUA_AGENT_TOOLS
-          }]
+        ? [
+            {
+              id: 'cua',
+              transport: 'local-http',
+              sessionId: cuaBrokerSession.sessionId,
+              endpoint: cuaBrokerSession.endpoint,
+              tools: CUA_AGENT_TOOLS
+            }
+          ]
         : initialEnvelope.toolServers
     };
     const controller = new AbortController();
@@ -459,13 +460,11 @@ async function capturePointerContext(cursor: CursorPayload, targetPath?: Point[]
     broadcast(OMP_CHANNELS.CaptureActivity, { phase: 'end', withCua });
   }
   const windowInfo = await activeWindowInfo();
-  
-  const manualEntities = targetPath && targetPath.length > 1 
-    ? visualEntities(cursor, capture.crop, targetPath) 
-    : [];
-    
+
+  const manualEntities = targetPath && targetPath.length > 1 ? visualEntities(cursor, capture.crop, targetPath) : [];
+
   const entities = selectedEntity ? [selectedEntity] : manualEntities;
-  
+
   const context = buildPointerContext({
     cursor,
     source: 'desktop',
@@ -508,14 +507,15 @@ async function activeWindowInfo(): Promise<PointerContext['window']> {
 }
 
 function visualEntities(cursor: CursorPayload, crop: Rect, targetPath?: Point[]): PointerEntity[] {
-  const bbox = targetPath && targetPath.length > 1
-    ? bboxFromPoints(targetPath)
-    : {
-        x: Math.max(0, cursor.localX - 24),
-        y: Math.max(0, cursor.localY - 24),
-        width: 48,
-        height: 48
-      };
+  const bbox =
+    targetPath && targetPath.length > 1
+      ? bboxFromPoints(targetPath)
+      : {
+          x: Math.max(0, cursor.localX - 24),
+          y: Math.max(0, cursor.localY - 24),
+          width: 48,
+          height: 48
+        };
   return [
     {
       id: `entity-${Date.now()}`,
@@ -528,7 +528,10 @@ function visualEntities(cursor: CursorPayload, crop: Rect, targetPath?: Point[])
   ];
 }
 
-async function captureContextImage(cursor: CursorPayload, targetPath?: Point[]): Promise<{
+async function captureContextImage(
+  cursor: CursorPayload,
+  targetPath?: Point[]
+): Promise<{
   id: string;
   imageBase64: string;
   mimeType: 'image/jpeg';

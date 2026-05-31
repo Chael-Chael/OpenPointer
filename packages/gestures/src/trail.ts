@@ -16,9 +16,7 @@ export function nextTrail(points: Point[], point: Point, options: TrailOptions =
   if (last && last.x === point.x && last.y === point.y) {
     return points.filter((p) => now - (p.t ?? now) <= options.lifetimeMs);
   }
-  return [...points, { ...point, t: now }]
-    .filter((p) => now - (p.t ?? now) <= options.lifetimeMs)
-    .slice(-options.maxPoints);
+  return [...points, { ...point, t: now }].filter((p) => now - (p.t ?? now) <= options.lifetimeMs).slice(-options.maxPoints);
 }
 
 export function toSmoothSvgPath(points: Point[]): string {

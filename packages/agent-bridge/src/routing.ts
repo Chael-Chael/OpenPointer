@@ -36,9 +36,7 @@ export function buildAgentContextEnvelope(args: {
 }
 
 function buildPreferredTools(operationIntent: boolean): string[] {
-  return operationIntent
-    ? ['app-specific-mcp', 'document-skill', 'screen-skill', 'cua']
-    : ['app-specific-mcp', 'document-skill', 'screen-skill'];
+  return operationIntent ? ['app-specific-mcp', 'document-skill', 'screen-skill', 'cua'] : ['app-specific-mcp', 'document-skill', 'screen-skill'];
 }
 
 function contextAttachments(context: PointerContext): AgentContextEnvelope['attachments'] {

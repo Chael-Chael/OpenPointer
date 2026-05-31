@@ -30,15 +30,17 @@ describe('HermesBridge', () => {
       }
       if (req.method === 'GET' && req.url === '/v1/runs/run-1/events') {
         res.setHeader('Content-Type', 'text/event-stream');
-        res.end([
-          'data: {"type":"assistant.delta","text":"hello"}',
-          '',
-          'data: {"type":"tool.started","name":"mcp"}',
-          '',
-          'data: {"type":"run.completed","text":"done"}',
-          '',
-          ''
-        ].join('\n'));
+        res.end(
+          [
+            'data: {"type":"assistant.delta","text":"hello"}',
+            '',
+            'data: {"type":"tool.started","name":"mcp"}',
+            '',
+            'data: {"type":"run.completed","text":"done"}',
+            '',
+            ''
+          ].join('\n')
+        );
         return;
       }
       res.statusCode = 404;
@@ -55,12 +57,6 @@ describe('HermesBridge', () => {
     const envelope = buildAgentContextEnvelope({ instruction: 'explain this', mode: 'text', context, backend: 'hermes' });
     const events = [];
     for await (const event of bridge.run(envelope)) events.push(event);
-    expect(events.map((event) => event.type)).toEqual([
-      'tool.discovery',
-      'run.started',
-      'assistant.delta',
-      'tool.started',
-      'run.completed'
-    ]);
+    expect(events.map((event) => event.type)).toEqual(['tool.discovery', 'run.started', 'assistant.delta', 'tool.started', 'run.completed']);
   });
 });

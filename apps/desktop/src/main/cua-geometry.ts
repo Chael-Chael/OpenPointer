@@ -140,9 +140,7 @@ export function resolveHoveredEntity(
   maxFallbackDistance = 24
 ): string | undefined {
   const withBbox = entities.filter((entity): entity is PointerEntity & { bbox: Rect } => Boolean(entity.bbox));
-  const contained = withBbox
-    .filter((entity) => pointInRect(cursor.localX, cursor.localY, entity.bbox))
-    .sort((a, b) => area(a.bbox) - area(b.bbox));
+  const contained = withBbox.filter((entity) => pointInRect(cursor.localX, cursor.localY, entity.bbox)).sort((a, b) => area(a.bbox) - area(b.bbox));
   if (contained[0]) return contained[0].id;
 
   let nearest: { id: string; distanceSquared: number } | undefined;
@@ -196,9 +194,13 @@ export function parseTreeMarkdown(markdown: string | undefined): ParsedTreeEleme
       automation_id: rest.match(/\bid=([^\s\]]+)/)?.[1],
       help_text: rest.match(/help="([^"]*)"/)?.[1],
       value: rest.match(/value="([^"]*)"/)?.[1],
-      actions: actions ? actions.split(',').map((a) => a.trim()).filter(Boolean) : []
+      actions: actions
+        ? actions
+            .split(',')
+            .map((a) => a.trim())
+            .filter(Boolean)
+        : []
     });
   }
   return out;
 }
-

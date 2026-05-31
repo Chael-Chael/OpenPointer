@@ -8,13 +8,7 @@ const PANEL_COMFORT_HEIGHT = 360;
 const PANEL_MAX_HEIGHT = 520;
 const PANEL_MIN_HEIGHT = 160;
 
-export function computeShellPosition(
-  cursorX: number,
-  cursorY: number,
-  shellWidth = 520,
-  pillHeight = 44,
-  hasPanel = false
-) {
+export function computeShellPosition(cursorX: number, cursorY: number, shellWidth = 520, pillHeight = 44, hasPanel = false) {
   const viewportW = window.innerWidth;
   const viewportH = window.innerHeight;
 
@@ -24,10 +18,7 @@ export function computeShellPosition(
   if (preferredX + shellWidth + SHELL_MARGIN > viewportW) {
     preferredX = cursorX - shellWidth - CURSOR_OFFSET_X;
   }
-  const x = Math.min(
-    Math.max(SHELL_MARGIN, preferredX),
-    Math.max(SHELL_MARGIN, viewportW - shellWidth - SHELL_MARGIN)
-  );
+  const x = Math.min(Math.max(SHELL_MARGIN, preferredX), Math.max(SHELL_MARGIN, viewportW - shellWidth - SHELL_MARGIN));
 
   // Vertical: align the pill to the cursor, then lift the whole shell up if the
   // panel would not fit below, so it is never clipped by the bottom edge.

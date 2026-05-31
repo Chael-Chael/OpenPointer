@@ -77,7 +77,10 @@ export function NumberSlider({
     <label className="field slider-field">
       <span>
         {label}
-        <em>{value}{unit}</em>
+        <em>
+          {value}
+          {unit}
+        </em>
       </span>
       <div className="slider-row">
         <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => commit(event.target.value)} />
@@ -115,7 +118,9 @@ export function SecretField({
           onChange={(event) => onChange(event.target.value)}
           placeholder={configured && !clearQueued ? 'Configured - paste to replace' : 'Paste key or token'}
         />
-        <button type="button" onClick={onClear} disabled={!configured && !value}>Clear</button>
+        <button type="button" onClick={onClear} disabled={!configured && !value}>
+          Clear
+        </button>
       </div>
     </label>
   );

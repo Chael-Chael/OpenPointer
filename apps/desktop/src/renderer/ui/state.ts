@@ -4,15 +4,7 @@ export type SecretKey = 'localVlmApiKey' | 'hermesApiKey' | 'opencodeApiKey' | '
 
 export type StatusTone = 'ready' | 'missing' | 'working' | 'failed' | 'approval';
 
-export type UiState =
-  | 'idle'
-  | 'holding'
-  | 'composing'
-  | 'submitting'
-  | 'streaming'
-  | 'approval'
-  | 'completed'
-  | 'failed';
+export type UiState = 'idle' | 'holding' | 'composing' | 'submitting' | 'streaming' | 'approval' | 'completed' | 'failed';
 
 export type SecretDrafts = Record<SecretKey, string>;
 export type ClearSecretFlags = Record<SecretKey, boolean>;

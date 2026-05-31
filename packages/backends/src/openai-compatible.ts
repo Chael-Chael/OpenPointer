@@ -2,12 +2,7 @@ import type { PointerContext } from '@openmagicpointer/core';
 
 export type ChatMessage = {
   role: 'system' | 'user' | 'assistant';
-  content:
-    | string
-    | Array<
-        | { type: 'text'; text: string }
-        | { type: 'image_url'; image_url: { url: string } }
-      >;
+  content: string | Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }>;
 };
 
 export type OpenAICompatibleConfig = {
@@ -146,7 +141,13 @@ function parseStreamChunk(chunk: string): string {
     .split(/\r?\n/)
     .filter((line) => line.startsWith('data:'))
     .map((line) => line.slice(5).trim());
-  const rawPayloads = payloads.length > 0 ? payloads : chunk.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const rawPayloads =
+    payloads.length > 0
+      ? payloads
+      : chunk
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
   let text = '';
   for (const payload of rawPayloads) {
     if (!payload || payload === '[DONE]') continue;
@@ -180,22 +181,29 @@ export function buildPointerMessages(context: PointerContext, userPrompt: string
     `Source: ${context.source}`,
     target ? `Target: ${target.kind} ${target.text || target.name || target.role || ''}` : 'Target: unknown',
     context.gesture ? `Gesture: ${context.gesture.kind}` : '',
-    context.nearby.length > 0 ? `Nearby: ${context.nearby.map((item) => item.text).filter(Boolean).join(' | ')}` : ''
+    context.nearby.length > 0
+      ? `Nearby: ${context.nearby
+          .map((item) => item.text)
+          .filter(Boolean)
+          .join(' | ')}`
+      : ''
   ]
     .filter(Boolean)
     .join('\n');
 
   const userText = `Pointer context:\n${contextSummary}\n\nUser request:\n${userPrompt}`;
-  const image = options.includeImage !== false && context.visual?.imageBase64 && context.visual.mimeType
-    ? {
-        type: 'image_url' as const,
-        image_url: { url: `data:${context.visual.mimeType};base64,${context.visual.imageBase64}` }
-      }
-    : null;
+  const image =
+    options.includeImage !== false && context.visual?.imageBase64 && context.visual.mimeType
+      ? {
+          type: 'image_url' as const,
+          image_url: { url: `data:${context.visual.mimeType};base64,${context.visual.imageBase64}` }
+        }
+      : null;
 
-  const visualNote = context.visual?.imageBase64 && !image
-    ? '\nVisual screenshot is available locally but was not attached to this request because the current model/provider does not support image input.'
-    : '';
+  const visualNote =
+    context.visual?.imageBase64 && !image
+      ? '\nVisual screenshot is available locally but was not attached to this request because the current model/provider does not support image input.'
+      : '';
 
   return [
     {

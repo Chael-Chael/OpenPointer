@@ -24,12 +24,7 @@ vi.mock('node:fs', () => ({
   mkdirSync: () => undefined
 }));
 
-const ENV_KEYS = [
-  'OMP_AGENT_BACKEND',
-  'OMP_LOCAL_VLM_BASE_URL',
-  'OMP_LOCAL_VLM_MODEL',
-  'OMP_CUA_MODE'
-];
+const ENV_KEYS = ['OMP_AGENT_BACKEND', 'OMP_LOCAL_VLM_BASE_URL', 'OMP_LOCAL_VLM_MODEL', 'OMP_CUA_MODE'];
 
 let settings: typeof import('./settings.js');
 

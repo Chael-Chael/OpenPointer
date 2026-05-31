@@ -54,14 +54,20 @@ export function SettingsPanel(props: SettingsPanelProps) {
             <p className="m-0 mb-1 text-accent text-[11px] font-bold uppercase tracking-[0.04em]">Agent backends</p>
             <h2 className="m-0 text-xl font-bold leading-tight text-ink">Connection settings</h2>
           </div>
-          <button className="ghost-button" onClick={onClose}>Close</button>
+          <button className="ghost-button" onClick={onClose}>
+            Close
+          </button>
         </header>
 
         <section className="settings-section">
           <label className="field">
             <span>Default backend</span>
             <select value={backend} onChange={(event) => setBackend(event.target.value as AgentBackendId)}>
-              {selectableBackends.map((item) => <option key={item} value={item}>{backendLabel(item)}</option>)}
+              {selectableBackends.map((item) => (
+                <option key={item} value={item}>
+                  {backendLabel(item)}
+                </option>
+              ))}
             </select>
           </label>
         </section>
@@ -72,8 +78,18 @@ export function SettingsPanel(props: SettingsPanelProps) {
               <input type="checkbox" checked={settings.localVlmEnabled} onChange={(event) => updateSettings({ localVlmEnabled: event.target.checked })} />
               <span>Enabled</span>
             </label>
-            <TextField label="Base URL" value={settings.localVlmBaseUrl} onChange={(value) => updateSettings({ localVlmBaseUrl: value })} placeholder="https://provider.example/v1" />
-            <TextField label="Model" value={settings.localVlmModel} onChange={(value) => updateSettings({ localVlmModel: value })} placeholder="Optional model name" />
+            <TextField
+              label="Base URL"
+              value={settings.localVlmBaseUrl}
+              onChange={(value) => updateSettings({ localVlmBaseUrl: value })}
+              placeholder="https://provider.example/v1"
+            />
+            <TextField
+              label="Model"
+              value={settings.localVlmModel}
+              onChange={(value) => updateSettings({ localVlmModel: value })}
+              placeholder="Optional model name"
+            />
 
             <div className="flex gap-2 items-end mt-1">
               <button
@@ -129,7 +145,12 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </BackendCard>
           {/* MORE_BACKENDS_PLACEHOLDER */}
           <BackendCard title="Hermes" status={backendReadiness(draftAwareSettings, 'hermes')}>
-            <TextField label="Base URL" value={settings.hermesBaseUrl} onChange={(value) => updateSettings({ hermesBaseUrl: value })} placeholder="http://127.0.0.1:8642/v1" />
+            <TextField
+              label="Base URL"
+              value={settings.hermesBaseUrl}
+              onChange={(value) => updateSettings({ hermesBaseUrl: value })}
+              placeholder="http://127.0.0.1:8642/v1"
+            />
             <SecretField
               label="API token"
               value={secretDrafts.hermesApiKey}
@@ -141,7 +162,12 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </BackendCard>
 
           <BackendCard title="OpenCode" status={backendReadiness(draftAwareSettings, 'opencode')}>
-            <TextField label="Base URL" value={settings.opencodeBaseUrl} onChange={(value) => updateSettings({ opencodeBaseUrl: value })} placeholder="http://127.0.0.1:4096" />
+            <TextField
+              label="Base URL"
+              value={settings.opencodeBaseUrl}
+              onChange={(value) => updateSettings({ opencodeBaseUrl: value })}
+              placeholder="http://127.0.0.1:4096"
+            />
             <SecretField
               label="API token"
               value={secretDrafts.opencodeApiKey}
@@ -168,7 +194,12 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </BackendCard>
 
           <BackendCard title="Codex" status={backendReadiness(draftAwareSettings, 'codex')}>
-            <TextField label="App server URL" value={settings.codexAppServerUrl} onChange={(value) => updateSettings({ codexAppServerUrl: value })} placeholder="http://127.0.0.1:5050/v1" />
+            <TextField
+              label="App server URL"
+              value={settings.codexAppServerUrl}
+              onChange={(value) => updateSettings({ codexAppServerUrl: value })}
+              placeholder="http://127.0.0.1:5050/v1"
+            />
             <SecretField
               label="API token"
               value={secretDrafts.codexApiKey}
@@ -190,7 +221,11 @@ export function SettingsPanel(props: SettingsPanelProps) {
             </select>
           </label>
           <label className="toggle-row">
-            <input type="checkbox" checked={settings.requireApprovalBeforeCua} onChange={(event) => updateSettings({ requireApprovalBeforeCua: event.target.checked })} />
+            <input
+              type="checkbox"
+              checked={settings.requireApprovalBeforeCua}
+              onChange={(event) => updateSettings({ requireApprovalBeforeCua: event.target.checked })}
+            />
             <span>Require approval before CUA</span>
           </label>
           <label className="toggle-row">
@@ -252,7 +287,9 @@ export function SettingsPanel(props: SettingsPanelProps) {
         </section>
 
         <div className="flex justify-end mt-4">
-          <button className="primary-button" onClick={saveSettings}>Save settings</button>
+          <button className="primary-button" onClick={saveSettings}>
+            Save settings
+          </button>
         </div>
       </div>
     </div>

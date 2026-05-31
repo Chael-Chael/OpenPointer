@@ -57,7 +57,7 @@ async function loadClaudeSdk(): Promise<ClaudeAgentBridgeConfig['sdk'] | null> {
 function allowedToolsForEnvelope(envelope: AgentContextEnvelope): string[] | undefined {
   if (envelope.routing.toolPolicy !== 'require') return undefined;
   if (envelope.cuaDirective?.mode === 'require') return ['mcp__cua__*'];
-  return envelope.routing.preferredTools.map((tool) => tool.includes('*') ? tool : `mcp__${tool}__*`);
+  return envelope.routing.preferredTools.map((tool) => (tool.includes('*') ? tool : `mcp__${tool}__*`));
 }
 
 function mapClaudeMessage(raw: unknown): AgentEvent {

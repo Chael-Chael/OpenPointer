@@ -38,11 +38,12 @@ export async function* postRunAndStream(args: {
     const runId = String(json.run_id ?? json.runId ?? json.id ?? `${args.backend}-${Date.now()}`);
     yield { type: 'run.started', runId, backend: args.backend };
 
-    const eventsUrl = typeof json.events_url === 'string'
-      ? absolutize(base, json.events_url)
-      : typeof json.eventsUrl === 'string'
-        ? absolutize(base, json.eventsUrl)
-        : `${base}/runs/${encodeURIComponent(runId)}/events`;
+    const eventsUrl =
+      typeof json.events_url === 'string'
+        ? absolutize(base, json.events_url)
+        : typeof json.eventsUrl === 'string'
+          ? absolutize(base, json.eventsUrl)
+          : `${base}/runs/${encodeURIComponent(runId)}/events`;
 
     const streamResponse = await fetcher(eventsUrl, {
       headers: {
@@ -102,7 +103,12 @@ export function mapRuntimeEvent(raw: RuntimeEvent, backend: AgentBackendId): Age
     return { type: 'tool.completed', name: String(raw.name ?? raw.tool ?? 'tool'), output: raw.output ?? raw.result };
   }
   if (type.includes('approval')) {
-    return { type: 'approval.requested', id: String(raw.id ?? `approval-${Date.now()}`), reason: String(raw.reason ?? 'Agent requested approval.'), tool: typeof raw.tool === 'string' ? raw.tool : undefined };
+    return {
+      type: 'approval.requested',
+      id: String(raw.id ?? `approval-${Date.now()}`),
+      reason: String(raw.reason ?? 'Agent requested approval.'),
+      tool: typeof raw.tool === 'string' ? raw.tool : undefined
+    };
   }
   if (type.includes('fail') || type.includes('error')) {
     return { type: 'run.failed', error: String(raw.error ?? raw.message ?? `${backend} run failed.`), recoverable: true };
@@ -137,16 +143,12 @@ function findEventBoundary(buffer: string): number {
 }
 
 function isAgentEvent(raw: RuntimeEvent): raw is AgentEvent {
-  return typeof raw.type === 'string' && [
-    'run.started',
-    'assistant.delta',
-    'tool.discovery',
-    'tool.started',
-    'tool.completed',
-    'approval.requested',
-    'run.completed',
-    'run.failed'
-  ].includes(raw.type);
+  return (
+    typeof raw.type === 'string' &&
+    ['run.started', 'assistant.delta', 'tool.discovery', 'tool.started', 'tool.completed', 'approval.requested', 'run.completed', 'run.failed'].includes(
+      raw.type
+    )
+  );
 }
 
 function absolutize(base: string, url: string): string {

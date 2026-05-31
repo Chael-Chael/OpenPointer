@@ -181,4 +181,3 @@ describe('parseTreeMarkdown', () => {
     expect(parseTreeMarkdown('- Window "x"\n  - TitleBar = "x"')).toEqual([]);
   });
 });
-

@@ -26,14 +26,15 @@ export function buildPointerContext(input: BuildContextInput): PointerContext {
     target,
     entities,
     selection: target?.kind === 'input' ? { insertionTarget: target } : undefined,
-    visual: input.screenshotId || input.crop || input.imageBase64
-      ? {
-          screenshotId: input.screenshotId,
-          crop: input.crop,
-          imageBase64: input.imageBase64,
-          mimeType: input.mimeType
-        }
-      : undefined,
+    visual:
+      input.screenshotId || input.crop || input.imageBase64
+        ? {
+            screenshotId: input.screenshotId,
+            crop: input.crop,
+            imageBase64: input.imageBase64,
+            mimeType: input.mimeType
+          }
+        : undefined,
     gesture,
     // Up to 24 elements (complex windows like browsers/IDEs far exceed 8) with
     // role/name and the grounding reference so the agent can target an element

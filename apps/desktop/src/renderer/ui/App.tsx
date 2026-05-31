@@ -16,22 +16,8 @@ import {
   type SelectionRect,
   type UiState
 } from './state';
-import {
-  backendLabel,
-  backendReadiness,
-  isToolEvent,
-  latestEvent,
-  placeholderForState,
-  secretConfigured,
-  statusLabel
-} from './lib/backend-status';
-import {
-  availablePanelHeight,
-  computeShellPosition,
-  focusPromptInput,
-  normalizeSelection,
-  selectionFromDrag
-} from './lib/geometry';
+import { backendLabel, backendReadiness, isToolEvent, latestEvent, placeholderForState, secretConfigured, statusLabel } from './lib/backend-status';
+import { availablePanelHeight, computeShellPosition, focusPromptInput, normalizeSelection, selectionFromDrag } from './lib/geometry';
 import { HoldRing, ToolRows } from './components/fields';
 import { SettingsPanel } from './components/SettingsPanel';
 import { HistoryPanel } from './components/HistoryPanel';
@@ -103,7 +89,7 @@ export function App() {
 
   const contextLimit = settings?.localVlmContextWindow ?? 32768;
   const remainingFraction = Math.max(0, (contextLimit - estimatedUsedTokens) / contextLimit);
-  
+
   let ringColor = '#30a14e'; // Green
   if (remainingFraction < 0.2) {
     ringColor = '#e5383b'; // Red
@@ -181,10 +167,10 @@ export function App() {
       window.openMagicPointer.getSettings().then(async (currentSettings) => {
         const behavior = currentSettings?.newDialogBehavior ?? 'continue';
         const interval = currentSettings?.newDialogInterval ?? 300;
-        
+
         let restoreId = lastConversationIdRef.current;
         let lastDeactivatedAt = lastDeactivatedAtRef.current;
-        
+
         if (!restoreId) {
           const list = await window.openMagicPointer.getConversations();
           if (list.length > 0) {
@@ -196,7 +182,7 @@ export function App() {
             }
           }
         }
-        
+
         let shouldRestore = false;
         if (restoreId) {
           if (behavior === 'continue') {
@@ -208,7 +194,7 @@ export function App() {
             }
           }
         }
-        
+
         if (shouldRestore && restoreId) {
           setConversationId(restoreId);
           const conv = await window.openMagicPointer.getConversation(restoreId);
@@ -257,7 +243,8 @@ export function App() {
     });
     const offEvent = window.openMagicPointer.onAgentEvent((event) => {
       setEvents((prev) => [...prev, event].slice(-80));
-      if (event.type === 'run.started' || event.type === 'assistant.delta' || event.type === 'tool.started' || event.type === 'tool.completed') setState('streaming');
+      if (event.type === 'run.started' || event.type === 'assistant.delta' || event.type === 'tool.started' || event.type === 'tool.completed')
+        setState('streaming');
       if (event.type === 'approval.requested') setState('approval');
       if (event.type === 'run.completed') setState('completed');
       if (event.type === 'run.failed') setState('failed');
@@ -281,8 +268,9 @@ export function App() {
       // Guard against a stale response from a previous conversationId/state
       // overwriting the history after a rapid switch.
       let cancelled = false;
-      window.openMagicPointer.getConversation(conversationId)
-        .then(conv => {
+      window.openMagicPointer
+        .getConversation(conversationId)
+        .then((conv) => {
           if (!cancelled && conv) setHistoryTurns(conv.turns);
         })
         .catch(() => {
@@ -298,7 +286,8 @@ export function App() {
     let lastInteractive = false;
 
     // We want to force interactive mode if dragging/selecting/detached etc.
-    const forceInteractive = active && (detached || menuOpen || settingsOpen || historyOpen || Boolean(selection) || selecting || Boolean(selectionDrag) || Boolean(panelResizeDrag));
+    const forceInteractive =
+      active && (detached || menuOpen || settingsOpen || historyOpen || Boolean(selection) || selecting || Boolean(selectionDrag) || Boolean(panelResizeDrag));
 
     function checkTarget(target: EventTarget | null) {
       if (forceInteractive) return true;
@@ -321,14 +310,14 @@ export function App() {
     function onMouseOver(e: MouseEvent) {
       updateInteractive(checkTarget(e.target));
     }
-    
+
     function onMouseOut(e: MouseEvent) {
       updateInteractive(checkTarget(e.relatedTarget));
     }
 
     window.addEventListener('mouseover', onMouseOver);
     window.addEventListener('mouseout', onMouseOut);
-    
+
     // Set initial state
     updateInteractive(forceInteractive);
 
@@ -361,7 +350,10 @@ export function App() {
     }
     function onContextMenu(event: MouseEvent) {
       event.preventDefault();
-      if (menuOpen) { setMenuOpen(false); return; }
+      if (menuOpen) {
+        setMenuOpen(false);
+        return;
+      }
       if (selecting || selectionDrag) {
         setSelecting(false);
         setSelectionOrigin(null);
@@ -394,12 +386,14 @@ export function App() {
   // Live-update selection rectangle while selecting (cursor comes via IPC)
   useEffect(() => {
     if (!selecting || !selectionOrigin) return;
-    setSelection(normalizeSelection({
-      x1: Math.min(selectionOrigin.x, cursor.localX),
-      y1: Math.min(selectionOrigin.y, cursor.localY),
-      x2: Math.max(selectionOrigin.x, cursor.localX),
-      y2: Math.max(selectionOrigin.y, cursor.localY),
-    }));
+    setSelection(
+      normalizeSelection({
+        x1: Math.min(selectionOrigin.x, cursor.localX),
+        y1: Math.min(selectionOrigin.y, cursor.localY),
+        x2: Math.max(selectionOrigin.x, cursor.localX),
+        y2: Math.max(selectionOrigin.y, cursor.localY)
+      })
+    );
   }, [selecting, selectionOrigin, cursor.localX, cursor.localY]);
 
   // End selection on mouseup → return to composing (following mode)
@@ -486,15 +480,18 @@ export function App() {
     }
     const timer = window.setTimeout(() => {
       const point = { x: cursorRef.current.localX, y: cursorRef.current.localY };
-      void window.openMagicPointer.requestGrounding({ cursor: cursorRef.current }).then((preview) => {
-        lastGroundingPointRef.current = point;
-        setCuaEntities(preview.entities);
-        setHoveredCuaEntityId(preview.hoveredEntityId ?? null);
-      }).catch(() => {
-        lastGroundingPointRef.current = null;
-        setCuaEntities([]);
-        setHoveredCuaEntityId(null);
-      });
+      void window.openMagicPointer
+        .requestGrounding({ cursor: cursorRef.current })
+        .then((preview) => {
+          lastGroundingPointRef.current = point;
+          setCuaEntities(preview.entities);
+          setHoveredCuaEntityId(preview.hoveredEntityId ?? null);
+        })
+        .catch(() => {
+          lastGroundingPointRef.current = null;
+          setCuaEntities([]);
+          setHoveredCuaEntityId(null);
+        });
     }, GROUNDING_SETTLE_MS);
     return () => window.clearTimeout(timer);
   }, [active, cursor.localX, cursor.localY, selecting, selectionDrag, settings?.cuaMode, settingsOpen, selection, selectedCuaEntityId]);
@@ -526,18 +523,29 @@ export function App() {
     [cursor.localX, cursor.localY, pillWidth, pillHeight, hasPanel]
   );
   const effectiveShellPos = detachedPos ?? shellPosition;
-  const transcript = useMemo(() => events.filter((event) => event.type === 'assistant.delta').map((event) => event.text).join(''), [events]);
+  const transcript = useMemo(
+    () =>
+      events
+        .filter((event) => event.type === 'assistant.delta')
+        .map((event) => event.text)
+        .join(''),
+    [events]
+  );
   const readiness = useMemo(() => backendReadiness(settings, backend), [backend, settings]);
-  const draftAwareSettings = useMemo(() => settings
-    ? {
-        ...settings,
-        hasLocalVlmApiKey: secretConfigured(settings.hasLocalVlmApiKey, secretDrafts.localVlmApiKey, clearSecrets.localVlmApiKey),
-        hasHermesApiKey: secretConfigured(settings.hasHermesApiKey, secretDrafts.hermesApiKey, clearSecrets.hermesApiKey),
-        hasOpenCodeApiKey: secretConfigured(settings.hasOpenCodeApiKey, secretDrafts.opencodeApiKey, clearSecrets.opencodeApiKey),
-        hasClaudeAgentApiKey: secretConfigured(settings.hasClaudeAgentApiKey, secretDrafts.claudeAgentApiKey, clearSecrets.claudeAgentApiKey),
-        hasCodexApiKey: secretConfigured(settings.hasCodexApiKey, secretDrafts.codexApiKey, clearSecrets.codexApiKey)
-      }
-    : null, [clearSecrets, secretDrafts, settings]);
+  const draftAwareSettings = useMemo(
+    () =>
+      settings
+        ? {
+            ...settings,
+            hasLocalVlmApiKey: secretConfigured(settings.hasLocalVlmApiKey, secretDrafts.localVlmApiKey, clearSecrets.localVlmApiKey),
+            hasHermesApiKey: secretConfigured(settings.hasHermesApiKey, secretDrafts.hermesApiKey, clearSecrets.hermesApiKey),
+            hasOpenCodeApiKey: secretConfigured(settings.hasOpenCodeApiKey, secretDrafts.opencodeApiKey, clearSecrets.opencodeApiKey),
+            hasClaudeAgentApiKey: secretConfigured(settings.hasClaudeAgentApiKey, secretDrafts.claudeAgentApiKey, clearSecrets.claudeAgentApiKey),
+            hasCodexApiKey: secretConfigured(settings.hasCodexApiKey, secretDrafts.codexApiKey, clearSecrets.codexApiKey)
+          }
+        : null,
+    [clearSecrets, secretDrafts, settings]
+  );
   const discovery = latestEvent(events, 'tool.discovery');
   const approval = latestEvent(events, 'approval.requested');
   const latestFailure = latestEvent(events, 'run.failed');
@@ -549,7 +557,7 @@ export function App() {
     return {
       hasSkills: discovery.skills.length > 0,
       hasMcp: discovery.tools.some((t) => t.includes('mcp')),
-      hasCua: Boolean(settings?.cuaMode && settings.cuaMode !== 'off'),
+      hasCua: Boolean(settings?.cuaMode && settings.cuaMode !== 'off')
     };
   }, [discovery, settings]);
 
@@ -632,7 +640,12 @@ export function App() {
     }, 1000);
 
     const targetPath = selection
-      ? [{ x: selection.x1, y: selection.y1 }, { x: selection.x2, y: selection.y1 }, { x: selection.x2, y: selection.y2 }, { x: selection.x1, y: selection.y2 }]
+      ? [
+          { x: selection.x1, y: selection.y1 },
+          { x: selection.x2, y: selection.y1 },
+          { x: selection.x2, y: selection.y2 },
+          { x: selection.x1, y: selection.y2 }
+        ]
       : undefined;
     const selectedEntity = selectedCuaEntityId ? cuaEntities.find((entity) => entity.id === selectedCuaEntityId) : undefined;
     setSelection(null);
@@ -642,7 +655,15 @@ export function App() {
     // not linger in the input box after submission.
     setPrompt('');
     try {
-      const res = await window.openMagicPointer.submitInstruction({ text, mode, backend, cursor, targetPath: selectedEntity ? undefined : targetPath, selectedEntity, conversationId: conversationId ?? undefined });
+      const res = await window.openMagicPointer.submitInstruction({
+        text,
+        mode,
+        backend,
+        cursor,
+        targetPath: selectedEntity ? undefined : targetPath,
+        selectedEntity,
+        conversationId: conversationId ?? undefined
+      });
       setConversationId(res.conversationId);
       const conv = await window.openMagicPointer.getConversation(res.conversationId);
       if (conv) setHistoryTurns(conv.turns);
@@ -726,7 +747,7 @@ export function App() {
   }
 
   function updateSettings(patch: Partial<AppSettings>) {
-    setSettings((current) => current ? { ...current, ...patch } : current);
+    setSettings((current) => (current ? { ...current, ...patch } : current));
   }
 
   function updateSecret(key: keyof SecretDrafts, value: string) {
@@ -778,7 +799,6 @@ export function App() {
     }
   }
 
-
   function beginSelectionMove(event: ReactMouseEvent<HTMLDivElement>) {
     if (!selection || selecting) return;
     event.preventDefault();
@@ -828,7 +848,9 @@ export function App() {
   }, [captureActivity.active, captureActivity.withCua, cuaEntities.length]);
 
   return (
-    <div className={`fixed inset-0 text-ink pointer-events-none${detached ? ' pointer-events-auto cursor-crosshair' : ''}${selecting ? ' cursor-crosshair' : ''}`}>
+    <div
+      className={`fixed inset-0 text-ink pointer-events-none${detached ? ' pointer-events-auto cursor-crosshair' : ''}${selecting ? ' cursor-crosshair' : ''}`}
+    >
       {hold?.state === 'holding' && <HoldRing cursor={hold.cursor} progress={hold.progress} />}
 
       {active && (
@@ -859,7 +881,15 @@ export function App() {
             >
               {!selecting && (
                 <>
-                  <button className="selection-clear" type="button" onMouseDown={(event) => event.stopPropagation()} onClick={clearSelection} aria-label="Clear selection">x</button>
+                  <button
+                    className="selection-clear"
+                    type="button"
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={clearSelection}
+                    aria-label="Clear selection"
+                  >
+                    x
+                  </button>
                   {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const).map((handle) => {
                     const handlePos: Record<string, string> = {
                       n: 'handle-ns left-1/2 -translate-x-1/2 -top-1.5',
@@ -869,7 +899,7 @@ export function App() {
                       nw: 'handle-corner -left-1.5 -top-1.5',
                       ne: 'handle-corner-alt -right-1.5 -top-1.5',
                       se: 'handle-corner -right-1.5 -bottom-1.5',
-                      sw: 'handle-corner-alt -left-1.5 -bottom-1.5',
+                      sw: 'handle-corner-alt -left-1.5 -bottom-1.5'
                     };
                     return (
                       <button
@@ -888,18 +918,28 @@ export function App() {
 
           <section
             className={`absolute left-0 top-0 pointer-events-auto will-change-transform w-[min(var(--pill-width,520px),calc(100vw-32px))] state-${state}${selecting ? ' is-selecting' : ''}`}
-            style={{
-              transform: `translate3d(${effectiveShellPos.x}px, ${effectiveShellPos.y}px, 0)`,
-              '--pill-width': `${pillWidth}px`,
-              '--pill-height': `${pillHeight}px`
-            } as CSSProperties}
+            style={
+              {
+                transform: `translate3d(${effectiveShellPos.x}px, ${effectiveShellPos.y}px, 0)`,
+                '--pill-width': `${pillWidth}px`,
+                '--pill-height': `${pillHeight}px`
+              } as CSSProperties
+            }
           >
             {/* Blur glow layer — always matches pill shape/size */}
             <div className="absolute inset-0 rounded-full bg-[rgba(13,111,255,0.56)] blur-[23.9px] z-0 pointer-events-none" />
 
-            <div className="command-bubble relative z-4 flex items-start gap-6 min-h-[var(--pill-height,36px)] py-3 pr-6 pl-3 rounded-full bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] animate-bubble-pop origin-left" onMouseDown={onPillMouseDown}>
+            <div
+              className="command-bubble relative z-4 flex items-start gap-6 min-h-[var(--pill-height,36px)] py-3 pr-6 pl-3 rounded-full bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] animate-bubble-pop origin-left"
+              onMouseDown={onPillMouseDown}
+            >
               <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
-              <button className="bubble-menu shrink-0 grid place-items-center w-8 h-8 rounded-full text-white/70 bg-transparent text-lg leading-none tracking-[1px] hover:bg-white/10 hover:text-white active:scale-95 transition-all duration-160 relative z-1" title="Menu" onClick={() => setMenuOpen(!menuOpen)} aria-label="Menu">
+              <button
+                className="bubble-menu shrink-0 grid place-items-center w-8 h-8 rounded-full text-white/70 bg-transparent text-lg leading-none tracking-[1px] hover:bg-white/10 hover:text-white active:scale-95 transition-all duration-160 relative z-1"
+                title="Menu"
+                onClick={() => setMenuOpen(!menuOpen)}
+                aria-label="Menu"
+              >
                 ···
               </button>
 
@@ -935,14 +975,7 @@ export function App() {
                 >
                   <svg className="w-full h-full" viewBox="0 0 32 32">
                     <circle className="ring-track" cx="16" cy="16" r="10" />
-                    <circle
-                      className="ring-progress"
-                      cx="16"
-                      cy="16"
-                      r="10"
-                      strokeDasharray={62.8}
-                      strokeDashoffset={62.8 * (1 - remainingFraction)}
-                    />
+                    <circle className="ring-progress" cx="16" cy="16" r="10" strokeDasharray={62.8} strokeDashoffset={62.8 * (1 - remainingFraction)} />
                   </svg>
                   <span className="context-progress-text absolute text-[8px] font-bold text-white/70 tabular-nums">{Math.round(remainingFraction * 100)}%</span>
                 </div>
@@ -950,39 +983,60 @@ export function App() {
 
               {menuOpen && (
                 <div className="bubble-dropdown absolute top-[calc(100%+6px)] left-0 min-w-[200px] p-1.5 border border-glass-border rounded-[14px] bg-glass-bg-solid backdrop-blur-[40px] backdrop-saturate-180 shadow-[0_8px_32px_rgba(0,0,0,0.10)] animate-dropdown-appear z-10">
-                  <button className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140" onClick={startVoice}>
+                  <button
+                    className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140"
+                    onClick={startVoice}
+                  >
                     <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">🎤</span>
                     Voice input
                   </button>
                   <div className="h-px mx-2 my-1 bg-black/[0.06]" />
                   <label className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140">
                     <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">⚡</span>
-                    <select className="flex-1 min-w-0 h-7 border border-glass-border rounded-lg px-2 bg-white/80 text-ink text-xs font-medium" value={backend} onChange={(event) => setBackend(event.target.value as AgentBackendId)} title="Agent backend">
-                      {selectableBackends.map((item) => <option key={item} value={item}>{backendLabel(item)}</option>)}
+                    <select
+                      className="flex-1 min-w-0 h-7 border border-glass-border rounded-lg px-2 bg-white/80 text-ink text-xs font-medium"
+                      value={backend}
+                      onChange={(event) => setBackend(event.target.value as AgentBackendId)}
+                      title="Agent backend"
+                    >
+                      {selectableBackends.map((item) => (
+                        <option key={item} value={item}>
+                          {backendLabel(item)}
+                        </option>
+                      ))}
                     </select>
                   </label>
-                  <button className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140" onClick={() => {
-                    setMenuOpen(false);
-                    setConversationId(null);
-                    setHistoryTurns([]);
-                    setEvents([]);
-                    setPrompt('');
-                  }}>
+                  <button
+                    className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setConversationId(null);
+                      setHistoryTurns([]);
+                      setEvents([]);
+                      setPrompt('');
+                    }}
+                  >
                     <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">✨</span>
                     New Conversation
                   </button>
-                  <button className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140" onClick={() => {
-                    setMenuOpen(false);
-                    setHistoryOpen(true);
-                    window.openMagicPointer.getConversations().then(setConversationsList);
-                  }}>
+                  <button
+                    className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setHistoryOpen(true);
+                      window.openMagicPointer.getConversations().then(setConversationsList);
+                    }}
+                  >
                     <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">🕒</span>
                     History
                   </button>
-                  <button className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140" onClick={() => {
-                    setMenuOpen(false);
-                    setSettingsOpen(true);
-                  }}>
+                  <button
+                    className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setSettingsOpen(true);
+                    }}
+                  >
                     <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">⚙</span>
                     Settings
                   </button>
@@ -993,9 +1047,21 @@ export function App() {
             {/* Capability indicators — only visible when backend detects capabilities */}
             {(capabilities.hasSkills || capabilities.hasMcp || capabilities.hasCua) && (
               <div className="flex items-center gap-1.5 mt-2 ml-2 animate-fade-up">
-                {capabilities.hasSkills && <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(52,199,89,0.12)] text-success">Skills</span>}
-                {capabilities.hasMcp && <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(255,59,48,0.10)] text-danger">MCP</span>}
-                {capabilities.hasCua && <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(255,204,0,0.15)] text-warning">CUA</span>}
+                {capabilities.hasSkills && (
+                  <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(52,199,89,0.12)] text-success">
+                    Skills
+                  </span>
+                )}
+                {capabilities.hasMcp && (
+                  <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(255,59,48,0.10)] text-danger">
+                    MCP
+                  </span>
+                )}
+                {capabilities.hasCua && (
+                  <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(255,204,0,0.15)] text-warning">
+                    CUA
+                  </span>
+                )}
               </div>
             )}
 
@@ -1010,7 +1076,9 @@ export function App() {
                     if (turn.role === 'user') {
                       return (
                         <div key={turn.id} className="flex flex-col w-full items-end">
-                          <div className="user-bubble max-w-[85%] bg-black/[0.05] rounded-[16px_16px_0_16px] py-2.5 px-3.5 text-sm leading-[1.45] text-ink break-words whitespace-pre-wrap shadow-[0_1px_2px_rgba(0,0,0,0.03)] dark:bg-white/[0.08]">{turn.text}</div>
+                          <div className="user-bubble max-w-[85%] bg-black/[0.05] rounded-[16px_16px_0_16px] py-2.5 px-3.5 text-sm leading-[1.45] text-ink break-words whitespace-pre-wrap shadow-[0_1px_2px_rgba(0,0,0,0.03)] dark:bg-white/[0.08]">
+                            {turn.text}
+                          </div>
                         </div>
                       );
                     } else {
@@ -1060,8 +1128,12 @@ export function App() {
                           <strong className="text-ink text-[13px]">{approval.tool ?? 'Agent'} requests approval</strong>
                           <p className="mt-2.5 text-[13px] leading-relaxed text-[#3c3c43]">{approval.reason}</p>
                           <div className="flex gap-2 mt-2.5">
-                            <button className="approval-button" onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'approve')}>Allow</button>
-                            <button className="approval-button" onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'deny')}>Deny</button>
+                            <button className="approval-button" onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'approve')}>
+                              Allow
+                            </button>
+                            <button className="approval-button" onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'deny')}>
+                              Deny
+                            </button>
                           </div>
                         </div>
                       )}
@@ -1069,9 +1141,7 @@ export function App() {
                     </div>
                   )}
                 </div>
-                {detached && (
-                  <div className="resize-grip" onMouseDown={onResizeMouseDown} />
-                )}
+                {detached && <div className="resize-grip" onMouseDown={onResizeMouseDown} />}
               </div>
             )}
           </section>

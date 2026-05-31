@@ -23,17 +23,17 @@ export class LocalVlmBridge implements AgentBridge {
     const estimatedTokens = estimateTokensForMessages(messages);
 
     if (estimatedTokens > limit && envelope.history && envelope.history.length > 2) {
-      yield { 
-        type: 'assistant.delta', 
-        text: `⚠️ **[System Info]** Current conversation history has exceeded the model's context window limit (${limit} tokens). Automatically summarizing the prior context to continue...\n\n` 
+      yield {
+        type: 'assistant.delta',
+        text: `⚠️ **[System Info]** Current conversation history has exceeded the model's context window limit (${limit} tokens). Automatically summarizing the prior context to continue...\n\n`
       };
 
       const historicalTurns = envelope.history.slice(0, -1);
       const summaryText = await summarizeHistory(backend, historicalTurns);
 
-      yield { 
-        type: 'assistant.delta', 
-        text: `*Context successfully compressed. Resuming conversation with summarized history context...*\n\n---\n\n` 
+      yield {
+        type: 'assistant.delta',
+        text: `*Context successfully compressed. Resuming conversation with summarized history context...*\n\n---\n\n`
       };
 
       messages = [
@@ -61,7 +61,11 @@ export class LocalVlmBridge implements AgentBridge {
   }
 }
 
-async function* streamLocalAnswer(backend: OpenAICompatibleBackend, messages: ChatMessage[], signal?: AbortSignal): AsyncGenerator<AgentEvent, string, unknown> {
+async function* streamLocalAnswer(
+  backend: OpenAICompatibleBackend,
+  messages: ChatMessage[],
+  signal?: AbortSignal
+): AsyncGenerator<AgentEvent, string, unknown> {
   let text = '';
   for await (const delta of backend.streamComplete(messages, signal)) {
     if (!delta) continue;
@@ -78,7 +82,7 @@ async function* streamLocalAnswer(backend: OpenAICompatibleBackend, messages: Ch
 function buildLocalMessages(envelope: AgentContextEnvelope, includeImage: boolean): ChatMessage[] {
   const prompt = buildLocalVlmPrompt(envelope);
   const dataUrl = includeImage ? dataUrlFromEnvelope(envelope) : undefined;
-  
+
   const messages: ChatMessage[] = [
     {
       role: 'system',
@@ -90,12 +94,13 @@ function buildLocalMessages(envelope: AgentContextEnvelope, includeImage: boolea
     const previousTurns = envelope.history.slice(0, -1);
     for (const turn of previousTurns) {
       if (turn.role === 'user') {
-        const turnDataUrl = includeImage && turn.pointerContext?.visual?.imageBase64 
+        const turnDataUrl =
+          includeImage && turn.pointerContext?.visual?.imageBase64
             ? `data:${turn.pointerContext.visual.mimeType || 'image/jpeg'};base64,${turn.pointerContext.visual.imageBase64}`
             : undefined;
         messages.push({
           role: 'user',
-          content: turnDataUrl 
+          content: turnDataUrl
             ? [
                 { type: 'text', text: turn.text },
                 { type: 'image_url', image_url: { url: turnDataUrl } }
@@ -128,11 +133,12 @@ async function summarizeHistory(backend: OpenAICompatibleBackend, history: impor
   const summaryPrompt: ChatMessage[] = [
     {
       role: 'system',
-      content: 'You are a context compression assistant. Summarize the following dialogue history briefly but comprehensively. Retain all user requirements, instructions, and outcomes. Keep the summary under 600 words.'
+      content:
+        'You are a context compression assistant. Summarize the following dialogue history briefly but comprehensively. Retain all user requirements, instructions, and outcomes. Keep the summary under 600 words.'
     },
     {
       role: 'user',
-      content: history.map(t => `${t.role}: ${t.text}`).join('\n\n')
+      content: history.map((t) => `${t.role}: ${t.text}`).join('\n\n')
     }
   ];
   try {

@@ -40,10 +40,12 @@ export class ChatHistoryManager {
 
   async getConversations(): Promise<Conversation[]> {
     await this.load();
-    return Array.from(this.conversations.values()).sort((a, b) => b.updatedAt - a.updatedAt).map(c => ({
-      ...c,
-      turns: [] // Don't return full turns for the list view to save memory/bandwidth
-    }));
+    return Array.from(this.conversations.values())
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map((c) => ({
+        ...c,
+        turns: [] // Don't return full turns for the list view to save memory/bandwidth
+      }));
   }
 
   async getConversation(id: string): Promise<Conversation | null> {

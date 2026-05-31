@@ -63,9 +63,7 @@ export class CuaGroundingProvider {
       if (state.isError) {
         return { status: 'unavailable', entities: [], error: cuaErrorText(state) ?? 'CUA get_window_state reported an error.' };
       }
-      const structured = state.structuredContent as
-        | { elements?: CuaElementRecord[]; element_count?: number; tree_markdown?: string }
-        | undefined;
+      const structured = state.structuredContent as { elements?: CuaElementRecord[]; element_count?: number; tree_markdown?: string } | undefined;
       const coordinateScale = usesPhysicalCoordinates(matched.bounds, cursor) ? Math.max(1, cursor.dpr || 1) : 1;
       // Fetch displays once and reuse across every element; resolving them
       // per-element via screen.getDisplayMatching is a costly native call.
@@ -131,7 +129,7 @@ function matchWindow(windows: CuaWindowRecord[], cursor: CursorPayload, windowIn
   let best: { record: CuaWindowRecord; score: number } | undefined;
   for (const record of windows) {
     if (!record.bounds || typeof record.pid !== 'number' || typeof record.window_id !== 'number') continue;
-    
+
     // Ignore our own transparent overlay
     if (record.title === 'OpenMagicPointer' || record.app_name === 'OpenMagicPointer.exe' || record.title?.includes('Cua.AgentCursorOverlay')) {
       continue;
@@ -184,12 +182,7 @@ function entityFromCuaElement(
   };
 }
 
-function entityFromTreeElement(
-  element: ParsedTreeElement,
-  pid: number,
-  windowId: string,
-  windowRect: Rect | undefined
-): PointerEntity {
+function entityFromTreeElement(element: ParsedTreeElement, pid: number, windowId: string, windowRect: Rect | undefined): PointerEntity {
   const role = element.control_type || 'Unknown';
   const label = firstNonEmpty(element.name, element.value, element.help_text, element.automation_id, role);
   return {
@@ -224,7 +217,10 @@ function usesPhysicalCoordinates(rect: Rect | undefined, cursor: CursorPayload):
 }
 
 function cuaErrorText(result: CuaToolResult): string | undefined {
-  const text = result.content?.map((part) => part.text).filter(Boolean).join(' ').trim();
+  const text = result.content
+    ?.map((part) => part.text)
+    .filter(Boolean)
+    .join(' ')
+    .trim();
   return text || undefined;
 }
-

@@ -72,11 +72,15 @@ export class CuaSidecarManager {
       }
     });
 
-    await this.request('initialize', {
-      protocolVersion: '2025-06-18',
-      capabilities: {},
-      clientInfo: { name: 'OpenMagicPointer', version: app.getVersion() }
-    }, 5000);
+    await this.request(
+      'initialize',
+      {
+        protocolVersion: '2025-06-18',
+        capabilities: {},
+        clientInfo: { name: 'OpenMagicPointer', version: app.getVersion() }
+      },
+      5000
+    );
   }
 
   private request(method: string, params: unknown, timeoutMs: number): Promise<unknown> {

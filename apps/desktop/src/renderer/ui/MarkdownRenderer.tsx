@@ -22,11 +22,7 @@ mermaid.initialize({
 
 export function MarkdownRenderer({ value }: { value: string }) {
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkMath]}
-      rehypePlugins={[rehypeKatex]}
-      components={markdownComponents}
-    >
+    <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={markdownComponents}>
       {value}
     </ReactMarkdown>
   );
@@ -60,7 +56,8 @@ function MermaidDiagram({ chart }: { chart: string }) {
   useEffect(() => {
     let canceled = false;
     setError(null);
-    mermaid.render(`omp-mermaid-${id}`, chart)
+    mermaid
+      .render(`omp-mermaid-${id}`, chart)
       .then(({ svg }) => {
         if (canceled || !ref.current) return;
         ref.current.innerHTML = svg;

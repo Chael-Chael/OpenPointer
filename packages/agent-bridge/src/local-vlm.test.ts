@@ -33,7 +33,9 @@ describe('LocalVlmBridge', () => {
   });
 
   it('answers without emitting tool events', async () => {
-    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: { content: 'answer' } }], model: 'vlm' }), { status: 200 })) as typeof fetch;
+    globalThis.fetch = vi.fn(
+      async () => new Response(JSON.stringify({ choices: [{ message: { content: 'answer' } }], model: 'vlm' }), { status: 200 })
+    ) as typeof fetch;
     const bridge = new LocalVlmBridge({ baseUrl: 'http://local/v1', apiKey: 'key', model: 'vlm' });
     const events = [];
     for await (const event of bridge.run(buildAgentContextEnvelope({ instruction: 'what is this', mode: 'text', context }))) events.push(event);

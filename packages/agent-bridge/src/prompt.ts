@@ -1,12 +1,9 @@
 import type { AgentContextEnvelope, CuaDirective, PointerContext } from '@openmagicpointer/core';
 
-const TOOL_DISCOVERY_MESSAGE =
-  'Agent may use available MCP tools, skills, or CUA depending on backend configuration.';
+const TOOL_DISCOVERY_MESSAGE = 'Agent may use available MCP tools, skills, or CUA depending on backend configuration.';
 
 export function buildToolDiscoveryEvent(envelope: AgentContextEnvelope) {
-  const skills = envelope.routing.preferredTools
-    .filter((tool) => tool.includes('skill'))
-    .map((tool) => tool.replace(/-/g, ' '));
+  const skills = envelope.routing.preferredTools.filter((tool) => tool.includes('skill')).map((tool) => tool.replace(/-/g, ' '));
   return {
     type: 'tool.discovery' as const,
     tools: envelope.routing.preferredTools,
@@ -113,8 +110,5 @@ function formatCuaDirective(directive: CuaDirective): string {
 }
 
 function formatToolServers(toolServers: NonNullable<AgentContextEnvelope['toolServers']>): string {
-  return [
-    'Local tool servers:',
-    JSON.stringify(toolServers, null, 2)
-  ].join('\n');
+  return ['Local tool servers:', JSON.stringify(toolServers, null, 2)].join('\n');
 }
