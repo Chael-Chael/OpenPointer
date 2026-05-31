@@ -50,7 +50,8 @@ const DEFAULTS: AppSettings = {
   pillHeight: 24,
   newDialogBehavior: 'continue',
   newDialogInterval: 300,
-  localVlmContextWindow: 32768
+  localVlmContextWindow: 32768,
+  modalTheme: 'blue'
 };
 
 function settingsPath(): string {
@@ -94,6 +95,7 @@ export function getSettings(): AppSettings {
     newDialogBehavior: normalizeNewDialogBehavior(loaded.newDialogBehavior || DEFAULTS.newDialogBehavior),
     newDialogInterval: clampNumber(loaded.newDialogInterval, 10, 86400, DEFAULTS.newDialogInterval),
     localVlmContextWindow: clampNumber(loaded.localVlmContextWindow, 4096, 2000000, DEFAULTS.localVlmContextWindow),
+    modalTheme: normalizeModalTheme(loaded.modalTheme || DEFAULTS.modalTheme),
     hasLocalVlmApiKey: Boolean(firstEnv(localVlmSecretEnvKeys) || loaded.encryptedLocalVlmApiKey),
     hasHermesApiKey: Boolean(firstEnv(hermesSecretEnvKeys) || loaded.encryptedHermesApiKey),
     hasOpenCodeApiKey: Boolean(firstEnv(opencodeSecretEnvKeys) || loaded.encryptedOpenCodeApiKey),
@@ -268,4 +270,8 @@ function normalizeCuaMode(value: string): AppSettings['cuaMode'] {
 
 function normalizeNewDialogBehavior(value: string): AppSettings['newDialogBehavior'] {
   return ['new', 'continue', 'interval'].includes(value) ? (value as AppSettings['newDialogBehavior']) : 'continue';
+}
+
+function normalizeModalTheme(value: string): AppSettings['modalTheme'] {
+  return ['blue', 'white', 'black'].includes(value) ? (value as AppSettings['modalTheme']) : 'blue';
 }

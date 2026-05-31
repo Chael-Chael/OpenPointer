@@ -79,7 +79,7 @@ function PointerContextPreview({ context }: { context: PointerContext }) {
   if (!imageSrc && !context.grounding && !target && cuaEntities.length === 0) return null;
 
   return (
-    <div className="pointer-context-card mt-2 max-w-[85%] self-end overflow-hidden rounded-[14px] border border-white/12 bg-white/[0.08] text-white/[0.86] shadow-[0_6px_18px_rgba(0,0,0,0.08)]">
+    <div className="pointer-context-card mt-2 max-w-[85%] self-end overflow-hidden rounded-[var(--radius-pill)] border border-white/12 bg-white/[0.08] text-white/[0.86] shadow-[0_6px_18px_rgba(0,0,0,0.08)]">
       {imageSrc && <img className="pointer-context-image" src={imageSrc} alt="Captured pointer context" />}
       <div className="grid gap-2 p-2.5 text-[11px] leading-[1.35]">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -407,6 +407,12 @@ export function App() {
     }
 
     function updateInteractive(shouldCapture: boolean) {
+      // Never switch the overlay to interactive (capture) mode when the
+      // pointer is not active.  This prevents the forwarded mouse events
+      // from toggling setIgnoreMouseEvents repeatedly, which would
+      // interfere with uIOhook's global long-press detection and cause
+      // the pill to pop up unexpectedly when the user just moves the mouse.
+      if (shouldCapture && !active) return;
       if (shouldCapture !== lastInteractiveRef.current) {
         lastInteractiveRef.current = shouldCapture;
         window.openMagicPointer.setInteractive(shouldCapture);
@@ -1005,6 +1011,13 @@ export function App() {
   return (
     <div
       className={`app-container fixed inset-0 text-ink pointer-events-none${overlayNeedsPointerEvents ? ' pointer-events-auto' : ''}${detached || selecting ? ' cursor-crosshair' : ''}`}
+      style={
+        {
+          '--pill-width': `${pillWidth}px`,
+          '--pill-height': `${pillHeight}px`,
+          '--radius-pill': `${pillHeight / 2}px`
+        } as CSSProperties
+      }
     >
       {hold?.state === 'holding' && <HoldRing cursor={hold.cursor} progress={hold.progress} />}
 
@@ -1108,7 +1121,7 @@ export function App() {
               {/* Context attachment preview card */}
               {hoveredAttachment === 'selection' && selection && (
                 <div
-                  className="absolute left-0 z-10 w-[240px] p-3 text-white bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] border border-glass-border rounded-[18px] flex flex-col gap-1.5 pointer-events-none animate-elastic-pop origin-bottom-left"
+                  className="absolute left-0 z-10 w-[240px] p-3 text-white bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] border border-glass-border rounded-[var(--radius-pill)] flex flex-col gap-1.5 pointer-events-none animate-elastic-pop origin-bottom-left"
                   style={{ bottom: `calc(100% + ${previewCardBottom}px)` }}
                 >
                   {/* Inner Shadow Layer covering the ENTIRE card, inheriting border-radius */}
@@ -1136,7 +1149,7 @@ export function App() {
 
               {hoveredAttachment === 'entity' && selectedEntity && (
                 <div
-                  className="absolute left-0 z-10 w-[280px] p-3 text-white bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] border border-glass-border rounded-[18px] flex flex-col gap-1.5 pointer-events-none animate-elastic-pop origin-bottom-left"
+                  className="absolute left-0 z-10 w-[280px] p-3 text-white bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] border border-glass-border rounded-[var(--radius-pill)] flex flex-col gap-1.5 pointer-events-none animate-elastic-pop origin-bottom-left"
                   style={{ bottom: `calc(100% + ${previewCardBottom}px)` }}
                 >
                   {/* Inner Shadow Layer covering the ENTIRE card, inheriting border-radius */}
@@ -1190,7 +1203,7 @@ export function App() {
 
               {hoveredAttachment === 'cua' && cuaEntities.length > 0 && (
                 <div
-                  className="absolute left-0 z-10 w-[300px] p-3 text-white bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] border border-glass-border rounded-[18px] flex flex-col gap-1.5 pointer-events-none animate-elastic-pop origin-bottom-left"
+                  className="absolute left-0 z-10 w-[300px] p-3 text-white bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] border border-glass-border rounded-[var(--radius-pill)] flex flex-col gap-1.5 pointer-events-none animate-elastic-pop origin-bottom-left"
                   style={{ bottom: `calc(100% + ${previewCardBottom}px)` }}
                 >
                   <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
@@ -1204,7 +1217,7 @@ export function App() {
                   <div className="h-px bg-white/12 my-0.5" />
                   <div className="grid gap-1 text-[11px] text-white/[0.84]">
                     {cuaEntities.slice(0, 5).map((entity) => (
-                      <div key={entity.id} className="grid grid-cols-[1fr_auto] gap-2 rounded-[8px] bg-white/[0.08] px-2 py-1">
+                      <div key={entity.id} className="grid grid-cols-[1fr_auto] gap-2 rounded-[var(--radius-pill)] bg-white/[0.08] px-2 py-1">
                         <span className="truncate">{entityLabel(entity)}</span>
                         <span className="text-[9px] uppercase text-white/55">{entity.role || entity.kind}</span>
                       </div>
@@ -1235,7 +1248,7 @@ export function App() {
               {/* Custom glassmorphic backend selector dropdown list, hovering above the small pill */}
               {backendDropdownOpen && (
                 <div
-                  className="backend-dropdown absolute left-0 z-10 min-w-[140px] p-1 border border-glass-border rounded-[14px] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] animate-dropdown-appear flex flex-col gap-0.5"
+                  className="backend-dropdown absolute left-0 z-10 min-w-[140px] p-1 border border-glass-border rounded-[var(--radius-pill)] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] animate-dropdown-appear flex flex-col gap-0.5"
                   style={{ bottom: `calc(100% + ${previewCardBottom}px)` }}
                 >
                   {/* Inner Shadow Layer covering the ENTIRE dropdown, inheriting border-radius */}
@@ -1246,7 +1259,7 @@ export function App() {
                       <button
                         key={item}
                         type="button"
-                        className={`flex items-center justify-between w-full py-1.5 px-3 border-0 rounded-[10px] bg-transparent text-left cursor-pointer transition-colors duration-140 font-semibold text-[11px] relative z-1 ${
+                        className={`flex items-center justify-between w-full py-1.5 px-3 border-0 rounded-[var(--radius-pill)] bg-transparent text-left cursor-pointer transition-colors duration-140 font-semibold text-[11px] relative z-1 ${
                           isSelected ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]' : 'text-white/80 hover:bg-white/10 hover:text-white'
                         }`}
                         onClick={() => {
@@ -1273,7 +1286,8 @@ export function App() {
               />
 
               <div
-                className="command-bubble relative z-4 flex flex-col bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] animate-pill-unfold origin-left"
+                className="command-bubble relative z-4 flex flex-col animate-pill-unfold origin-left"
+                data-pill-theme={settings?.modalTheme ?? 'blue'}
                 style={{
                   borderRadius: `${pillHeight / 2}px`
                 }}
@@ -1435,7 +1449,7 @@ export function App() {
                           if (turn.role === 'user') {
                             return (
                               <div key={turn.id} className="flex flex-col w-full items-end">
-                                <div className="user-bubble max-w-[85%] rounded-[16px_16px_0_16px] py-2.5 px-3.5 text-sm leading-[1.45] break-words whitespace-pre-wrap">
+                                <div className="user-bubble max-w-[85%] rounded-[var(--radius-pill)_var(--radius-pill)_0_var(--radius-pill)] py-2.5 px-3.5 text-sm leading-[1.45] break-words whitespace-pre-wrap">
                                   {turn.text}
                                 </div>
                                 {turn.pointerContext && <PointerContextPreview context={turn.pointerContext} />}
@@ -1460,7 +1474,7 @@ export function App() {
                             {thinkingTime > 0 && (
                               <div className="my-2.5 flex flex-col items-start w-full">
                                 <div
-                                  className={`inline-flex items-center gap-1.5 cursor-pointer select-none text-xs font-semibold text-white/60 py-1 px-2 rounded-[10px] bg-white/5 hover:bg-white/10 hover:text-white transition-all duration-150${showTools ? ' [&>.arrow]:rotate-90' : ''}`}
+                                  className={`inline-flex items-center gap-1.5 cursor-pointer select-none text-xs font-semibold text-white/60 py-1 px-2 rounded-[var(--radius-pill)] bg-white/5 hover:bg-white/10 hover:text-white transition-all duration-150${showTools ? ' [&>.arrow]:rotate-90' : ''}`}
                                   onClick={() => setShowTools(!showTools)}
                                 >
                                   <span>已思考 {thinkingTime}s</span>
@@ -1484,18 +1498,18 @@ export function App() {
 
                             {/* Other active states */}
                             {approval && (
-                              <div className="approval-box mt-3 border border-[rgba(255,255,255,0.15)] rounded-[10px] bg-white/5 p-3">
+                              <div className="approval-box mt-3 border border-[rgba(255,255,255,0.15)] rounded-[var(--radius-pill)] bg-white/5 p-3">
                                 <strong className="text-white text-[13px]">{approval.tool ?? 'Agent'} requests approval</strong>
                                 <p className="mt-2.5 text-[13px] leading-relaxed text-white/80">{approval.reason}</p>
                                 <div className="flex gap-2 mt-2.5">
                                   <button
-                                    className="approval-button bg-white/15 text-white hover:bg-white/25 rounded-full px-3 py-1 text-xs font-semibold"
+                                    className="approval-button bg-white/15 text-white hover:bg-white/25 rounded-[var(--radius-pill)] px-3 py-1 text-xs font-semibold"
                                     onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'approve')}
                                   >
                                     Allow
                                   </button>
                                   <button
-                                    className="approval-button bg-white/15 text-white hover:bg-white/25 rounded-full px-3 py-1 text-xs font-semibold"
+                                    className="approval-button bg-white/15 text-white hover:bg-white/25 rounded-[var(--radius-pill)] px-3 py-1 text-xs font-semibold"
                                     onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'deny')}
                                   >
                                     Deny
@@ -1589,12 +1603,15 @@ export function App() {
           fetchedModels={fetchedModels}
           isFetchingModels={isFetchingModels}
           fetchModelsError={fetchModelsError}
+          conversations={conversationsList}
           onClose={() => setSettingsOpen(false)}
           updateSettings={updateSettings}
           updateSecret={updateSecret}
           clearSecret={clearSecret}
           fetchModels={() => void fetchModels()}
           saveSettings={() => void saveSettings()}
+          loadConversation={(id) => void loadConversation(id)}
+          deleteConversation={(id, event) => void handleDeleteConversation(id, event)}
         />
       )}
 

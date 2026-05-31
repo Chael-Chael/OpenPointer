@@ -47,6 +47,14 @@ export class ClaudeAgentBridge implements AgentBridge {
     yield buildToolDiscoveryEvent(envelope);
     const runId = `claude-agent-${Date.now()}`;
     yield { type: 'run.started', runId, backend: this.id };
+
+    // The SDK expects an AbortController (with .signal), not a raw AbortSignal.
+    const controller = new AbortController();
+    if (options.signal) {
+      if (options.signal.aborted) controller.abort(options.signal.reason);
+      else options.signal.addEventListener('abort', () => controller.abort(options.signal!.reason), { once: true });
+    }
+
     try {
       for await (const raw of sdk.query({
         prompt: `${buildAgentInstructions(envelope)}\n\n${buildAgentInput(envelope)}`,
@@ -54,7 +62,7 @@ export class ClaudeAgentBridge implements AgentBridge {
           allowedTools: allowedToolsForEnvelope(envelope),
           includePartialMessages: true,
           maxTurns: 12,
-          abortController: options.signal,
+          abortController: controller,
           env: buildSdkEnv(this.config),
           pathToClaudeCodeExecutable: claudePath
         }
@@ -196,16 +204,154 @@ function mapClaudeMessage(raw: unknown): AgentEvent {
   if (!raw || typeof raw !== 'object') return { type: 'assistant.delta', text: String(raw) };
   const msg = raw as Record<string, unknown>;
   const type = String(msg.type ?? '');
-  if (type.includes('assistant') || type.includes('message')) {
-    return { type: 'assistant.delta', text: extractText(msg) };
+
+  // Handle user messages that contain tool results
+  if (type === 'user' && msg.message && typeof msg.message === 'object') {
+    const message = msg.message as Record<string, unknown>;
+    if (Array.isArray(message.content)) {
+      for (const block of message.content) {
+        if (block && typeof block === 'object') {
+          const blockRecord = block as Record<string, unknown>;
+          if (blockRecord.type === 'tool_result') {
+            // Extract the tool result content
+            const toolResult = blockRecord;
+            const toolUseId = String(toolResult.tool_use_id ?? '');
+            const content = toolResult.content;
+            let resultText = '';
+
+            if (typeof content === 'string') {
+              resultText = content;
+            } else if (Array.isArray(content)) {
+              resultText = content
+                .map((item: unknown) => {
+                  if (item && typeof item === 'object') {
+                    const itemRecord = item as Record<string, unknown>;
+                    if (itemRecord.type === 'text' && typeof itemRecord.text === 'string') {
+                      return itemRecord.text;
+                    }
+                  }
+                  return '';
+                })
+                .filter(Boolean)
+                .join('\n');
+            }
+
+            // Also check tool_use_result field
+            if (!resultText && msg.tool_use_result && typeof msg.tool_use_result === 'object') {
+              const toolUseResult = msg.tool_use_result as Record<string, unknown>;
+              if (typeof toolUseResult.stdout === 'string') {
+                resultText = toolUseResult.stdout;
+              }
+            }
+
+            return {
+              type: 'tool.completed',
+              name: 'Bash', // The tool that was called
+              output: resultText || JSON.stringify(content)
+            };
+          }
+        }
+      }
+    }
+    // Skip other user messages
+    return { type: 'assistant.delta', text: '' };
   }
-  if (type.includes('tool') && type.includes('result')) {
-    return { type: 'tool.completed', name: String(msg.name ?? msg.tool ?? 'tool'), output: msg.result ?? msg.content };
+
+  // Handle tool result events (standalone)
+  if (type === 'tool_result') {
+    return { type: 'tool.completed', name: String(msg.tool_use_id ?? msg.name ?? 'tool'), output: msg.content ?? msg.result };
   }
-  if (type.includes('tool')) {
-    return { type: 'tool.started', name: String(msg.name ?? msg.tool ?? 'tool'), input: msg.input };
+
+  // Handle assistant messages with structured content
+  if (type === 'assistant' && msg.message && typeof msg.message === 'object') {
+    const message = msg.message as Record<string, unknown>;
+    const content = message.content;
+    if (Array.isArray(content)) {
+      // Extract thinking blocks
+      const thinkingParts: string[] = [];
+      for (const block of content) {
+        if (block && typeof block === 'object') {
+          const blockRecord = block as Record<string, unknown>;
+          if (blockRecord.type === 'thinking' && typeof blockRecord.thinking === 'string') {
+            thinkingParts.push(blockRecord.thinking);
+          }
+        }
+      }
+      // Emit thinking content as special formatted text
+      if (thinkingParts.length > 0) {
+        const thinkingText = thinkingParts.join('\n');
+        return { type: 'assistant.delta', text: `\n\n> 💭 **Thinking:**\n> ${thinkingText.split('\n').join('\n> ')}\n\n` };
+      }
+    }
+    // Skip text blocks from assistant messages (they come from stream events)
+    return { type: 'assistant.delta', text: '' };
   }
-  return { type: 'assistant.delta', text: extractText(msg) };
+
+  // Handle stream events
+  if (type === 'stream_event' && msg.event && typeof msg.event === 'object') {
+    const event = msg.event as Record<string, unknown>;
+    const eventType = String(event.type ?? '');
+
+    // Content block start - may be tool_use or text
+    if (eventType === 'content_block_start' && event.content_block && typeof event.content_block === 'object') {
+      const block = event.content_block as Record<string, unknown>;
+      const blockType = String(block.type ?? '');
+
+      // Tool use block starting
+      if (blockType === 'tool_use') {
+        return { type: 'tool.started', name: String(block.name ?? 'unknown_tool'), input: undefined };
+      }
+      // Text block starting - skip
+      return { type: 'assistant.delta', text: '' };
+    }
+
+    // Content block delta - actual content
+    if (eventType === 'content_block_delta' && event.delta && typeof event.delta === 'object') {
+      const delta = event.delta as Record<string, unknown>;
+      const deltaType = String(delta.type ?? '');
+
+      // Text delta - actual response text
+      if (deltaType === 'text_delta' && typeof delta.text === 'string') {
+        return { type: 'assistant.delta', text: delta.text };
+      }
+
+      // Input JSON delta - tool input streaming (accumulate, don't display)
+      if (deltaType === 'input_json_delta') {
+        return { type: 'assistant.delta', text: '' };
+      }
+
+      // Thinking delta - skip (we use the complete thinking from assistant message)
+      if (deltaType === 'thinking_delta') {
+        return { type: 'assistant.delta', text: '' };
+      }
+
+      // Signature delta - skip
+      return { type: 'assistant.delta', text: '' };
+    }
+
+    // Content block stop
+    if (eventType === 'content_block_stop') {
+      return { type: 'assistant.delta', text: '' };
+    }
+
+    // Message start, message delta, message stop - skip
+    return { type: 'assistant.delta', text: '' };
+  }
+
+  // Handle final result
+  if (type === 'result') {
+    const text = typeof msg.result === 'string' ? msg.result : '';
+    return { type: 'run.completed', text };
+  }
+
+  // Skip system messages
+  if (type === 'system') {
+    return { type: 'assistant.delta', text: '' };
+  }
+
+  // Fallback - try to extract any text content
+  const text = extractText(msg);
+  return { type: 'assistant.delta', text };
 }
 
 function extractText(msg: Record<string, unknown>): string {

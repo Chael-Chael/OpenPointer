@@ -26,6 +26,7 @@ export type AppSettings = {
   newDialogBehavior: 'new' | 'continue' | 'interval';
   newDialogInterval: number;
   localVlmContextWindow: number;
+  modalTheme: 'blue' | 'white' | 'black';
 };
 
 export type HistoryEntry = {

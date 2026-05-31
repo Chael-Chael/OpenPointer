@@ -30,9 +30,9 @@
   --color-teal-selected: rgba(37, 99, 235, 0.9);
 
   /* Radii */
-  --radius-pill: 999px;
-  --radius-md: 14px;
-  --radius-sm: 10px;
+  --radius-pill: calc(var(--pill-height, 24px) / 2);
+  --radius-md: var(--radius-pill);
+  --radius-sm: var(--radius-pill);
 
   /* Animations */
   --animate-bubble-pop: bubble-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -464,6 +464,47 @@
   color: rgba(255, 255, 255, 0.55);
 }
 
+/* ── Command Bubble (Main Pill) ── */
+
+.command-bubble {
+  background: rgba(13, 111, 255, 0.85);
+  backdrop-filter: blur(6.8px);
+  -webkit-backdrop-filter: blur(6.8px);
+  box-shadow: 0 8px 6px rgba(0, 0, 0, 0.05);
+}
+
+.command-bubble[data-pill-theme="white"] {
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 6px rgba(0, 0, 0, 0.08);
+}
+
+.command-bubble[data-pill-theme="black"] {
+  background: rgba(28, 28, 30, 0.92);
+  box-shadow: 0 8px 6px rgba(0, 0, 0, 0.12);
+}
+
+/* White pill: dark text, dark inner shadow */
+.command-bubble[data-pill-theme="white"] .bubble-input {
+  color: #1c1c1e;
+}
+
+.command-bubble[data-pill-theme="white"] .bubble-input::placeholder {
+  color: rgba(0, 0, 0, 0.35);
+}
+
+.command-bubble[data-pill-theme="white"] .bubble-menu {
+  color: rgba(0, 0, 0, 0.6) !important;
+}
+
+.command-bubble[data-pill-theme="white"] .bubble-menu:hover {
+  background: rgba(0, 0, 0, 0.06) !important;
+  color: rgba(0, 0, 0, 0.85) !important;
+}
+
+.command-bubble[data-pill-theme="white"] > div:first-child {
+  box-shadow: inset 2px 3px 3px -3px rgba(0, 0, 0, 0.12), inset 0px -1px 1px 0px rgba(0, 0, 0, 0.06), inset 0px 1px 1px 0px rgba(0, 0, 0, 0.06) !important;
+}
+
 .bubble-dropdown {
   position: fixed;
   display: flex;
@@ -471,7 +512,7 @@
   gap: 2.5px;
   padding: 6px;
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 14px;
+  border-radius: var(--radius-pill);
   background: rgba(13, 111, 255, 0.92);
   backdrop-filter: blur(40px) saturate(180%);
   -webkit-backdrop-filter: blur(40px) saturate(180%);
@@ -494,7 +535,7 @@
   min-height: 34px;
   padding: 7px 9px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: rgba(255, 255, 255, 0.85);
   font-size: 13px;
@@ -541,7 +582,7 @@
   min-width: 0;
   height: 28px;
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 8px;
+  border-radius: var(--radius-pill);
   background: rgba(255, 255, 255, 0.12);
   color: #ffffff;
   padding: 0 8px;
@@ -636,8 +677,8 @@
   max-height: min(780px, calc(100vh - 32px));
   overflow: auto;
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 24px;
-  background: rgba(13, 111, 255, 0.85);
+  border-radius: var(--radius-pill);
+  background: rgba(13, 111, 255, 0.90);
   backdrop-filter: blur(40px) saturate(180%);
   -webkit-backdrop-filter: blur(40px) saturate(180%);
   box-shadow: 
@@ -652,6 +693,328 @@
 
 .modal-card {
   color: #ffffff;
+}
+
+/* ── Theme: White ── */
+
+.modal-card[data-theme="white"] {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  color: #1c1c1e !important;
+}
+
+.modal-card[data-theme="white"] .settings-section,
+.modal-card[data-theme="white"] .backend-card {
+  background: rgba(0, 0, 0, 0.04) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  color: #1c1c1e !important;
+  box-shadow: none !important;
+}
+
+.modal-card[data-theme="white"] .field {
+  color: #1c1c1e !important;
+}
+
+.modal-card[data-theme="white"] .field span {
+  color: #1c1c1e !important;
+}
+
+.modal-card[data-theme="white"] .field em {
+  color: rgba(0, 0, 0, 0.45) !important;
+}
+
+.modal-card[data-theme="white"] .field input,
+.modal-card[data-theme="white"] .field select {
+  background: rgba(0, 0, 0, 0.06) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+  color: #1c1c1e !important;
+  box-shadow: none !important;
+}
+
+.modal-card[data-theme="white"] .field input::placeholder {
+  color: rgba(0, 0, 0, 0.35) !important;
+}
+
+.modal-card[data-theme="white"] .field input:focus,
+.modal-card[data-theme="white"] .field select:focus {
+  background: rgba(0, 0, 0, 0.08) !important;
+  border-color: rgba(0, 122, 255, 0.5) !important;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.12) !important;
+}
+
+.modal-card[data-theme="white"] .field select {
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='rgba(0,0,0,0.45)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.modal-card[data-theme="white"] .field select option {
+  background: #ffffff;
+  color: #1c1c1e;
+}
+
+.modal-card[data-theme="white"] .toggle-row {
+  color: #1c1c1e !important;
+}
+
+.modal-card[data-theme="white"] .toggle-row input[type='checkbox'] {
+  accent-color: #007aff;
+}
+
+.modal-card[data-theme="white"] .segmented-control-track {
+  background: rgba(0, 0, 0, 0.06) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+}
+
+.modal-card[data-theme="white"] .segmented-control-item {
+  color: rgba(0, 0, 0, 0.4) !important;
+}
+
+.modal-card[data-theme="white"] .segmented-control-item:hover {
+  color: rgba(0, 0, 0, 0.6) !important;
+}
+
+.modal-card[data-theme="white"] .segmented-control-item.active {
+  color: #1c1c1e !important;
+}
+
+.modal-card[data-theme="white"] .segmented-control-indicator {
+  background: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1) !important;
+}
+
+.modal-card[data-theme="white"] .ghost-button {
+  color: #1c1c1e !important;
+  background: rgba(0, 0, 0, 0.06) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+  box-shadow: none !important;
+}
+
+.modal-card[data-theme="white"] .ghost-button:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.1) !important;
+  border-color: rgba(0, 0, 0, 0.18) !important;
+}
+
+.modal-card[data-theme="white"] .primary-button {
+  background: #007aff !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(0, 122, 255, 0.3) !important;
+}
+
+.modal-card[data-theme="white"] .primary-button:hover:not(:disabled) {
+  background: #0066d6 !important;
+}
+
+.modal-card[data-theme="white"] .secret-row button {
+  background: rgba(0, 0, 0, 0.06) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+  color: rgba(0, 0, 0, 0.6) !important;
+}
+
+.modal-card[data-theme="white"] .secret-row button:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.1) !important;
+  color: #1c1c1e !important;
+}
+
+.modal-card[data-theme="white"] .config-status {
+  border-color: rgba(0, 0, 0, 0.1) !important;
+}
+
+.modal-card[data-theme="white"] .config-status.tone-ready {
+  background: rgba(52, 199, 89, 0.12) !important;
+  color: #248a3d !important;
+  border-color: rgba(52, 199, 89, 0.2) !important;
+}
+
+.modal-card[data-theme="white"] .config-status.tone-warning {
+  background: rgba(255, 149, 0, 0.12) !important;
+  color: #c93400 !important;
+  border-color: rgba(255, 149, 0, 0.2) !important;
+}
+
+.modal-card[data-theme="white"] .config-status.tone-danger {
+  background: rgba(255, 59, 48, 0.12) !important;
+  color: #d70015 !important;
+  border-color: rgba(255, 59, 48, 0.2) !important;
+}
+
+.modal-card[data-theme="white"] .config-status.tone-unconfigured {
+  background: rgba(0, 0, 0, 0.04) !important;
+  color: rgba(0, 0, 0, 0.4) !important;
+}
+
+.modal-card[data-theme="white"] .history-item {
+  background: rgba(0, 0, 0, 0.04) !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  color: #1c1c1e !important;
+}
+
+.modal-card[data-theme="white"] .history-item:hover {
+  background: rgba(0, 0, 0, 0.08) !important;
+  border-color: rgba(0, 122, 255, 0.2) !important;
+}
+
+.modal-card[data-theme="white"] .history-item-title {
+  color: #1c1c1e !important;
+}
+
+.modal-card[data-theme="white"] .history-item-date {
+  color: rgba(0, 0, 0, 0.4) !important;
+}
+
+.modal-card[data-theme="white"] .slider-row input[type='range'] {
+  accent-color: #007aff;
+}
+
+/* ── Theme: Black ── */
+
+.modal-card[data-theme="black"] {
+  background: rgba(28, 28, 30, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: #ffffff !important;
+}
+
+.modal-card[data-theme="black"] .settings-section,
+.modal-card[data-theme="black"] .backend-card {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 255, 255, 0.95) !important;
+}
+
+.modal-card[data-theme="black"] .field {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.modal-card[data-theme="black"] .field span {
+  color: rgba(255, 255, 255, 0.95) !important;
+}
+
+.modal-card[data-theme="black"] .field em {
+  color: rgba(255, 255, 255, 0.45) !important;
+}
+
+.modal-card[data-theme="black"] .field input,
+.modal-card[data-theme="black"] .field select {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+  color: #ffffff !important;
+}
+
+.modal-card[data-theme="black"] .field input::placeholder {
+  color: rgba(255, 255, 255, 0.35) !important;
+}
+
+.modal-card[data-theme="black"] .field input:focus,
+.modal-card[data-theme="black"] .field select:focus {
+  background: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(0, 122, 255, 0.6) !important;
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.15) !important;
+}
+
+.modal-card[data-theme="black"] .field select {
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='rgba(255,255,255,0.5)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.modal-card[data-theme="black"] .field select option {
+  background: #1c1c1e;
+  color: #ffffff;
+}
+
+.modal-card[data-theme="black"] .toggle-row {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+.modal-card[data-theme="black"] .toggle-row input[type='checkbox'] {
+  accent-color: #0a84ff;
+}
+
+.modal-card[data-theme="black"] .segmented-control-track {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.modal-card[data-theme="black"] .segmented-control-indicator {
+  background: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+.modal-card[data-theme="black"] .ghost-button {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+}
+
+.modal-card[data-theme="black"] .ghost-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14) !important;
+}
+
+.modal-card[data-theme="black"] .primary-button {
+  background: #0a84ff !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 8px rgba(10, 132, 255, 0.3) !important;
+}
+
+.modal-card[data-theme="black"] .primary-button:hover:not(:disabled) {
+  background: #409cff !important;
+}
+
+.modal-card[data-theme="black"] .secret-row button {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+}
+
+.modal-card[data-theme="black"] .secret-row button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.14) !important;
+  color: #ffffff !important;
+}
+
+.modal-card[data-theme="black"] .config-status.tone-ready {
+  background: rgba(48, 209, 88, 0.15) !important;
+  color: #30d158 !important;
+}
+
+.modal-card[data-theme="black"] .config-status.tone-warning {
+  background: rgba(255, 214, 10, 0.15) !important;
+  color: #ffd60a !important;
+}
+
+.modal-card[data-theme="black"] .config-status.tone-danger {
+  background: rgba(255, 69, 58, 0.15) !important;
+  color: #ff453a !important;
+}
+
+.modal-card[data-theme="black"] .config-status.tone-unconfigured {
+  background: rgba(255, 255, 255, 0.06) !important;
+  color: rgba(255, 255, 255, 0.45) !important;
+}
+
+.modal-card[data-theme="black"] .history-item {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.modal-card[data-theme="black"] .history-item:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  border-color: rgba(10, 132, 255, 0.25) !important;
+}
+
+.modal-card[data-theme="black"] .history-item-title {
+  color: #ffffff !important;
+}
+
+.modal-card[data-theme="black"] .history-item-date {
+  color: rgba(255, 255, 255, 0.45) !important;
+}
+
+.modal-card[data-theme="black"] .slider-row input[type='range'] {
+  accent-color: #0a84ff;
+}
+
+.modal-card[data-theme="black"] .scrollbar-thin::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .modal-card,
@@ -670,6 +1033,77 @@
   &::-webkit-scrollbar-thumb:hover {
     background: rgba(255, 255, 255, 0.38) !important;
   }
+}
+
+/* ── Segmented Control (Vision OS Tab Bar) ── */
+
+.segmented-control {
+  margin-bottom: 18px;
+}
+
+.segmented-control-track {
+  display: flex;
+  position: relative;
+  gap: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-pill);
+  padding: 3px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+.segmented-control-item {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 0;
+  cursor: pointer;
+  transition: color 200ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  border-radius: var(--radius-pill);
+}
+
+.segmented-control-item:hover {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.segmented-control-item.active {
+  color: #ffffff;
+}
+
+.segmented-control-indicator {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc((100% - 6px) / 3);
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--radius-pill);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    inset 0 1px 1px rgba(255, 255, 255, 0.1);
+  transition: transform 280ms cubic-bezier(0.25, 0.1, 0.25, 1);
+  pointer-events: none;
+}
+
+.segmented-control-indicator[data-active="general"] {
+  transform: translateX(0);
+}
+
+.segmented-control-indicator[data-active="customization"] {
+  transform: translateX(calc(100% + 2px));
+}
+
+.segmented-control-indicator[data-active="history"] {
+  transform: translateX(calc(200% + 4px));
 }
 
 .modal-card .settings-section,
@@ -702,29 +1136,61 @@
   color: rgba(255, 255, 255, 0.9) !important;
 }
 
+.modal-card .toggle-row input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  accent-color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+}
+
 .modal-card .field input,
 .modal-card .field select {
-  background: rgba(255, 255, 255, 0.12) !important;
-  border: 1px solid rgba(255, 255, 255, 0.18) !important;
-  color: #ffffff !important;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
-  transition: all 150ms ease;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-pill);
+  color: #ffffff;
+  padding: 10px 18px;
+  min-height: 42px;
+  font-size: 14px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.06),
+    0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: all 200ms cubic-bezier(0.25, 0.1, 0.25, 1);
 }
 
 .modal-card .field input::placeholder {
-  color: rgba(255, 255, 255, 0.45) !important;
+  color: rgba(255, 255, 255, 0.4);
 }
 
 .modal-card .field input:focus,
 .modal-card .field select:focus {
-  background: rgba(255, 255, 255, 0.18) !important;
-  border-color: rgba(255, 255, 255, 0.4) !important;
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.12), inset 0 1px 2px rgba(0, 0, 0, 0.1) !important;
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.4);
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.12),
+    0 0 20px rgba(255, 255, 255, 0.06),
+    inset 0 1px 2px rgba(0, 0, 0, 0.06);
+  outline: none;
+}
+
+.modal-card .field select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='rgba(255,255,255,0.6)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 36px;
+  cursor: pointer;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 .modal-card .field select option {
-  background: #0d6fff !important;
-  color: #ffffff !important;
+  background: rgba(13, 111, 255, 0.95);
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 8px 12px;
 }
 
 /* History panel adjustments */
@@ -758,14 +1224,24 @@
 /* Button overrides inside settings modal */
 .modal-card .ghost-button {
   color: #ffffff !important;
-  background: rgba(255, 255, 255, 0.12) !important;
-  border: 1px solid rgba(255, 255, 255, 0.18) !important;
-  box-shadow: inset 0px 1px 1px 0px rgba(255, 255, 255, 0.15) !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: var(--radius-pill) !important;
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.1),
+    0 1px 0 rgba(255, 255, 255, 0.06) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  padding: 8px 18px !important;
+  transition: all 200ms cubic-bezier(0.25, 0.1, 0.25, 1) !important;
 }
 
 .modal-card .ghost-button:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.2) !important;
-  border-color: rgba(255, 255, 255, 0.28) !important;
+  background: rgba(255, 255, 255, 0.18) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+  box-shadow:
+    0 0 12px rgba(255, 255, 255, 0.06),
+    inset 0 1px 1px rgba(255, 255, 255, 0.1) !important;
 }
 
 .modal-card .ghost-button:disabled {
@@ -776,14 +1252,18 @@
   background: #ffffff !important;
   color: #0d6fff !important;
   border: none !important;
+  border-radius: var(--radius-pill) !important;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12) !important;
   font-weight: 700 !important;
+  padding: 8px 24px !important;
+  transition: all 200ms cubic-bezier(0.25, 0.1, 0.25, 1) !important;
 }
 
 .modal-card .primary-button:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.92) !important;
   color: #0c62e6 !important;
   transform: translateY(-0.5px) !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15) !important;
 }
 
 .modal-card .primary-button:active:not(:disabled) {
@@ -817,6 +1297,30 @@
 .modal-card .config-status.tone-unconfigured {
   background: rgba(255, 255, 255, 0.08) !important;
   color: rgba(255, 255, 255, 0.55) !important;
+}
+
+/* Secret field Clear button - pill shape */
+.modal-card .secret-row button {
+  border-radius: var(--radius-pill) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+  padding: 6px 16px !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: all 200ms cubic-bezier(0.25, 0.1, 0.25, 1) !important;
+}
+
+.modal-card .secret-row button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+  color: #ffffff !important;
+}
+
+/* Slider number input - pill shape */
+.modal-card .slider-row input[type='number'] {
+  border-radius: var(--radius-pill) !important;
+  text-align: center;
 }
 
 
