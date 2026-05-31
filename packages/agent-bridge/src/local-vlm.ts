@@ -1,5 +1,5 @@
 import { OpenAICompatibleBackend, isUnsupportedImageInputError, type ChatMessage } from '@openmagicpointer/backends';
-import type { AgentContextEnvelope, AgentEvent } from '@openmagicpointer/core';
+import { estimateTextTokens, type AgentContextEnvelope, type AgentEvent } from '@openmagicpointer/core';
 import { buildLocalVlmPrompt, dataUrlFromEnvelope } from './prompt.js';
 import type { AgentBridge, AgentRunOptions, LocalVlmBridgeConfig } from './types.js';
 
@@ -20,7 +20,7 @@ export class LocalVlmBridge implements AgentBridge {
 
     const limit = this.config.contextWindow ?? 32768;
     let messages = buildLocalMessages(envelope, true);
-    let estimatedTokens = estimateTokensForMessages(messages);
+    const estimatedTokens = estimateTokensForMessages(messages);
 
     if (estimatedTokens > limit && envelope.history && envelope.history.length > 2) {
       yield { 
@@ -160,19 +160,4 @@ function estimateTokensForMessages(messages: ChatMessage[]): number {
     }
   }
   return tokens;
-}
-
-function estimateTextTokens(text: string): number {
-  let englishWordCount = 0;
-  let chineseCharCount = 0;
-  for (const char of text) {
-    if (char.charCodeAt(0) > 127) {
-      chineseCharCount++;
-    } else if (/\w/.test(char)) {
-      englishWordCount += 0.25;
-    } else {
-      englishWordCount += 0.15;
-    }
-  }
-  return Math.ceil(chineseCharCount * 0.6 + englishWordCount);
 }

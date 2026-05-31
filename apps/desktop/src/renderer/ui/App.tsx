@@ -1,39 +1,42 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import type { AgentBackendId, AgentEvent, PointerEntity } from '@openmagicpointer/core';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
+import { clampNumber, estimateTextTokens, type AgentBackendId, type AgentEvent, type PointerEntity } from '@openmagicpointer/core';
 import type { AppSettings } from '@openmagicpointer/storage';
 import { parseVoiceCommand } from '@openmagicpointer/voice';
 import type { CursorPayload, HoldProgressPayload } from '../../shared/types';
 import { CursorTrail } from './CursorTrail';
 import { MarkdownRenderer } from './MarkdownRenderer';
+import {
+  emptyClearSecretFlags,
+  emptySecretDrafts,
+  selectableBackends,
+  type ClearSecretFlags,
+  type SecretDrafts,
+  type SelectionDrag,
+  type SelectionHandle,
+  type SelectionRect,
+  type UiState
+} from './state';
+import {
+  backendLabel,
+  backendReadiness,
+  isToolEvent,
+  latestEvent,
+  placeholderForState,
+  secretConfigured,
+  statusLabel
+} from './lib/backend-status';
+import {
+  availablePanelHeight,
+  computeShellPosition,
+  focusPromptInput,
+  normalizeSelection,
+  selectionFromDrag
+} from './lib/geometry';
+import { HoldRing, ToolRows } from './components/fields';
+import { SettingsPanel } from './components/SettingsPanel';
+import { HistoryPanel } from './components/HistoryPanel';
 
 const initialCursor: CursorPayload = { x: 300, y: 300, localX: 300, localY: 300, displayId: 0, dpr: 1 };
-const selectableBackends: AgentBackendId[] = ['auto', 'local-vlm', 'hermes', 'opencode', 'claude-agent', 'codex'];
-
-type UiState = 'idle' | 'holding' | 'composing' | 'submitting' | 'streaming' | 'approval' | 'completed' | 'failed';
-type StatusTone = 'ready' | 'missing' | 'working' | 'failed' | 'approval';
-type SecretDrafts = Record<'localVlmApiKey' | 'hermesApiKey' | 'opencodeApiKey' | 'claudeAgentApiKey' | 'codexApiKey', string>;
-type ClearSecretFlags = Record<keyof SecretDrafts, boolean>;
-type SelectionRect = { x1: number; y1: number; x2: number; y2: number };
-type SelectionHandle = 'n' | 'e' | 's' | 'w' | 'nw' | 'ne' | 'se' | 'sw';
-type SelectionDrag =
-  | { kind: 'move'; startX: number; startY: number; initial: SelectionRect }
-  | { kind: 'resize'; handle: SelectionHandle; startX: number; startY: number; initial: SelectionRect };
-
-const emptySecretDrafts: SecretDrafts = {
-  localVlmApiKey: '',
-  hermesApiKey: '',
-  opencodeApiKey: '',
-  claudeAgentApiKey: '',
-  codexApiKey: ''
-};
-
-const emptyClearSecretFlags: ClearSecretFlags = {
-  localVlmApiKey: false,
-  hermesApiKey: false,
-  opencodeApiKey: false,
-  claudeAgentApiKey: false,
-  codexApiKey: false
-};
 
 export function App() {
   const [cursor, setCursor] = useState<CursorPayload>(initialCursor);
@@ -68,9 +71,12 @@ export function App() {
   const [panelResizeDrag, setPanelResizeDrag] = useState<{ startY: number; startHeight: number } | null>(null);
   const [thinkingTime, setThinkingTime] = useState<number>(0);
   const [showTools, setShowTools] = useState<boolean>(false);
-  const thinkingTimerRef = useRef<any>(null);
+  const thinkingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const thinkingStartRef = useRef<number>(0);
   const streamPanelRef = useRef<HTMLDivElement | null>(null);
+  const lastGroundingPointRef = useRef<{ x: number; y: number } | null>(null);
+  // Submit-time screenshot signal from the main process (see CaptureActivity IPC).
+  const [captureActivity, setCaptureActivity] = useState<{ active: boolean; withCua: boolean }>({ active: false, withCua: false });
   const [historyTurns, setHistoryTurns] = useState<import('@openmagicpointer/core').ChatTurn[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [conversationsList, setConversationsList] = useState<import('@openmagicpointer/core').Conversation[]>([]);
@@ -121,8 +127,8 @@ export function App() {
       } else {
         setFetchModelsError(res.error || 'Failed to fetch models.');
       }
-    } catch (e: any) {
-      setFetchModelsError(e.message || 'Error occurred.');
+    } catch (e: unknown) {
+      setFetchModelsError(e instanceof Error ? e.message : 'Error occurred.');
     } finally {
       setIsFetchingModels(false);
     }
@@ -272,9 +278,19 @@ export function App() {
 
   useEffect(() => {
     if (conversationId && (state === 'completed' || state === 'composing' || state === 'idle' || state === 'failed')) {
-      window.openMagicPointer.getConversation(conversationId).then(conv => {
-        if (conv) setHistoryTurns(conv.turns);
-      });
+      // Guard against a stale response from a previous conversationId/state
+      // overwriting the history after a rapid switch.
+      let cancelled = false;
+      window.openMagicPointer.getConversation(conversationId)
+        .then(conv => {
+          if (!cancelled && conv) setHistoryTurns(conv.turns);
+        })
+        .catch(() => {
+          /* transient IPC failure; history simply isn't refreshed */
+        });
+      return () => {
+        cancelled = true;
+      };
     }
   }, [conversationId, state]);
   // Dynamic interactive region logic
@@ -454,20 +470,42 @@ export function App() {
       if (!selectedCuaEntityId) {
         setCuaEntities([]);
         setHoveredCuaEntityId(null);
+        lastGroundingPointRef.current = null;
       }
       return;
     }
+    // Settle-based throttle: only ground after the cursor has been still for
+    // GROUNDING_SETTLE_MS, and skip re-grounding when it barely moved since the
+    // last successful preview (dead zone). This avoids hammering CUA on every
+    // pixel of cursor movement.
+    const GROUNDING_SETTLE_MS = 350;
+    const GROUNDING_MOVE_DEADZONE_PX = 24;
+    const last = lastGroundingPointRef.current;
+    if (last && Math.hypot(cursor.localX - last.x, cursor.localY - last.y) < GROUNDING_MOVE_DEADZONE_PX) {
+      return;
+    }
     const timer = window.setTimeout(() => {
+      const point = { x: cursorRef.current.localX, y: cursorRef.current.localY };
       void window.openMagicPointer.requestGrounding({ cursor: cursorRef.current }).then((preview) => {
+        lastGroundingPointRef.current = point;
         setCuaEntities(preview.entities);
         setHoveredCuaEntityId(preview.hoveredEntityId ?? null);
       }).catch(() => {
+        lastGroundingPointRef.current = null;
         setCuaEntities([]);
         setHoveredCuaEntityId(null);
       });
-    }, 120);
+    }, GROUNDING_SETTLE_MS);
     return () => window.clearTimeout(timer);
   }, [active, cursor.localX, cursor.localY, selecting, selectionDrag, settings?.cuaMode, settingsOpen, selection, selectedCuaEntityId]);
+
+  // Track submit-time screenshot capture so the pointer can tint while it runs.
+  useEffect(() => {
+    const off = window.openMagicPointer.onCaptureActivity((payload) => {
+      setCaptureActivity({ active: payload.phase === 'start', withCua: payload.withCua });
+    });
+    return off;
+  }, []);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -500,12 +538,10 @@ export function App() {
         hasCodexApiKey: secretConfigured(settings.hasCodexApiKey, secretDrafts.codexApiKey, clearSecrets.codexApiKey)
       }
     : null, [clearSecrets, secretDrafts, settings]);
-  const runtimeStatus = useMemo(() => runtimeStatusFor(state, readiness), [readiness, state]);
   const discovery = latestEvent(events, 'tool.discovery');
   const approval = latestEvent(events, 'approval.requested');
   const latestFailure = latestEvent(events, 'run.failed');
   const toolEvents = useMemo(() => events.filter(isToolEvent), [events]);
-  const canSubmit = Boolean(prompt.trim()) && state !== 'submitting';
 
   // Capability indicators — only show when detected via tool.discovery
   const capabilities = useMemo(() => {
@@ -552,14 +588,17 @@ export function App() {
   }, [panelResizeDrag]);
 
   const streamPanelStyle = useMemo<CSSProperties>(() => {
+    // Cap the panel to the space actually left below the pill so it scrolls
+    // internally instead of being clipped by the screen's bottom edge.
+    const maxHeight = availablePanelHeight(effectiveShellPos.y, pillHeight);
     if (panelHeight !== null) {
       return {
-        height: `${panelHeight}px`,
-        maxHeight: 'none',
+        height: `${Math.min(panelHeight, maxHeight)}px`,
+        maxHeight: `${maxHeight}px`
       };
     }
-    return {};
-  }, [panelHeight]);
+    return { maxHeight: `${maxHeight}px` };
+  }, [panelHeight, effectiveShellPos.y, pillHeight]);
 
   function onResizeMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -599,10 +638,25 @@ export function App() {
     setSelection(null);
     setSelectedCuaEntityId(null);
     setHoveredCuaEntityId(null);
-    const res = await window.openMagicPointer.submitInstruction({ text, mode, backend, cursor, targetPath: selectedEntity ? undefined : targetPath, selectedEntity, conversationId: conversationId ?? undefined });
-    setConversationId(res.conversationId);
-    const conv = await window.openMagicPointer.getConversation(res.conversationId);
-    if (conv) setHistoryTurns(conv.turns);
+    // Clear the composer now that the message has been sent, so its text does
+    // not linger in the input box after submission.
+    setPrompt('');
+    try {
+      const res = await window.openMagicPointer.submitInstruction({ text, mode, backend, cursor, targetPath: selectedEntity ? undefined : targetPath, selectedEntity, conversationId: conversationId ?? undefined });
+      setConversationId(res.conversationId);
+      const conv = await window.openMagicPointer.getConversation(res.conversationId);
+      if (conv) setHistoryTurns(conv.turns);
+    } catch (error) {
+      // Without this the UI is stuck in the submitting state forever (no agent
+      // events arrive when the submit IPC itself fails) and the thinking timer
+      // keeps ticking.
+      if (thinkingTimerRef.current) {
+        clearInterval(thinkingTimerRef.current);
+        thinkingTimerRef.current = null;
+      }
+      setEvents([{ type: 'run.failed', error: error instanceof Error ? error.message : 'Failed to submit instruction.', recoverable: true }]);
+      setState('failed');
+    }
   }
 
   function startVoice() {
@@ -762,6 +816,17 @@ export function App() {
     return id ? cuaEntities.find((entity) => entity.id === id && entity.bbox) : undefined;
   }, [cuaEntities, hoveredCuaEntityId, selectedCuaEntityId]);
 
+  // Pointer tint state, by actual timing/priority:
+  //   'both'    teal   – submit-time screenshot taken with a selected CUA element
+  //   'capture' purple – submit-time screenshot only
+  //   'cua'     blue   – hovering over a CUA-grounded element (no screenshot yet)
+  //   'none'           – default glow
+  const pointerActivity = useMemo<'both' | 'capture' | 'cua' | 'none'>(() => {
+    if (captureActivity.active) return captureActivity.withCua ? 'both' : 'capture';
+    if (cuaEntities.length > 0) return 'cua';
+    return 'none';
+  }, [captureActivity.active, captureActivity.withCua, cuaEntities.length]);
+
   return (
     <div className={`screen${detached ? ' screen-detached' : ''}${selecting ? ' screen-selecting' : ''}`}>
       {hold?.state === 'holding' && <HoldRing cursor={hold.cursor} progress={hold.progress} />}
@@ -769,7 +834,7 @@ export function App() {
       {active && (
         <>
           <CursorTrail x={cursor.localX} y={cursor.localY} enabled={active} />
-          <div className={`cursor-glow state-${state}`} style={{ left: cursor.localX - 14, top: cursor.localY - 14 }} />
+          <div className={`cursor-glow state-${state} activity-${pointerActivity}`} style={{ left: cursor.localX - 14, top: cursor.localY - 14 }} />
 
           {highlightedCuaEntity?.bbox && (
             <div
@@ -999,610 +1064,35 @@ export function App() {
       )}
 
       {settingsOpen && settings && (
-        <div className="modal" role="dialog" aria-modal="true" aria-label="OpenMagicPointer settings">
-          <div className="modal-card">
-            <header className="settings-header">
-              <div>
-                <p>Agent backends</p>
-                <h2>Connection settings</h2>
-              </div>
-              <button className="ghost-button" onClick={() => setSettingsOpen(false)}>Close</button>
-            </header>
-
-            <section className="settings-section">
-              <label className="field">
-                <span>Default backend</span>
-                <select value={backend} onChange={(event) => setBackend(event.target.value as AgentBackendId)}>
-                  {selectableBackends.map((item) => <option key={item} value={item}>{backendLabel(item)}</option>)}
-                </select>
-              </label>
-            </section>
-
-            <div className="backend-grid">
-              <BackendCard title="Local VLM" status={backendReadiness(draftAwareSettings, 'local-vlm')}>
-                <label className="toggle-row">
-                  <input type="checkbox" checked={settings.localVlmEnabled} onChange={(event) => updateSettings({ localVlmEnabled: event.target.checked })} />
-                  <span>Enabled</span>
-                </label>
-                <TextField label="Base URL" value={settings.localVlmBaseUrl} onChange={(value) => updateSettings({ localVlmBaseUrl: value })} placeholder="https://provider.example/v1" />
-                <TextField label="Model" value={settings.localVlmModel} onChange={(value) => updateSettings({ localVlmModel: value })} placeholder="Optional model name" />
-
-                <div className="model-fetch-row" style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', marginTop: '4px' }}>
-                  <button
-                    type="button"
-                    className="ghost-button"
-                    style={{ fontSize: '11px', padding: '4px 10px', height: '28px', borderRadius: '8px' }}
-                    onClick={fetchModels}
-                    disabled={isFetchingModels || !settings.localVlmBaseUrl}
-                  >
-                    {isFetchingModels ? 'Fetching...' : 'Fetch vision models'}
-                  </button>
-                  {fetchModelsError && <span style={{ color: '#e5383b', fontSize: '11px' }}>{fetchModelsError}</span>}
-                </div>
-
-                {fetchedModels && fetchedModels.length > 0 && (
-                  <div className="fetched-models-list" style={{ marginTop: '8px', maxHeight: '100px', overflowY: 'auto', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '6px', background: 'rgba(0,0,0,0.02)' }}>
-                    <p style={{ margin: '0 0 4px', fontSize: '11px', fontWeight: 'bold', color: 'var(--muted)' }}>Select a vision model:</p>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                      {fetchedModels.map(m => (
-                        <span
-                          key={m}
-                          style={{ cursor: 'pointer', background: 'var(--accent-soft)', color: 'var(--accent-deep)', fontSize: '10px', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(52,120,246,0.15)' }}
-                          onClick={() => updateSettings({ localVlmModel: m })}
-                        >
-                          {m}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <label className="field" style={{ marginTop: '10px' }}>
-                  <span>
-                    Context window size
-                    <em>Default: 32k</em>
-                  </span>
-                  <input
-                    type="number"
-                    min={4096}
-                    max={2000000}
-                    step={4096}
-                    value={settings.localVlmContextWindow ?? 32768}
-                    onChange={(event) => updateSettings({ localVlmContextWindow: Number(event.target.value) })}
-                  />
-                </label>
-                <SecretField
-                  label="API key"
-                  value={secretDrafts.localVlmApiKey}
-                  configured={secretConfigured(settings.hasLocalVlmApiKey, secretDrafts.localVlmApiKey, clearSecrets.localVlmApiKey)}
-                  clearQueued={clearSecrets.localVlmApiKey}
-                  onChange={(value) => updateSecret('localVlmApiKey', value)}
-                  onClear={() => clearSecret('localVlmApiKey')}
-                />
-              </BackendCard>
-
-              <BackendCard title="Hermes" status={backendReadiness(draftAwareSettings, 'hermes')}>
-                <TextField label="Base URL" value={settings.hermesBaseUrl} onChange={(value) => updateSettings({ hermesBaseUrl: value })} placeholder="http://127.0.0.1:8642/v1" />
-                <SecretField
-                  label="API token"
-                  value={secretDrafts.hermesApiKey}
-                  configured={secretConfigured(settings.hasHermesApiKey, secretDrafts.hermesApiKey, clearSecrets.hermesApiKey)}
-                  clearQueued={clearSecrets.hermesApiKey}
-                  onChange={(value) => updateSecret('hermesApiKey', value)}
-                  onClear={() => clearSecret('hermesApiKey')}
-                />
-              </BackendCard>
-
-              <BackendCard title="OpenCode" status={backendReadiness(draftAwareSettings, 'opencode')}>
-                <TextField label="Base URL" value={settings.opencodeBaseUrl} onChange={(value) => updateSettings({ opencodeBaseUrl: value })} placeholder="http://127.0.0.1:4096" />
-                <SecretField
-                  label="API token"
-                  value={secretDrafts.opencodeApiKey}
-                  configured={secretConfigured(settings.hasOpenCodeApiKey, secretDrafts.opencodeApiKey, clearSecrets.opencodeApiKey)}
-                  clearQueued={clearSecrets.opencodeApiKey}
-                  onChange={(value) => updateSecret('opencodeApiKey', value)}
-                  onClear={() => clearSecret('opencodeApiKey')}
-                />
-              </BackendCard>
-
-              <BackendCard title="Claude Agent" status={backendReadiness(draftAwareSettings, 'claude-agent')}>
-                <label className="toggle-row">
-                  <input type="checkbox" checked={settings.claudeAgentEnabled} onChange={(event) => updateSettings({ claudeAgentEnabled: event.target.checked })} />
-                  <span>Enabled</span>
-                </label>
-                <SecretField
-                  label="API key"
-                  value={secretDrafts.claudeAgentApiKey}
-                  configured={secretConfigured(settings.hasClaudeAgentApiKey, secretDrafts.claudeAgentApiKey, clearSecrets.claudeAgentApiKey)}
-                  clearQueued={clearSecrets.claudeAgentApiKey}
-                  onChange={(value) => updateSecret('claudeAgentApiKey', value)}
-                  onClear={() => clearSecret('claudeAgentApiKey')}
-                />
-              </BackendCard>
-
-              <BackendCard title="Codex" status={backendReadiness(draftAwareSettings, 'codex')}>
-                <TextField label="App server URL" value={settings.codexAppServerUrl} onChange={(value) => updateSettings({ codexAppServerUrl: value })} placeholder="http://127.0.0.1:5050/v1" />
-                <SecretField
-                  label="API token"
-                  value={secretDrafts.codexApiKey}
-                  configured={secretConfigured(settings.hasCodexApiKey, secretDrafts.codexApiKey, clearSecrets.codexApiKey)}
-                  clearQueued={clearSecrets.codexApiKey}
-                  onChange={(value) => updateSecret('codexApiKey', value)}
-                  onClear={() => clearSecret('codexApiKey')}
-                />
-              </BackendCard>
-            </div>
-
-            <section className="settings-section runtime-section">
-              <label className="field">
-                <span>CUA mode</span>
-                <select value={settings.cuaMode} onChange={(event) => updateSettings({ cuaMode: event.target.value as AppSettings['cuaMode'] })}>
-                  <option value="off">Off</option>
-                  <option value="prefer">Prefer</option>
-                  <option value="require-on-explicit-command">Require on explicit command</option>
-                </select>
-              </label>
-              <label className="toggle-row">
-                <input type="checkbox" checked={settings.requireApprovalBeforeCua} onChange={(event) => updateSettings({ requireApprovalBeforeCua: event.target.checked })} />
-                <span>Require approval before CUA</span>
-              </label>
-              <label className="toggle-row">
-                <input type="checkbox" checked={settings.longPressEnabled} onChange={(event) => updateSettings({ longPressEnabled: event.target.checked })} />
-                <span>Long press activation</span>
-              </label>
-              <label className="toggle-row">
-                <input type="checkbox" checked={settings.voiceEnabled} onChange={(event) => updateSettings({ voiceEnabled: event.target.checked })} />
-                <span>Voice input</span>
-              </label>
-            </section>
-
-            <section className="settings-section">
-              <label className="field">
-                <span>New dialog behavior</span>
-                <select
-                  value={settings?.newDialogBehavior ?? 'continue'}
-                  onChange={(event) => updateSettings({ newDialogBehavior: event.target.value as any })}
-                >
-                  <option value="new">Always start a new conversation</option>
-                  <option value="continue">Always continue the previous conversation</option>
-                  <option value="interval">Start new conversation after interval, otherwise continue</option>
-                </select>
-              </label>
-              {(settings?.newDialogBehavior ?? 'continue') === 'interval' && (
-                <div style={{ marginTop: '12px' }}>
-                  <NumberSlider
-                    label="New dialog interval"
-                    value={settings?.newDialogInterval ?? 300}
-                    min={10}
-                    max={3600}
-                    step={10}
-                    unit="s"
-                    onChange={(value) => updateSettings({ newDialogInterval: value })}
-                  />
-                </div>
-              )}
-            </section>
-
-            <section className="settings-section appearance-section">
-              <NumberSlider
-                label="Pill width"
-                value={pillWidth}
-                min={280}
-                max={900}
-                step={10}
-                unit="px"
-                onChange={(value) => updateSettings({ pillWidth: value })}
-              />
-              <NumberSlider
-                label="Pill height"
-                value={pillHeight}
-                min={36}
-                max={96}
-                step={2}
-                unit="px"
-                onChange={(value) => updateSettings({ pillHeight: value })}
-              />
-            </section>
-
-            <div className="modal-actions">
-              <button className="primary-button" onClick={() => void saveSettings()}>Save settings</button>
-            </div>
-          </div>
-        </div>
+        <SettingsPanel
+          settings={settings}
+          draftAwareSettings={draftAwareSettings}
+          backend={backend}
+          setBackend={setBackend}
+          secretDrafts={secretDrafts}
+          clearSecrets={clearSecrets}
+          pillWidth={pillWidth}
+          pillHeight={pillHeight}
+          fetchedModels={fetchedModels}
+          isFetchingModels={isFetchingModels}
+          fetchModelsError={fetchModelsError}
+          onClose={() => setSettingsOpen(false)}
+          updateSettings={updateSettings}
+          updateSecret={updateSecret}
+          clearSecret={clearSecret}
+          fetchModels={() => void fetchModels()}
+          saveSettings={() => void saveSettings()}
+        />
       )}
 
       {historyOpen && (
-        <div className="modal" role="dialog" aria-modal="true" aria-label="OpenMagicPointer conversation history">
-          <div className="modal-card">
-            <header className="settings-header">
-              <div>
-                <p>Chat history</p>
-                <h2>Past conversations</h2>
-              </div>
-              <button className="ghost-button" onClick={() => setHistoryOpen(false)}>Close</button>
-            </header>
-
-            {conversationsList.length === 0 ? (
-              <div className="history-empty">
-                <div className="history-empty-icon">🕒</div>
-                <p>No past conversations found. Start a new chat to begin!</p>
-              </div>
-            ) : (
-              <div className="history-list">
-                {conversationsList.map((conv) => (
-                  <div key={conv.id} className="history-item" onClick={() => void loadConversation(conv.id)}>
-                    <div className="history-item-info">
-                      <span className="history-item-title">{conv.title || 'Untitled Conversation'}</span>
-                      <span className="history-item-date">{new Date(conv.updatedAt).toLocaleString()}</span>
-                    </div>
-                    <div className="history-item-actions">
-                      <button className="history-item-btn primary-button" type="button" onClick={(e) => { e.stopPropagation(); void loadConversation(conv.id); }}>Open</button>
-                      <button className="history-item-btn ghost-button" type="button" onClick={(e) => void handleDeleteConversation(conv.id, e)}>Delete</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+        <HistoryPanel
+          conversations={conversationsList}
+          onClose={() => setHistoryOpen(false)}
+          loadConversation={(id) => void loadConversation(id)}
+          deleteConversation={(id, event) => void handleDeleteConversation(id, event)}
+        />
       )}
     </div>
   );
-}
-
-
-function HoldRing({ cursor, progress }: { cursor: CursorPayload; progress: number }) {
-  const radius = 12;
-  const circumference = 2 * Math.PI * radius;
-  return (
-    <svg className="hold-ring" style={{ transform: `translate3d(${cursor.localX - 16}px, ${cursor.localY - 16}px, 0)` }} viewBox="0 0 32 32">
-      <circle className="hold-ring-track" cx="16" cy="16" r={radius} />
-      <circle className="hold-ring-progress" cx="16" cy="16" r={radius} strokeDasharray={circumference} strokeDashoffset={circumference * (1 - progress)} />
-    </svg>
-  );
-}
-
-function ToolRows({ events }: { events: Array<Extract<AgentEvent, { type: 'tool.started' | 'tool.completed' }>> }) {
-  return (
-    <div className="tool-rows">
-      {events.map((event, index) => (
-        <div key={`${event.type}-${index}`}>
-          <span>{event.type === 'tool.started' ? 'Using' : 'Finished'}</span>
-          <strong>{event.name}</strong>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function BackendCard({ title, status, children }: { title: string; status: BackendReadiness; children: ReactNode }) {
-  return (
-    <section className="backend-card">
-      <header>
-        <div>
-          <h3>{title}</h3>
-          <p>{status.detail}</p>
-        </div>
-        <span className={`config-status tone-${status.tone}`}>{status.label}</span>
-      </header>
-      <div className="backend-fields">{children}</div>
-    </section>
-  );
-}
-
-function TextField({ label, value, onChange, placeholder }: { label: string; value: string; onChange(value: string): void; placeholder?: string }) {
-  return (
-    <label className="field">
-      <span>{label}</span>
-      <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} />
-    </label>
-  );
-}
-
-function NumberSlider({
-  label,
-  value,
-  min,
-  max,
-  step,
-  unit,
-  onChange
-}: {
-  label: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  unit: string;
-  onChange(value: number): void;
-}) {
-  function commit(rawValue: string) {
-    onChange(clampNumber(Number(rawValue), min, max, value));
-  }
-
-  return (
-    <label className="field slider-field">
-      <span>
-        {label}
-        <em>{value}{unit}</em>
-      </span>
-      <div className="slider-row">
-        <input type="range" min={min} max={max} step={step} value={value} onChange={(event) => commit(event.target.value)} />
-        <input type="number" min={min} max={max} step={step} value={value} onChange={(event) => commit(event.target.value)} />
-      </div>
-    </label>
-  );
-}
-
-function SecretField({
-  label,
-  value,
-  configured,
-  clearQueued,
-  onChange,
-  onClear
-}: {
-  label: string;
-  value: string;
-  configured: boolean;
-  clearQueued: boolean;
-  onChange(value: string): void;
-  onClear(): void;
-}) {
-  return (
-    <label className="field secret-field">
-      <span>
-        {label}
-        <em>{clearQueued ? 'Will clear' : configured ? 'Configured' : 'Not configured'}</em>
-      </span>
-      <div className="secret-row">
-        <input
-          type="password"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          placeholder={configured && !clearQueued ? 'Configured - paste to replace' : 'Paste key or token'}
-        />
-        <button type="button" onClick={onClear} disabled={!configured && !value}>Clear</button>
-      </div>
-    </label>
-  );
-}
-
-function ArrowMark() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M5 12h13M13 6l6 6-6 6" />
-    </svg>
-  );
-}
-
-function SettingsMark() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
-      <path d="M18.7 13.2c.1-.4.1-.8.1-1.2s0-.8-.1-1.2l2-1.5-2-3.4-2.4 1a8.2 8.2 0 0 0-2.1-1.2L14 3h-4l-.3 2.7c-.8.3-1.5.7-2.1 1.2l-2.4-1-2 3.4 2 1.5c-.1.4-.1.8-.1 1.2s0 .8.1 1.2l-2 1.5 2 3.4 2.4-1c.6.5 1.3.9 2.1 1.2L10 21h4l.3-2.7c.8-.3 1.5-.7 2.1-1.2l2.4 1 2-3.4-2.1-1.5Z" />
-    </svg>
-  );
-}
-
-type BackendReadiness = {
-  configured: boolean;
-  label: string;
-  detail: string;
-  tone: StatusTone;
-};
-
-function backendReadiness(settings: AppSettings | null, backend: AgentBackendId): BackendReadiness {
-  if (!settings) return { configured: false, label: 'Missing config', detail: 'Settings are loading.', tone: 'missing' };
-  if (backend === 'auto') {
-    const configured = selectableBackends.filter((item) => item !== 'auto').some((item) => backendReadiness(settings, item).configured);
-    return configured
-      ? { configured: true, label: 'Ready', detail: 'Auto will choose from configured backends.', tone: 'ready' }
-      : { configured: false, label: 'Missing config', detail: 'Configure at least one backend.', tone: 'missing' };
-  }
-  if (backend === 'local-vlm') {
-    if (!settings.localVlmEnabled) return { configured: false, label: 'Missing config', detail: 'Local VLM is disabled.', tone: 'missing' };
-    if (!settings.localVlmBaseUrl.trim()) return { configured: false, label: 'Missing config', detail: 'Add a Local VLM base URL.', tone: 'missing' };
-    if (!settings.hasLocalVlmApiKey) return { configured: false, label: 'Missing config', detail: 'Add a Local VLM API key.', tone: 'missing' };
-    return { configured: true, label: 'Ready', detail: 'Base URL and API key are configured.', tone: 'ready' };
-  }
-  if (backend === 'hermes') {
-    if (!settings.hermesBaseUrl.trim()) return { configured: false, label: 'Missing config', detail: 'Add a Hermes base URL.', tone: 'missing' };
-    return { configured: true, label: 'Ready', detail: settings.hasHermesApiKey ? 'Base URL and token are configured.' : 'Base URL configured; token optional.', tone: 'ready' };
-  }
-  if (backend === 'opencode') {
-    if (!settings.opencodeBaseUrl.trim()) return { configured: false, label: 'Missing config', detail: 'Add an OpenCode base URL.', tone: 'missing' };
-    return { configured: true, label: 'Ready', detail: settings.hasOpenCodeApiKey ? 'Base URL and token are configured.' : 'Base URL configured; token optional.', tone: 'ready' };
-  }
-  if (backend === 'claude-agent') {
-    if (!settings.claudeAgentEnabled) return { configured: false, label: 'Missing config', detail: 'Claude Agent is disabled.', tone: 'missing' };
-    if (!settings.hasClaudeAgentApiKey) return { configured: false, label: 'Missing config', detail: 'Add a Claude Agent API key.', tone: 'missing' };
-    return { configured: true, label: 'Ready', detail: 'Claude Agent is enabled with a configured key.', tone: 'ready' };
-  }
-  if (backend === 'codex') {
-    if (!settings.codexAppServerUrl.trim()) return { configured: false, label: 'Missing config', detail: 'Add a Codex app-server URL.', tone: 'missing' };
-    return { configured: true, label: 'Ready', detail: settings.hasCodexApiKey ? 'Server URL and token are configured.' : 'Server URL configured; token optional.', tone: 'ready' };
-  }
-  return { configured: true, label: 'Ready', detail: 'Backend is available.', tone: 'ready' };
-}
-
-function runtimeStatusFor(state: UiState, readiness: BackendReadiness): { label: string; tone: StatusTone } {
-  if (!readiness.configured) return { label: 'Missing config', tone: 'missing' };
-  if (state === 'submitting') return { label: 'Connecting', tone: 'working' };
-  if (state === 'streaming') return { label: 'Streaming', tone: 'working' };
-  if (state === 'approval') return { label: 'Approval needed', tone: 'approval' };
-  if (state === 'failed') return { label: 'Failed', tone: 'failed' };
-  return { label: 'Ready', tone: 'ready' };
-}
-
-function secretConfigured(stored: boolean, draft: string, clearQueued: boolean): boolean {
-  if (clearQueued) return false;
-  return stored || Boolean(draft.trim());
-}
-
-function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
-  const numeric = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(numeric)) return fallback;
-  return Math.round(Math.min(max, Math.max(min, numeric)));
-}
-
-function computeShellPosition(
-  cursorX: number,
-  cursorY: number,
-  shellWidth = 520,
-  pillHeight = 44,
-  hasPanel = false
-) {
-  // Determine overall estimated height of the shell
-  const shellHeight = !hasPanel ? pillHeight : 320;
-
-  // Horizontal Position
-  let preferredX = cursorX + 36;
-  
-  // If the right edge of the shell overflows the screen edge (with 12px margin),
-  // we try to flip it to the left side of the cursor.
-  if (cursorX + 36 + shellWidth + 12 > window.innerWidth) {
-    if (cursorX - shellWidth - 36 >= 12) {
-      preferredX = cursorX - shellWidth - 36;
-    } else {
-      preferredX = cursorX - shellWidth - 36;
-    }
-  }
-
-  // Vertical Position
-  const preferredY = cursorY - pillHeight / 2;
-  let y = preferredY;
-
-  // Check bottom boundary collision
-  if (preferredY + shellHeight + 12 > window.innerHeight) {
-    y = cursorY - shellHeight - 24;
-  }
-  
-  // Check top boundary collision
-  if (y < 12) {
-    y = cursorY + 24;
-  }
-
-  // Final clamps to ensure the shell stays completely on-screen
-  return {
-    x: Math.min(Math.max(12, preferredX), Math.max(12, window.innerWidth - shellWidth - 12)),
-    y: Math.min(Math.max(12, y), Math.max(12, window.innerHeight - shellHeight - 12))
-  };
-}
-
-function focusPromptInput(input: HTMLTextAreaElement | null) {
-  input?.focus({ preventScroll: true });
-}
-
-function normalizeSelection(rect: SelectionRect): SelectionRect {
-  return {
-    x1: Math.min(rect.x1, rect.x2),
-    y1: Math.min(rect.y1, rect.y2),
-    x2: Math.max(rect.x1, rect.x2),
-    y2: Math.max(rect.y1, rect.y2)
-  };
-}
-
-function clampSelection(rect: SelectionRect, width: number, height: number): SelectionRect {
-  const normalized = normalizeSelection(rect);
-  return {
-    x1: Math.max(0, Math.min(width, normalized.x1)),
-    y1: Math.max(0, Math.min(height, normalized.y1)),
-    x2: Math.max(0, Math.min(width, normalized.x2)),
-    y2: Math.max(0, Math.min(height, normalized.y2))
-  };
-}
-
-function selectionFromDrag(drag: SelectionDrag, clientX: number, clientY: number, width: number, height: number): SelectionRect {
-  const dx = clientX - drag.startX;
-  const dy = clientY - drag.startY;
-  if (drag.kind === 'move') {
-    const rectWidth = drag.initial.x2 - drag.initial.x1;
-    const rectHeight = drag.initial.y2 - drag.initial.y1;
-    const x1 = Math.max(0, Math.min(width - rectWidth, drag.initial.x1 + dx));
-    const y1 = Math.max(0, Math.min(height - rectHeight, drag.initial.y1 + dy));
-    return { x1, y1, x2: x1 + rectWidth, y2: y1 + rectHeight };
-  }
-
-  const next = { ...drag.initial };
-  if (drag.handle.includes('w')) next.x1 += dx;
-  if (drag.handle.includes('e')) next.x2 += dx;
-  if (drag.handle.includes('n')) next.y1 += dy;
-  if (drag.handle.includes('s')) next.y2 += dy;
-  return clampSelection(next, width, height);
-}
-
-function placeholderForState(state: UiState, readiness: BackendReadiness): string {
-  if (!readiness.configured) return readiness.detail;
-  if (state === 'submitting') return 'Connecting...';
-  if (state === 'streaming') return 'Ask a follow-up...';
-  if (state === 'failed') return 'Try again...';
-  return 'Input text...';
-}
-
-function backendLabel(backend: AgentBackendId): string {
-  switch (backend) {
-    case 'local-vlm':
-      return 'Local VLM';
-    case 'hermes':
-      return 'Hermes';
-    case 'opencode':
-      return 'OpenCode';
-    case 'claude-agent':
-      return 'Claude Agent';
-    case 'codex':
-      return 'Codex';
-    case 'mock':
-      return 'Mock';
-    case 'auto':
-      return 'Auto';
-  }
-}
-
-function statusLabel(state: UiState): string {
-  switch (state) {
-    case 'submitting':
-      return 'Connecting';
-    case 'streaming':
-      return 'Streaming';
-    case 'approval':
-      return 'Approval';
-    case 'completed':
-      return 'Done';
-    case 'failed':
-      return 'Failed';
-    case 'holding':
-      return 'Holding';
-    case 'composing':
-      return 'Ready';
-    case 'idle':
-      return 'Idle';
-  }
-}
-
-function latestEvent<T extends AgentEvent['type']>(events: AgentEvent[], type: T): Extract<AgentEvent, { type: T }> | undefined {
-  for (let index = events.length - 1; index >= 0; index -= 1) {
-    const event = events[index];
-    if (event?.type === type) return event as Extract<AgentEvent, { type: T }>;
-  }
-  return undefined;
-}
-
-function isToolEvent(event: AgentEvent): event is Extract<AgentEvent, { type: 'tool.started' | 'tool.completed' }> {
-  return event.type === 'tool.started' || event.type === 'tool.completed';
-}
-
-function estimateTextTokens(text: string): number {
-  let englishWordCount = 0;
-  let chineseCharCount = 0;
-  for (const char of text) {
-    if (char.charCodeAt(0) > 127) {
-      chineseCharCount++;
-    } else if (/\w/.test(char)) {
-      englishWordCount += 0.25;
-    } else {
-      englishWordCount += 0.15;
-    }
-  }
-  return Math.ceil(chineseCharCount * 0.6 + englishWordCount);
 }

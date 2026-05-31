@@ -1,7 +1,20 @@
 import { screen } from 'electron';
-import type { PointerContext, PointerEntity, PointerEntityKind, Rect } from '@openmagicpointer/core';
+import type { PointerContext, PointerEntity, Rect } from '@openmagicpointer/core';
 import type { CursorPayload, GroundingPreviewResponse } from '../shared/types.js';
-import { CuaSidecarManager } from './cua-sidecar.js';
+import { CuaSidecarManager, type CuaToolResult } from './cua-sidecar.js';
+import {
+  type DisplayBounds,
+  type ParsedTreeElement,
+  firstNonEmpty,
+  isNoiseEntity,
+  kindFromControlType,
+  normalizeRect,
+  normalizeText,
+  parseTreeMarkdown,
+  pointInRect,
+  resolveHoveredEntity,
+  screenRectToLocal
+} from './cua-geometry.js';
 
 type CuaWindowRecord = {
   window_id?: number;
@@ -42,14 +55,54 @@ export class CuaGroundingProvider {
       const state = await this.sidecar.callTool('get_window_state', {
         pid: matched.pid,
         window_id: matched.window_id,
-        capture_mode: 'som'
+        // 'ax' = accessibility tree only, no screenshot. Grounding preview only
+        // consumes the structured element list, so skipping the WGC/BitBlt capture
+        // avoids redundant screenshots (and their warnings) on every cursor move.
+        capture_mode: 'ax'
       });
-      const structured = state.structuredContent as { elements?: CuaElementRecord[]; element_count?: number } | undefined;
+      if (state.isError) {
+        return { status: 'unavailable', entities: [], error: cuaErrorText(state) ?? 'CUA get_window_state reported an error.' };
+      }
+      const structured = state.structuredContent as
+        | { elements?: CuaElementRecord[]; element_count?: number; tree_markdown?: string }
+        | undefined;
       const coordinateScale = usesPhysicalCoordinates(matched.bounds, cursor) ? Math.max(1, cursor.dpr || 1) : 1;
-      const entities = (structured?.elements ?? [])
-        .map((element) => entityFromCuaElement(element, matched.pid!, String(matched.window_id), coordinateScale))
-        .filter((entity): entity is PointerEntity => Boolean(entity));
-      const hoveredEntityId = nearestEntityId(cursor, entities);
+      // Fetch displays once and reuse across every element; resolving them
+      // per-element via screen.getDisplayMatching is a costly native call.
+      const displays: DisplayBounds[] = screen.getAllDisplays().map((display) => ({ ...display.bounds }));
+      let entities = (structured?.elements ?? [])
+        .map((element) => entityFromCuaElement(element, matched.pid!, String(matched.window_id), coordinateScale, displays))
+        .filter((entity): entity is PointerEntity => Boolean(entity))
+        // Drop pure layout containers with no actions and no label; they add
+        // noise to the element list and the model's `nearby` context.
+        .filter((entity) => !isNoiseEntity(entity));
+
+      // Release builds of cua-driver omit the structured `elements` array (it is
+      // added by the source patch) but still render `tree_markdown`. Fall back to
+      // parsing that so grounding works without a patched/compiled driver. These
+      // elements have no per-element bbox, so they inherit the window bounds and
+      // resolve at the window level instead of pixel-precise hover.
+      let coordinateless = false;
+      if (entities.length === 0 && structured?.tree_markdown) {
+        const windowRect = matched.bounds ? screenRectToLocal(normalizeRect(matched.bounds) ?? matched.bounds, coordinateScale, displays) : undefined;
+        entities = parseTreeMarkdown(structured.tree_markdown).map((element) =>
+          entityFromTreeElement(element, matched.pid!, String(matched.window_id), windowRect)
+        );
+        coordinateless = entities.length > 0;
+      }
+
+      if (entities.length === 0) {
+        return {
+          status: 'fallback',
+          entities: [],
+          pid: matched.pid,
+          windowId: String(matched.window_id),
+          error: 'CUA matched a window but returned no usable elements.'
+        };
+      }
+      // With only window-level bounds, cursor hit-testing is meaningless, so
+      // leave the hovered entity unset and let the user pick from the list.
+      const hoveredEntityId = coordinateless ? undefined : resolveHoveredEntity(cursor, entities);
       return {
         status: 'matched',
         entities,
@@ -97,11 +150,17 @@ function matchWindow(windows: CuaWindowRecord[], cursor: CursorPayload, windowIn
   return best && best.score >= 6 ? best.record : undefined;
 }
 
-function entityFromCuaElement(element: CuaElementRecord, pid: number, windowId: string, coordinateScale: number): PointerEntity | undefined {
+function entityFromCuaElement(
+  element: CuaElementRecord,
+  pid: number,
+  windowId: string,
+  coordinateScale: number,
+  displays: DisplayBounds[]
+): PointerEntity | undefined {
   if (typeof element.element_index !== 'number' || !element.rect) return undefined;
   const screenRect = normalizeRect(element.rect);
   if (!screenRect) return undefined;
-  const localRect = screenRectToLocal(screenRect, coordinateScale);
+  const localRect = screenRectToLocal(screenRect, coordinateScale, displays);
   const role = element.control_type ?? 'Unknown';
   const label = firstNonEmpty(element.name, element.value, element.help_text, element.automation_id, role);
   return {
@@ -125,27 +184,33 @@ function entityFromCuaElement(element: CuaElementRecord, pid: number, windowId: 
   };
 }
 
-function nearestEntityId(cursor: CursorPayload, entities: PointerEntity[]): string | undefined {
-  const hits = entities
-    .filter((entity) => entity.bbox && pointInRect(cursor.localX, cursor.localY, entity.bbox))
-    .sort((a, b) => area(a.bbox!) - area(b.bbox!));
-  return hits[0]?.id;
-}
-
-function screenRectToLocal(rect: Rect, coordinateScale: number): Rect {
-  const scale = Math.max(1, coordinateScale || 1);
-  const dipRect = {
-    x: rect.x / scale,
-    y: rect.y / scale,
-    width: rect.width / scale,
-    height: rect.height / scale
-  };
-  const display = screen.getDisplayMatching({ x: dipRect.x, y: dipRect.y, width: Math.max(1, dipRect.width), height: Math.max(1, dipRect.height) });
+function entityFromTreeElement(
+  element: ParsedTreeElement,
+  pid: number,
+  windowId: string,
+  windowRect: Rect | undefined
+): PointerEntity {
+  const role = element.control_type || 'Unknown';
+  const label = firstNonEmpty(element.name, element.value, element.help_text, element.automation_id, role);
   return {
-    x: dipRect.x - display.bounds.x,
-    y: dipRect.y - display.bounds.y,
-    width: dipRect.width,
-    height: dipRect.height
+    id: `cua-${pid}-${windowId}-${element.element_index}`,
+    kind: kindFromControlType(role),
+    text: label,
+    role,
+    name: element.name,
+    // Release driver gives no per-element bbox; inherit the window bounds so the
+    // element still has a location for the agent and any window-level overlay.
+    bbox: windowRect,
+    accessibilityPath: `cua:${pid}:${windowId}:${element.element_index}`,
+    confidence: 0.6,
+    origin: 'accessibility',
+    groundingRef: {
+      provider: 'cua',
+      pid,
+      windowId,
+      elementIndex: element.element_index,
+      actions: element.actions ?? []
+    }
   };
 }
 
@@ -158,36 +223,8 @@ function usesPhysicalCoordinates(rect: Rect | undefined, cursor: CursorPayload):
   return !pointInRect(cursor.x, cursor.y, rect) && pointInRect(cursor.x * cursor.dpr, cursor.y * cursor.dpr, rect);
 }
 
-function kindFromControlType(controlType: string): PointerEntityKind {
-  const value = controlType.toLowerCase();
-  if (value.includes('edit')) return 'input';
-  if (value.includes('hyperlink')) return 'link';
-  if (value.includes('text') || value.includes('document')) return 'text';
-  if (value.includes('table') || value.includes('datagrid')) return 'table';
-  if (value.includes('image')) return 'image';
-  if (/(button|menuitem|checkbox|radiobutton|combobox|tabitem|splitbutton)/i.test(controlType)) return 'button';
-  return 'unknown';
+function cuaErrorText(result: CuaToolResult): string | undefined {
+  const text = result.content?.map((part) => part.text).filter(Boolean).join(' ').trim();
+  return text || undefined;
 }
 
-function normalizeRect(rect: Rect): Rect | undefined {
-  const width = Number(rect.width);
-  const height = Number(rect.height);
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return undefined;
-  return { x: Number(rect.x), y: Number(rect.y), width, height };
-}
-
-function pointInRect(x: number, y: number, rect: Rect): boolean {
-  return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
-}
-
-function area(rect: Rect): number {
-  return rect.width * rect.height;
-}
-
-function normalizeText(value: string | undefined): string {
-  return value?.trim().toLowerCase() ?? '';
-}
-
-function firstNonEmpty(...values: Array<string | undefined>): string | undefined {
-  return values.find((value) => value?.trim())?.trim();
-}

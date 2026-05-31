@@ -13,6 +13,10 @@ coverage/
 .env.*
 !.env.example
 
+# Local secrets / scratch artifacts that must never be committed
+apikey.txt
+nul
+
 *.log
 npm-debug.log*
 yarn-debug.log*

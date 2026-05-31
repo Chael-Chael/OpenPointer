@@ -3,6 +3,7 @@ import type { AgentEvent } from '@openmagicpointer/core';
 import type { AppSettings } from '@openmagicpointer/storage';
 import { OMP_CHANNELS } from '../shared/ipc.js';
 import type {
+  CaptureActivityPayload,
   CursorPayload,
   DesktopApi,
   GroundingPreviewResponse,
@@ -24,6 +25,7 @@ const api: DesktopApi = {
   onCursor: (cb) => on<CursorPayload>(OMP_CHANNELS.Cursor, cb),
   onHoldProgress: (cb) => on<HoldProgressPayload>(OMP_CHANNELS.HoldProgress, cb),
   onAgentEvent: (cb) => on<AgentEvent>(OMP_CHANNELS.AgentEvent, cb),
+  onCaptureActivity: (cb) => on<CaptureActivityPayload>(OMP_CHANNELS.CaptureActivity, cb),
   deactivate: () => ipcRenderer.send(OMP_CHANNELS.RequestDeactivate),
   ready: () => ipcRenderer.send(OMP_CHANNELS.RendererReady),
   setInteractive: (value) => ipcRenderer.send(OMP_CHANNELS.SetInteractive, value),

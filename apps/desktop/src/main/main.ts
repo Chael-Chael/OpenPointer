@@ -10,7 +10,7 @@ import {
   type AgentBridge,
   type AgentBridgeRegistryConfig
 } from '@openmagicpointer/agent-bridge';
-import type { AgentBackendId, AgentContextEnvelope, AgentEvent, Point, PointerContext, PointerEntity, Rect } from '@openmagicpointer/core';
+import type { AgentContextEnvelope, AgentEvent, Point, PointerContext, PointerEntity, Rect } from '@openmagicpointer/core';
 import { buildPointerContext } from '@openmagicpointer/grounding';
 import { OMP_CHANNELS } from '../shared/ipc.js';
 import type { CursorPayload, HoldProgressPayload, SubmitInstructionRequest } from '../shared/types.js';
@@ -36,6 +36,23 @@ const cuaSidecar = new CuaSidecarManager(repoRoot);
 const cuaGrounding = new CuaGroundingProvider(cuaSidecar);
 const cuaBroker = new CuaBroker(cuaSidecar);
 const chatHistory = new ChatHistoryManager();
+
+// Single source of truth for the CUA tools exposed to the agent. This list is
+// both advertised to the model (envelope.toolServers[].tools) and enforced by
+// the broker as a whitelist, so the agent cannot invoke unlisted driver tools.
+const CUA_AGENT_TOOLS = [
+  'list_windows',
+  'get_window_state',
+  'click',
+  'double_click',
+  'right_click',
+  'type_text',
+  'press_key',
+  'hotkey',
+  'scroll',
+  'drag',
+  'set_value'
+];
 
 const hold = {
   active: false,
@@ -145,6 +162,26 @@ function deactivate(): void {
   }
 }
 
+let registeredHotkey: string | null = null;
+
+function registerActivationHotkey(hotkey: string): boolean {
+  if (registeredHotkey && globalShortcut.isRegistered(registeredHotkey)) {
+    globalShortcut.unregister(registeredHotkey);
+  }
+  registeredHotkey = null;
+  if (!hotkey) return false;
+  let registered = false;
+  try {
+    registered = globalShortcut.register(hotkey, () => (active ? deactivate() : activate()));
+  } catch (error) {
+    console.error('[omp] global shortcut error', hotkey, error);
+    return false;
+  }
+  if (registered) registeredHotkey = hotkey;
+  console.log('[omp] global shortcut', hotkey, registered ? 'registered' : 'failed');
+  return registered;
+}
+
 function startCursorLoop(): void {
   if (cursorTimer) return;
   cursorTimer = setInterval(() => {
@@ -243,7 +280,13 @@ function registerIpc(): void {
   });
 
   ipcMain.handle(OMP_CHANNELS.GetSettings, () => getSettings());
-  ipcMain.handle(OMP_CHANNELS.SaveSettings, (_event, patch) => saveSettings(patch));
+  ipcMain.handle(OMP_CHANNELS.SaveSettings, (_event, patch) => {
+    const next = saveSettings(patch);
+    // Re-apply runtime settings that are bound at registration time so saved
+    // changes (e.g. the activation hotkey) take effect without a restart.
+    registerActivationHotkey(next.activationHotkey);
+    return next;
+  });
   ipcMain.handle(OMP_CHANNELS.GetConversations, () => chatHistory.getConversations());
   ipcMain.handle(OMP_CHANNELS.GetConversation, (_event, id: string) => chatHistory.getConversation(id));
   ipcMain.handle(OMP_CHANNELS.DeleteConversation, (_event, id: string) => chatHistory.deleteConversation(id));
@@ -265,8 +308,8 @@ function registerIpc(): void {
         /vision|vl|multimodal|gpt-4o|claude-3|gemini|minicpm|internvl|llama-3\.2.*vision|deepseek-vl/i.test(name)
       );
       return { success: true, models: visionModels.length > 0 ? visionModels : models };
-    } catch (e: any) {
-      return { success: false, error: e.message };
+    } catch (e: unknown) {
+      return { success: false, error: e instanceof Error ? e.message : String(e) };
     }
   });
   ipcMain.handle(OMP_CHANNELS.RequestGrounding, async (_event, req: { cursor: CursorPayload }) => {
@@ -288,7 +331,7 @@ function registerIpc(): void {
     const cursor = req.cursor ?? lastActivationCursor ?? lastCursor ?? cursorPayload();
     const context = await capturePointerContext(cursor, req.targetPath, req.selectedEntity, settings.cuaMode !== 'off');
     
-    let conversationId = req.conversationId || `conv-${Date.now()}`;
+    const conversationId = req.conversationId || `conv-${Date.now()}`;
     await chatHistory.appendTurn(conversationId, {
       id: `turn-${Date.now()}-user`,
       role: 'user',
@@ -313,6 +356,7 @@ function registerIpc(): void {
     const cuaBrokerSession = context.grounding?.status === 'matched'
       ? await cuaBroker.ensureStarted({
           requireApprovalBeforeCua: settings.requireApprovalBeforeCua,
+          allowedTools: CUA_AGENT_TOOLS,
           emit: (agentEvent) => event.sender.send(OMP_CHANNELS.AgentEvent, agentEvent)
         })
       : undefined;
@@ -325,7 +369,7 @@ function registerIpc(): void {
             transport: 'local-http',
             sessionId: cuaBrokerSession.sessionId,
             endpoint: cuaBrokerSession.endpoint,
-            tools: ['list_windows', 'get_window_state', 'click', 'type_text', 'scroll', 'press_key']
+            tools: CUA_AGENT_TOOLS
           }]
         : initialEnvelope.toolServers
     };
@@ -345,30 +389,35 @@ async function streamBridgeEvents(
   allowLocalFallback: boolean
 ): Promise<void> {
   let emittedStarted = false;
+  let sawTerminal = false;
   let fullAnswer = '';
-  for await (const agentEvent of bridge.run(envelope, { signal: controller.signal, sessionKey: sessionKeyForContext(envelope.pointerContext) })) {
+
+  const forward = (agentEvent: AgentEvent) => {
     sender.send(OMP_CHANNELS.AgentEvent, agentEvent);
-    if (agentEvent.type === 'run.started') emittedStarted = true;
-    if (agentEvent.type === 'assistant.delta') fullAnswer += agentEvent.text;
+    if (agentEvent.type === 'run.completed' || agentEvent.type === 'run.failed') sawTerminal = true;
+  };
+
+  for await (const agentEvent of bridge.run(envelope, { signal: controller.signal, sessionKey: sessionKeyForContext(envelope.pointerContext) })) {
     if (agentEvent.type === 'run.failed' && agentEvent.recoverable && allowLocalFallback && !emittedStarted) {
+      // Recover silently via the local VLM instead of surfacing the primary failure to the UI.
       const localEnvelope: AgentContextEnvelope = { ...envelope, routing: { ...envelope.routing, backend: 'local-vlm' } };
-      sender.send(OMP_CHANNELS.AgentEvent, { type: 'assistant.delta', text: 'Agent backend is unavailable. Falling back to local VLM.' } satisfies AgentEvent);
+      forward({ type: 'assistant.delta', text: 'Agent backend is unavailable. Falling back to local VLM.' });
       const localBridge = createAgentBridge('local-vlm', bridgeConfig(getSettings()));
       for await (const localEvent of localBridge.run(localEnvelope, { signal: controller.signal })) {
-        sender.send(OMP_CHANNELS.AgentEvent, localEvent);
+        forward(localEvent);
         if (localEvent.type === 'assistant.delta') fullAnswer += localEvent.text;
       }
-      if (envelope.conversationId) {
-        await chatHistory.appendTurn(envelope.conversationId, {
-          id: `turn-${Date.now()}-assistant`,
-          role: 'assistant',
-          text: fullAnswer,
-          timestamp: Date.now()
-        });
-      }
-      return;
+      break;
     }
+    forward(agentEvent);
+    if (agentEvent.type === 'run.started') emittedStarted = true;
+    if (agentEvent.type === 'assistant.delta') fullAnswer += agentEvent.text;
   }
+
+  // Guarantee the UI leaves the streaming state even if the runtime stream
+  // closed without a terminal (run.completed / run.failed) event.
+  if (!sawTerminal) forward({ type: 'run.completed', text: fullAnswer || undefined });
+
   if (envelope.conversationId && fullAnswer) {
     await chatHistory.appendTurn(envelope.conversationId, {
       id: `turn-${Date.now()}-assistant`,
@@ -397,8 +446,18 @@ function bridgeConfig(settings = getSettings()): AgentBridgeRegistryConfig {
   };
 }
 
-async function capturePointerContext(cursor: CursorPayload, targetPath?: Point[], selectedEntity?: PointerEntity, useCua = true): Promise<PointerContext> {
-  const capture = await captureContextImage(cursor, targetPath);
+async function capturePointerContext(cursor: CursorPayload, targetPath?: Point[], selectedEntity?: PointerEntity, _useCua = true): Promise<PointerContext> {
+  // Signal the renderer that a submit-time screenshot is being taken so the
+  // pointer can tint accordingly. `withCua` distinguishes a plain screenshot
+  // (purple) from a screenshot that coincides with a selected CUA element (teal).
+  const withCua = Boolean(selectedEntity?.groundingRef);
+  broadcast(OMP_CHANNELS.CaptureActivity, { phase: 'start', withCua });
+  let capture: Awaited<ReturnType<typeof captureContextImage>>;
+  try {
+    capture = await captureContextImage(cursor, targetPath);
+  } finally {
+    broadcast(OMP_CHANNELS.CaptureActivity, { phase: 'end', withCua });
+  }
   const windowInfo = await activeWindowInfo();
   
   const manualEntities = targetPath && targetPath.length > 1 
@@ -537,8 +596,7 @@ app.whenReady().then(async () => {
     await createOverlay(display);
   }
   const settings = getSettings();
-  const registered = globalShortcut.register(settings.activationHotkey, () => (active ? deactivate() : activate()));
-  console.log('[omp] global shortcut', settings.activationHotkey, registered ? 'registered' : 'failed');
+  registerActivationHotkey(settings.activationHotkey);
   startCursorLoop();
   startGlobalLongPress();
   if (!app.isPackaged) {

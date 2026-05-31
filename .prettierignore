@@ -1,0 +1,7 @@
+dist
+build
+node_modules
+vendor
+*.json
+*.md
+package-lock.json

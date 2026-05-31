@@ -7,6 +7,7 @@ export const OMP_CHANNELS = {
   HoldProgress: 'omp:hold:progress',
   SetInteractive: 'omp:overlay:set-interactive',
   RequestGrounding: 'omp:grounding:request',
+  CaptureActivity: 'omp:capture:activity',
   SubmitInstruction: 'omp:agent:submit',
   AgentEvent: 'omp:agent:event',
   ApproveAgentRequest: 'omp:agent:approve',
