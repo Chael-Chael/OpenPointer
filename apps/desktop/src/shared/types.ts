@@ -14,6 +14,7 @@ export type HoldProgressPayload = {
   cursor: CursorPayload;
   progress: number;
   state: 'holding' | 'completed' | 'canceled';
+  startedWhileActive: boolean;
 };
 
 export type SubmitInstructionRequest = {
