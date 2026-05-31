@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 
 /* ================================================================
    Theme / Design Tokens
@@ -15,7 +15,7 @@
   --color-muted: #86868b;
   --color-accent: #3478f6;
   --color-accent-deep: #2563eb;
-  --color-accent-soft: rgba(52, 120, 246, 0.10);
+  --color-accent-soft: rgba(52, 120, 246, 0.1);
   --color-glow: rgba(52, 120, 246, 0.22);
 
   /* Semantic colors */
@@ -131,13 +131,22 @@
 }
 
 @keyframes selection-appear {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes glow-breathe {
-  0%, 100% { opacity: 0.9; }
-  50% { opacity: 0.5; }
+  0%,
+  100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 0.5;
+  }
 }
 
 @keyframes dropdown-appear {
@@ -169,11 +178,19 @@
 @layer base {
   :root {
     color-scheme: light;
-    font-family: "DM Sans", -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    font-family:
+      'DM Sans',
+      -apple-system,
+      'SF Pro Text',
+      'Segoe UI',
+      system-ui,
+      sans-serif;
     background: transparent;
   }
 
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     box-sizing: border-box;
   }
 
@@ -351,12 +368,7 @@
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  background: radial-gradient(
-    circle,
-    var(--glow-color, rgba(52, 120, 246, 0.22)) 0%,
-    var(--glow-mid, rgba(52, 120, 246, 0.10)) 55%,
-    transparent 75%
-  );
+  background: radial-gradient(circle, var(--glow-color, rgba(52, 120, 246, 0.22)) 0%, var(--glow-mid, rgba(52, 120, 246, 0.1)) 55%, transparent 75%);
   pointer-events: none;
   opacity: 0.9;
   animation: glow-breathe 2.4s ease-in-out infinite;
@@ -385,14 +397,7 @@
   border-radius: 50%;
   pointer-events: none;
   z-index: 2;
-  background:
-    radial-gradient(
-      circle,
-      rgba(255, 255, 255, 0.95) 0 2px,
-      rgba(0, 132, 255, 0.72) 3px 6px,
-      rgba(74, 163, 255, 0.18) 7px 18px,
-      transparent 30px
-    );
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.95) 0 2px, rgba(0, 132, 255, 0.72) 3px 6px, rgba(74, 163, 255, 0.18) 7px 18px, transparent 30px);
   filter: drop-shadow(0 0 14px rgba(0, 132, 255, 0.42));
   will-change: transform;
 }
@@ -555,7 +560,7 @@
   background: #0f172a;
   color: #e5edf8;
   padding: 12px;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
   font-size: 12px;
   line-height: 1.55;
   &::before {
@@ -563,7 +568,7 @@
     display: block;
     margin-bottom: 8px;
     color: #93c5fd;
-    font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
+    font-family: 'DM Sans', 'Segoe UI', system-ui, sans-serif;
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
@@ -576,7 +581,7 @@
   background: rgba(52, 120, 246, 0.08);
   color: #0f4aa8;
   padding: 1px 4px;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
   font-size: 0.92em;
 }
 
@@ -609,7 +614,7 @@
     display: block;
     margin-bottom: 8px;
     color: #93c5fd;
-    font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
+    font-family: 'DM Sans', 'Segoe UI', system-ui, sans-serif;
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
@@ -647,9 +652,15 @@
     letter-spacing: 0;
   }
 
-  & h1 { font-size: 18px; }
-  & h2 { font-size: 16px; }
-  & h3 { font-size: 14px; }
+  & h1 {
+    font-size: 18px;
+  }
+  & h2 {
+    font-size: 16px;
+  }
+  & h3 {
+    font-size: 14px;
+  }
 
   & ul,
   & ol {
@@ -697,7 +708,7 @@
     background: #0f172a;
     color: #e5edf8;
     padding: 12px;
-    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
     font-size: 12px;
     line-height: 1.55;
   }
@@ -763,7 +774,9 @@
     height: 4px;
     border-radius: 2px;
     background: rgba(0, 0, 0, 0.12);
-    transition: background 150ms ease, width 150ms ease;
+    transition:
+      background 150ms ease,
+      width 150ms ease;
   }
   &:hover::after {
     background: rgba(0, 0, 0, 0.24);
@@ -784,7 +797,9 @@
   stroke: var(--ring-color, #ffffff);
   stroke-width: 2.2;
   stroke-linecap: round;
-  transition: stroke-dashoffset 200ms ease, stroke 200ms ease;
+  transition:
+    stroke-dashoffset 200ms ease,
+    stroke 200ms ease;
   transform: rotate(-90deg);
   transform-origin: 16px 16px;
 }
@@ -905,11 +920,11 @@
   grid-template-columns: minmax(0, 1fr) 86px;
   gap: 10px;
   align-items: center;
-  & input[type="range"] {
+  & input[type='range'] {
     padding: 0;
     accent-color: var(--color-accent);
   }
-  & input[type="number"] {
+  & input[type='number'] {
     text-align: right;
   }
 }
