@@ -934,12 +934,12 @@ export function App() {
           >
             {/* Blur glow layer — always matches pill shape/size */}
             <div
-              className="absolute inset-0 bg-[rgba(13,111,255,0.56)] blur-[23.9px] z-0 pointer-events-none"
+              className="absolute inset-0 bg-[rgba(13,111,255,0.56)] blur-[23.9px] z-0 pointer-events-none animate-pill-glow"
               style={{ borderRadius: `${pillHeight / 2}px` }}
             />
 
             <div
-              className="command-bubble relative z-4 flex flex-col bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] animate-bubble-pop origin-left"
+              className="command-bubble relative z-4 flex flex-col bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] animate-pill-unfold origin-left"
               style={{
                 borderRadius: `${pillHeight / 2}px`
               }}
@@ -964,7 +964,7 @@ export function App() {
                   <div className="flex items-center gap-1.5 shrink-0 select-none">
                     {selection && (
                       <div
-                        className="group relative flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all duration-150 cursor-pointer"
+                        className="group relative flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all duration-150 cursor-pointer animate-elastic-pop"
                         style={{
                           width: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
                           height: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
@@ -982,7 +982,7 @@ export function App() {
 
                     {selectedEntity && (
                       <div
-                        className="group relative flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all duration-150 cursor-pointer"
+                        className="group relative flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all duration-150 cursor-pointer animate-elastic-pop"
                         style={{
                           width: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
                           height: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
