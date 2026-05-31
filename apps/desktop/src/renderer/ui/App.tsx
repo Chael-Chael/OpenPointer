@@ -75,7 +75,6 @@ export function App() {
   const thinkingStartRef = useRef<number>(0);
   const streamPanelRef = useRef<HTMLDivElement | null>(null);
   const lastGroundingPointRef = useRef<{ x: number; y: number } | null>(null);
-  const refocusReceivedRef = useRef(false);
   // Submit-time screenshot signal from the main process (see CaptureActivity IPC).
   const [captureActivity, setCaptureActivity] = useState<{ active: boolean; withCua: boolean }>({ active: false, withCua: false });
   const [historyTurns, setHistoryTurns] = useState<import('@openmagicpointer/core').ChatTurn[]>([]);
@@ -225,17 +224,12 @@ export function App() {
       setState('composing');
       window.setTimeout(() => focusPromptInput(inputRef.current), 0);
     });
-    const offRefocus = window.openMagicPointer.onRefocusInput(() => {
-      refocusReceivedRef.current = true;
-      focusPromptInput(inputRef.current);
-    });
     const offDeactivate = window.openMagicPointer.onDeactivate(() => {
       if (conversationIdRef.current) {
         lastConversationIdRef.current = conversationIdRef.current;
         lastDeactivatedAtRef.current = Date.now();
       }
       setActive(false);
-      refocusReceivedRef.current = false;
       setState('idle');
       setPrompt('');
       setEvents([]);
@@ -273,7 +267,6 @@ export function App() {
       offCursor();
       offHold();
       offActivate();
-      offRefocus();
       offDeactivate();
       offEvent();
       if (thinkingTimerRef.current) {
@@ -302,12 +295,7 @@ export function App() {
   }, [conversationId, state]);
   // Dynamic interactive region logic
   useEffect(() => {
-    // On initial activation, don't reset the interactive state. The main
-    // process explicitly calls setIgnoreMouseEvents(false) during activate(),
-    // and sending setInteractive(false) here would immediately undo that,
-    // breaking keyboard focus.  Only start managing the state after the
-    // delayed RefocusInput signal has arrived.
-    let lastInteractive: boolean = refocusReceivedRef.current;
+    let lastInteractive = false;
 
     // We want to force interactive mode if dragging/selecting/detached etc.
     const forceInteractive = active && (detached || menuOpen || settingsOpen || historyOpen || Boolean(selection) || selecting || Boolean(selectionDrag) || Boolean(panelResizeDrag));
@@ -471,9 +459,7 @@ export function App() {
   }, [pillDrag, pillWidth, pillHeight]);
 
   useEffect(() => {
-    // Only re-focus after the initial RefocusInput signal has arrived,
-    // to avoid racing with the main process's activation sequence.
-    if (refocusReceivedRef.current && state === 'composing' && active && !selecting && !selectionDrag && !settingsOpen) {
+    if (state === 'composing' && active && !selecting && !selectionDrag && !settingsOpen) {
       const requestId = window.requestAnimationFrame(() => focusPromptInput(inputRef.current));
       return () => window.cancelAnimationFrame(requestId);
     }

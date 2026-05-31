@@ -6,7 +6,7 @@ import '@fontsource/dm-sans/500.css';
 import '@fontsource/dm-sans/600.css';
 import '@fontsource/dm-sans/700.css';
 import 'katex/dist/katex.min.css';
-import './styles.css';
+import './styles/tailwind.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing #root');
