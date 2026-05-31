@@ -75,6 +75,7 @@ export function App() {
   const thinkingStartRef = useRef<number>(0);
   const streamPanelRef = useRef<HTMLDivElement | null>(null);
   const lastGroundingPointRef = useRef<{ x: number; y: number } | null>(null);
+  const refocusReceivedRef = useRef(false);
   // Submit-time screenshot signal from the main process (see CaptureActivity IPC).
   const [captureActivity, setCaptureActivity] = useState<{ active: boolean; withCua: boolean }>({ active: false, withCua: false });
   const [historyTurns, setHistoryTurns] = useState<import('@openmagicpointer/core').ChatTurn[]>([]);
@@ -224,12 +225,17 @@ export function App() {
       setState('composing');
       window.setTimeout(() => focusPromptInput(inputRef.current), 0);
     });
+    const offRefocus = window.openMagicPointer.onRefocusInput(() => {
+      refocusReceivedRef.current = true;
+      focusPromptInput(inputRef.current);
+    });
     const offDeactivate = window.openMagicPointer.onDeactivate(() => {
       if (conversationIdRef.current) {
         lastConversationIdRef.current = conversationIdRef.current;
         lastDeactivatedAtRef.current = Date.now();
       }
       setActive(false);
+      refocusReceivedRef.current = false;
       setState('idle');
       setPrompt('');
       setEvents([]);
@@ -267,6 +273,7 @@ export function App() {
       offCursor();
       offHold();
       offActivate();
+      offRefocus();
       offDeactivate();
       offEvent();
       if (thinkingTimerRef.current) {
@@ -295,8 +302,13 @@ export function App() {
   }, [conversationId, state]);
   // Dynamic interactive region logic
   useEffect(() => {
-    let lastInteractive = false;
-    
+    // On initial activation, don't reset the interactive state. The main
+    // process explicitly calls setIgnoreMouseEvents(false) during activate(),
+    // and sending setInteractive(false) here would immediately undo that,
+    // breaking keyboard focus.  Only start managing the state after the
+    // delayed RefocusInput signal has arrived.
+    let lastInteractive: boolean = refocusReceivedRef.current;
+
     // We want to force interactive mode if dragging/selecting/detached etc.
     const forceInteractive = active && (detached || menuOpen || settingsOpen || historyOpen || Boolean(selection) || selecting || Boolean(selectionDrag) || Boolean(panelResizeDrag));
 
@@ -459,7 +471,9 @@ export function App() {
   }, [pillDrag, pillWidth, pillHeight]);
 
   useEffect(() => {
-    if (state === 'composing' && active && !selecting && !selectionDrag && !settingsOpen) {
+    // Only re-focus after the initial RefocusInput signal has arrived,
+    // to avoid racing with the main process's activation sequence.
+    if (refocusReceivedRef.current && state === 'composing' && active && !selecting && !selectionDrag && !settingsOpen) {
       const requestId = window.requestAnimationFrame(() => focusPromptInput(inputRef.current));
       return () => window.cancelAnimationFrame(requestId);
     }
@@ -828,7 +842,7 @@ export function App() {
   }, [captureActivity.active, captureActivity.withCua, cuaEntities.length]);
 
   return (
-    <div className={`screen${detached ? ' screen-detached' : ''}${selecting ? ' screen-selecting' : ''}`}>
+    <div className={`fixed inset-0 text-ink pointer-events-none${detached ? ' pointer-events-auto cursor-crosshair' : ''}${selecting ? ' cursor-crosshair' : ''}`}>
       {hold?.state === 'holding' && <HoldRing cursor={hold.cursor} progress={hold.progress} />}
 
       {active && (
@@ -838,7 +852,7 @@ export function App() {
 
           {highlightedCuaEntity?.bbox && (
             <div
-              className={`cua-element-highlight${selectedCuaEntityId ? ' is-selected' : ''}`}
+              className={`cua-element-highlight${selectedCuaEntityId ? ' border-accent-deep bg-[rgba(52,120,246,0.09)] shadow-[0_0_0_1px_rgba(255,255,255,0.58)_inset,0_0_0_2px_rgba(52,120,246,0.18),0_10px_30px_rgba(37,99,235,0.16)] z-6' : ''}`}
               style={{
                 left: highlightedCuaEntity.bbox.x,
                 top: highlightedCuaEntity.bbox.y,
@@ -853,38 +867,53 @@ export function App() {
           {/* Selection rectangle overlay */}
           {selection && (
             <div
-              className={`selection-rect${selecting ? ' is-drafting' : ''}${selectionDrag ? ' is-adjusting' : ''}`}
+              className={`selection-rect${selecting ? ' pointer-events-none cursor-crosshair' : ''}${selectionDrag ? ' bg-[rgba(52,120,246,0.09)]' : ''}`}
               style={{ left: selection.x1, top: selection.y1, width: selection.x2 - selection.x1, height: selection.y2 - selection.y1 }}
               onMouseDown={beginSelectionMove}
             >
               {!selecting && (
                 <>
                   <button className="selection-clear" type="button" onMouseDown={(event) => event.stopPropagation()} onClick={clearSelection} aria-label="Clear selection">x</button>
-                  {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const).map((handle) => (
-                    <button
-                      key={handle}
-                      className={`selection-handle handle-${handle}`}
-                      type="button"
-                      aria-label={`Resize selection ${handle}`}
-                      onMouseDown={(event) => beginSelectionResize(handle, event)}
-                    />
-                  ))}
+                  {(['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const).map((handle) => {
+                    const handlePos: Record<string, string> = {
+                      n: 'handle-ns left-1/2 -translate-x-1/2 -top-1.5',
+                      s: 'handle-ns left-1/2 -translate-x-1/2 -bottom-1.5',
+                      e: 'handle-ew -right-1.5',
+                      w: 'handle-ew -left-1.5',
+                      nw: 'handle-corner -left-1.5 -top-1.5',
+                      ne: 'handle-corner-alt -right-1.5 -top-1.5',
+                      se: 'handle-corner -right-1.5 -bottom-1.5',
+                      sw: 'handle-corner-alt -left-1.5 -bottom-1.5',
+                    };
+                    return (
+                      <button
+                        key={handle}
+                        className={`selection-handle ${handlePos[handle]}`}
+                        type="button"
+                        aria-label={`Resize selection ${handle}`}
+                        onMouseDown={(event) => beginSelectionResize(handle, event)}
+                      />
+                    );
+                  })}
                 </>
               )}
             </div>
           )}
 
           <section
-            className={`command-shell state-${state}${selecting ? ' is-selecting' : ''}`}
+            className={`absolute left-0 top-0 pointer-events-auto will-change-transform w-[min(var(--pill-width,520px),calc(100vw-32px))] state-${state}${selecting ? ' is-selecting' : ''}`}
             style={{
               transform: `translate3d(${effectiveShellPos.x}px, ${effectiveShellPos.y}px, 0)`,
               '--pill-width': `${pillWidth}px`,
               '--pill-height': `${pillHeight}px`
             } as CSSProperties}
           >
+            {/* Blur glow layer — always matches pill shape/size */}
+            <div className="absolute inset-0 rounded-full bg-[rgba(13,111,255,0.56)] blur-[23.9px] z-0 pointer-events-none" />
 
-            <div className="command-bubble" onMouseDown={onPillMouseDown}>
-              <button className="bubble-menu" title="Menu" onClick={() => setMenuOpen(!menuOpen)} aria-label="Menu">
+            <div className="command-bubble relative z-4 flex items-start gap-6 min-h-[var(--pill-height,36px)] py-3 pr-6 pl-3 rounded-full bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] animate-bubble-pop origin-left" onMouseDown={onPillMouseDown}>
+              <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
+              <button className="bubble-menu shrink-0 grid place-items-center w-8 h-8 rounded-full text-white/70 bg-transparent text-lg leading-none tracking-[1px] hover:bg-white/10 hover:text-white active:scale-95 transition-all duration-160 relative z-1" title="Menu" onClick={() => setMenuOpen(!menuOpen)} aria-label="Menu">
                 ···
               </button>
 
@@ -914,11 +943,11 @@ export function App() {
 
               {active && (
                 <div
-                  className="context-progress-wrapper"
+                  className="context-progress-wrapper relative w-7 h-7 flex items-center justify-center ml-2 shrink-0 cursor-help select-none"
                   style={{ '--ring-color': ringColor } as CSSProperties}
                   title={`Context window: ${estimatedUsedTokens} / ${contextLimit} tokens used (${Math.round(remainingFraction * 100)}% remaining)`}
                 >
-                  <svg className="context-progress-ring" viewBox="0 0 32 32">
+                  <svg className="w-full h-full" viewBox="0 0 32 32">
                     <circle className="ring-track" cx="16" cy="16" r="10" />
                     <circle
                       className="ring-progress"
@@ -929,46 +958,46 @@ export function App() {
                       strokeDashoffset={62.8 * (1 - remainingFraction)}
                     />
                   </svg>
-                  <span className="context-progress-text">{Math.round(remainingFraction * 100)}%</span>
+                  <span className="context-progress-text absolute text-[8px] font-bold text-white/70 tabular-nums">{Math.round(remainingFraction * 100)}%</span>
                 </div>
               )}
 
               {menuOpen && (
-                <div className="bubble-dropdown">
-                  <button onClick={startVoice}>
-                    <span className="dropdown-icon">🎤</span>
+                <div className="bubble-dropdown absolute top-[calc(100%+6px)] left-0 min-w-[200px] p-1.5 border border-glass-border rounded-[14px] bg-glass-bg-solid backdrop-blur-[40px] backdrop-saturate-180 shadow-[0_8px_32px_rgba(0,0,0,0.10)] animate-dropdown-appear z-10">
+                  <button className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140" onClick={startVoice}>
+                    <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">🎤</span>
                     Voice input
                   </button>
-                  <div className="dropdown-divider" />
-                  <label>
-                    <span className="dropdown-icon">⚡</span>
-                    <select value={backend} onChange={(event) => setBackend(event.target.value as AgentBackendId)} title="Agent backend">
+                  <div className="h-px mx-2 my-1 bg-black/[0.06]" />
+                  <label className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140">
+                    <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">⚡</span>
+                    <select className="flex-1 min-w-0 h-7 border border-glass-border rounded-lg px-2 bg-white/80 text-ink text-xs font-medium" value={backend} onChange={(event) => setBackend(event.target.value as AgentBackendId)} title="Agent backend">
                       {selectableBackends.map((item) => <option key={item} value={item}>{backendLabel(item)}</option>)}
                     </select>
                   </label>
-                  <button className="menu-item" onClick={() => {
+                  <button className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140" onClick={() => {
                     setMenuOpen(false);
                     setConversationId(null);
                     setHistoryTurns([]);
                     setEvents([]);
                     setPrompt('');
                   }}>
-                    <span className="dropdown-icon">✨</span>
+                    <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">✨</span>
                     New Conversation
                   </button>
-                  <button className="menu-item" onClick={() => {
+                  <button className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140" onClick={() => {
                     setMenuOpen(false);
                     setHistoryOpen(true);
                     window.openMagicPointer.getConversations().then(setConversationsList);
                   }}>
-                    <span className="dropdown-icon">🕒</span>
+                    <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">🕒</span>
                     History
                   </button>
-                  <button className="menu-item" onClick={() => {
+                  <button className="flex items-center gap-2 w-full py-2 px-2.5 border-0 rounded-[10px] bg-transparent text-ink text-[13px] font-medium text-left cursor-pointer hover:bg-black/[0.04] transition-colors duration-140" onClick={() => {
                     setMenuOpen(false);
                     setSettingsOpen(true);
                   }}>
-                    <span className="dropdown-icon">⚙</span>
+                    <span className="inline-flex w-[18px] h-[18px] items-center justify-center text-sm shrink-0">⚙</span>
                     Settings
                   </button>
                 </div>
@@ -977,31 +1006,31 @@ export function App() {
 
             {/* Capability indicators — only visible when backend detects capabilities */}
             {(capabilities.hasSkills || capabilities.hasMcp || capabilities.hasCua) && (
-              <div className="capability-indicators">
-                {capabilities.hasSkills && <span className="indicator ind-skill">Skills</span>}
-                {capabilities.hasMcp && <span className="indicator ind-mcp">MCP</span>}
-                {capabilities.hasCua && <span className="indicator ind-cua">CUA</span>}
+              <div className="flex items-center gap-1.5 mt-2 ml-2 animate-fade-up">
+                {capabilities.hasSkills && <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(52,199,89,0.12)] text-success">Skills</span>}
+                {capabilities.hasMcp && <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(255,59,48,0.10)] text-danger">MCP</span>}
+                {capabilities.hasCua && <span className="inline-flex items-center px-2.5 py-[3px] rounded-pill text-[11px] font-semibold uppercase tracking-[0.03em] leading-none bg-[rgba(255,204,0,0.15)] text-warning">CUA</span>}
               </div>
             )}
 
             {(state !== 'composing' || historyTurns.length > 0 || conversationId) && (
-              <div className="stream-panel" style={streamPanelStyle} ref={streamPanelRef}>
-                <div className="stream-meta">
+              <div className={`stream-panel scrollbar-thin${detached ? ' dark:scrollbar-thin' : ''}`} style={streamPanelStyle} ref={streamPanelRef}>
+                <div className="flex justify-between gap-2.5 text-muted text-[11px] font-semibold uppercase tracking-[0.02em]">
                   <span>{backendLabel(backend)}</span>
                   <span>{statusLabel(state)}</span>
                 </div>
-                <div className="history-log">
+                <div className="flex flex-col gap-4 mt-2.5 w-full">
                   {historyTurns.map((turn) => {
                     if (turn.role === 'user') {
                       return (
-                        <div key={turn.id} className="history-turn turn-user">
-                          <div className="user-bubble">{turn.text}</div>
+                        <div key={turn.id} className="flex flex-col w-full items-end">
+                          <div className="user-bubble max-w-[85%] bg-black/[0.05] rounded-[16px_16px_0_16px] py-2.5 px-3.5 text-sm leading-[1.45] text-ink break-words whitespace-pre-wrap shadow-[0_1px_2px_rgba(0,0,0,0.03)] dark:bg-white/[0.08]">{turn.text}</div>
                         </div>
                       );
                     } else {
                       return (
-                        <div key={turn.id} className="history-turn turn-assistant">
-                          <article className="agent-text markdown-body">
+                        <div key={turn.id} className="flex flex-col w-full items-start">
+                          <article className="agent-text text-sm markdown-body">
                             <MarkdownRenderer value={turn.text} />
                           </article>
                         </div>
@@ -1012,20 +1041,20 @@ export function App() {
                   {/* Active turn streaming/thinking */}
                   {((historyTurns.length === 0 && (state === 'submitting' || state === 'streaming' || state === 'approval')) ||
                     (historyTurns.length > 0 && historyTurns[historyTurns.length - 1]?.role === 'user')) && (
-                    <div className="history-turn turn-assistant">
+                    <div className="flex flex-col w-full items-start">
                       {/* Thinking Block */}
                       {thinkingTime > 0 && (
-                        <div className="thinking-block">
+                        <div className="my-2.5 flex flex-col items-start w-full">
                           <div
-                            className={`thinking-header ${showTools ? 'expanded' : ''}`}
+                            className={`inline-flex items-center gap-1.5 cursor-pointer select-none text-xs font-semibold text-muted py-1 px-2 rounded-[10px] bg-black/[0.03] hover:bg-black/[0.06] hover:text-ink transition-all duration-150 dark:bg-white/[0.04] dark:hover:bg-white/[0.08]${showTools ? ' [&>.arrow]:rotate-90' : ''}`}
                             onClick={() => setShowTools(!showTools)}
                           >
                             <span>已思考 {thinkingTime}s</span>
-                            <span className="arrow">▶</span>
+                            <span className="arrow inline-block text-[8px] rotate-0 transition-transform duration-150 leading-none">▶</span>
                           </div>
                           {showTools && (
-                            <div className="thinking-details">
-                              {discovery && <p className="tool-discovery">{discovery.message}</p>}
+                            <div className="mt-1.5 pl-3 border-l-2 border-black/[0.06] w-full dark:border-white/10">
+                              {discovery && <p className="tool-discovery mt-2.5 text-muted text-[13px] leading-relaxed">{discovery.message}</p>}
                               {toolEvents.length > 0 && <ToolRows events={toolEvents} />}
                             </div>
                           )}
@@ -1034,28 +1063,28 @@ export function App() {
 
                       {/* Streaming Markdown Response */}
                       {transcript && (
-                        <article className="agent-text markdown-body">
+                        <article className="agent-text text-sm markdown-body">
                           <MarkdownRenderer value={transcript} />
                         </article>
                       )}
 
                       {/* Other active states */}
                       {approval && (
-                        <div className="approval-box">
-                          <strong>{approval.tool ?? 'Agent'} requests approval</strong>
-                          <p>{approval.reason}</p>
-                          <div>
-                            <button onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'approve')}>Allow</button>
-                            <button onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'deny')}>Deny</button>
+                        <div className="approval-box mt-3 border border-[rgba(139,92,246,0.15)] rounded-[10px] bg-[rgba(139,92,246,0.04)] p-3">
+                          <strong className="text-ink text-[13px]">{approval.tool ?? 'Agent'} requests approval</strong>
+                          <p className="mt-2.5 text-[13px] leading-relaxed text-[#3c3c43]">{approval.reason}</p>
+                          <div className="flex gap-2 mt-2.5">
+                            <button className="approval-button" onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'approve')}>Allow</button>
+                            <button className="approval-button" onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'deny')}>Deny</button>
                           </div>
                         </div>
                       )}
-                      {latestFailure && <p className="error-text">{latestFailure.error}</p>}
+                      {latestFailure && <p className="text-danger text-[13px] leading-relaxed mt-2.5">{latestFailure.error}</p>}
                     </div>
                   )}
                 </div>
                 {detached && (
-                  <div className="stream-panel-resize-handle" onMouseDown={onResizeMouseDown} />
+                  <div className="resize-grip" onMouseDown={onResizeMouseDown} />
                 )}
               </div>
             )}

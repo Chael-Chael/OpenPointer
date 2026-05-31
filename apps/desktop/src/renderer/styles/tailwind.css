@@ -1,0 +1,991 @@
+@import "tailwindcss";
+
+/* ================================================================
+   Theme / Design Tokens
+   ================================================================ */
+
+@theme {
+  /* Glassmorphism */
+  --color-glass-bg: rgba(255, 255, 255, 0.72);
+  --color-glass-bg-solid: rgba(248, 250, 252, 0.92);
+  --color-glass-border: rgba(0, 0, 0, 0.08);
+
+  /* Core palette */
+  --color-ink: #1d1d1f;
+  --color-muted: #86868b;
+  --color-accent: #3478f6;
+  --color-accent-deep: #2563eb;
+  --color-accent-soft: rgba(52, 120, 246, 0.10);
+  --color-glow: rgba(52, 120, 246, 0.22);
+
+  /* Semantic colors */
+  --color-success: #30a14e;
+  --color-danger: #e5383b;
+  --color-warning: #b8860b;
+  --color-approval: #8b5cf6;
+  --color-teal: rgba(20, 184, 166, 0.78);
+  --color-teal-bg: rgba(20, 184, 166, 0.07);
+  --color-teal-selected: rgba(37, 99, 235, 0.9);
+
+  /* Radii */
+  --radius-pill: 999px;
+  --radius-md: 14px;
+  --radius-sm: 10px;
+
+  /* Animations */
+  --animate-bubble-pop: bubble-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  --animate-bubble-tuck: bubble-tuck 260ms cubic-bezier(0.2, 0.9, 0.2, 1) forwards;
+  --animate-fade-up: fade-up 280ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-modal-fade: modal-fade 200ms ease;
+  --animate-modal-rise: modal-rise 280ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-selection-appear: selection-appear 120ms ease;
+  --animate-glow-breathe: glow-breathe 2.4s ease-in-out infinite;
+  --animate-dropdown-appear: dropdown-appear 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-stream-unfold: stream-unfold 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ================================================================
+   Keyframes
+   ================================================================ */
+
+@keyframes bubble-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.35) translateX(-16px);
+    filter: blur(8px);
+  }
+  55% {
+    opacity: 1;
+    transform: scale(1.04) translateX(3px);
+    filter: blur(0);
+  }
+  78% {
+    transform: scale(0.98) translateX(-1px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateX(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes bubble-tuck {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+  55% {
+    opacity: 0.78;
+    transform: scale(0.82) translateX(-5px);
+    filter: blur(0);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.18) translateX(-18px);
+    filter: blur(4px);
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes modal-fade {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(4px);
+  }
+}
+
+@keyframes modal-rise {
+  0% {
+    opacity: 0;
+    transform: scale(0.9) translateY(30px);
+    filter: blur(4px);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.03) translateY(-4px);
+    filter: blur(0);
+  }
+  75% {
+    transform: scale(0.99) translateY(1px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes selection-appear {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes glow-breathe {
+  0%, 100% { opacity: 0.9; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes dropdown-appear {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes stream-unfold {
+  from {
+    opacity: 0;
+    transform: scaleY(0.92);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
+}
+
+/* ================================================================
+   Base / Reset
+   ================================================================ */
+
+@layer base {
+  :root {
+    color-scheme: light;
+    font-family: "DM Sans", -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    background: transparent;
+  }
+
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: transparent;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button {
+    border: 0;
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  button:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid rgba(52, 120, 246, 0.5);
+    outline-offset: 2px;
+  }
+}
+
+/* ================================================================
+   Custom Utilities
+   ================================================================ */
+
+/* ── Glassmorphism ── */
+
+@utility glass {
+  border: 1px solid var(--color-glass-border);
+  background: var(--color-glass-bg);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: 0 2px 20px rgba(0, 0, 0, 0.07);
+}
+
+@utility glass-solid {
+  border: 1px solid var(--color-glass-border);
+  background: var(--color-glass-bg-solid);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+}
+
+/* ── Selection Rectangle ── */
+
+@utility selection-rect {
+  position: fixed;
+  border: 1.5px solid var(--color-accent);
+  background: rgba(52, 120, 246, 0.06);
+  border-radius: 3px;
+  pointer-events: auto;
+  z-index: 5;
+  animation: selection-appear 120ms ease;
+  cursor: move;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.45) inset,
+    0 0 28px rgba(52, 120, 246, 0.14);
+  min-width: 2px;
+  min-height: 2px;
+}
+
+@utility selection-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  padding: 0;
+  border: 1px solid rgba(37, 99, 235, 0.75);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.18);
+}
+
+@utility selection-clear {
+  position: absolute;
+  top: -28px;
+  right: -8px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--color-accent-deep);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ── Handle positions ── */
+
+@utility handle-ns {
+  left: 50%;
+  transform: translateX(-50%);
+  cursor: ns-resize;
+}
+
+@utility handle-ew {
+  top: 50%;
+  transform: translateY(-50%);
+  cursor: ew-resize;
+}
+
+@utility handle-corner {
+  cursor: nwse-resize;
+}
+
+@utility handle-corner-alt {
+  cursor: nesw-resize;
+}
+
+/* ── CUA Element Highlight ── */
+
+@utility cua-element-highlight {
+  position: fixed;
+  border: 1px solid var(--color-teal);
+  border-radius: 4px;
+  background: var(--color-teal-bg);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.5) inset,
+    0 8px 24px rgba(15, 118, 110, 0.12);
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 4;
+  animation: selection-appear 120ms ease;
+}
+
+/* ── Hold Ring (SVG) ── */
+
+@utility hold-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 32px;
+  height: 32px;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 8px rgba(52, 120, 246, 0.2));
+}
+
+@utility hold-ring-track {
+  fill: rgba(255, 255, 255, 0.4);
+  stroke: rgba(52, 120, 246, 0.12);
+  stroke-width: 3;
+  transform: rotate(-90deg);
+  transform-origin: 16px 16px;
+}
+
+@utility hold-ring-progress {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 16px 16px;
+  transition: stroke-dashoffset 80ms linear;
+}
+
+/* ── Cursor Glow ── */
+
+@utility cursor-glow {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    var(--glow-color, rgba(52, 120, 246, 0.22)) 0%,
+    var(--glow-mid, rgba(52, 120, 246, 0.10)) 55%,
+    transparent 75%
+  );
+  pointer-events: none;
+  opacity: 0.9;
+  animation: glow-breathe 2.4s ease-in-out infinite;
+  will-change: opacity;
+  transition: background 160ms ease;
+}
+
+/* ── Cursor Trail ── */
+
+@utility cursor-trail {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 1;
+}
+
+@utility cursor-halo {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 2;
+  background:
+    radial-gradient(
+      circle,
+      rgba(255, 255, 255, 0.95) 0 2px,
+      rgba(0, 132, 255, 0.72) 3px 6px,
+      rgba(74, 163, 255, 0.18) 7px 18px,
+      transparent 30px
+    );
+  filter: drop-shadow(0 0 14px rgba(0, 132, 255, 0.42));
+  will-change: transform;
+}
+
+/* ── Command Bubble ── */
+
+@utility bubble-input {
+  flex: 1;
+  min-width: 100px;
+  border: 0;
+  padding: 5px 0;
+  background: transparent;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  resize: none;
+  overflow: hidden;
+  field-sizing: content;
+  min-height: 22px;
+  max-height: 140px;
+  outline: none;
+}
+
+.bubble-input::placeholder {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* ── Stream Panel ── */
+
+@utility stream-panel {
+  width: 100%;
+  position: relative;
+  z-index: 3;
+  margin: -16px 0 0 0;
+  border: 1px solid var(--color-glass-border);
+  border-top: none;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--color-glass-bg-solid);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+  padding: 24px 16px 14px;
+  animation: stream-unfold 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top center;
+  max-height: min(520px, calc(100vh - 120px));
+  overflow: auto;
+}
+
+/* ── Buttons ── */
+
+@utility ghost-button {
+  border-radius: var(--radius-pill);
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-accent-deep);
+  background: rgba(52, 120, 246, 0.08);
+  border: 1px solid rgba(52, 120, 246, 0.12);
+  transition:
+    transform 160ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 160ms ease,
+    opacity 160ms ease;
+  &:hover {
+    background: rgba(52, 120, 246, 0.14);
+  }
+  &:active {
+    transform: scale(0.97);
+  }
+}
+
+@utility primary-button {
+  border-radius: var(--radius-pill);
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: white;
+  background: var(--color-accent);
+  border: none;
+  transition:
+    transform 160ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 160ms ease,
+    opacity 160ms ease;
+  &:hover {
+    background: var(--color-accent-deep);
+  }
+  &:active {
+    transform: scale(0.97);
+  }
+}
+
+/* ── Modal ── */
+
+@utility modal {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(4px);
+  pointer-events: auto;
+  animation: modal-fade 200ms ease;
+}
+
+@utility modal-card {
+  width: min(860px, calc(100vw - 32px));
+  max-height: min(780px, calc(100vh - 32px));
+  overflow: auto;
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-md);
+  background: var(--color-glass-bg-solid);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.14);
+  padding: 20px;
+  animation: modal-rise 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Backend Card ── */
+
+@utility backend-card {
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.6);
+  padding: 14px;
+}
+
+/* ── History Item ── */
+
+@utility history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+  &:hover {
+    background: rgba(255, 255, 255, 0.85);
+    border-color: rgba(52, 120, 246, 0.28);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+  }
+  &:active {
+    transform: translateY(0);
+  }
+}
+
+/* ── Code Blocks ── */
+
+@utility code-block {
+  overflow: auto;
+  border: 1px solid rgba(52, 120, 246, 0.14);
+  border-radius: 10px;
+  background: #0f172a;
+  color: #e5edf8;
+  padding: 12px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  &::before {
+    content: attr(data-language);
+    display: block;
+    margin-bottom: 8px;
+    color: #93c5fd;
+    font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+}
+
+@utility inline-code {
+  border: 1px solid rgba(52, 120, 246, 0.13);
+  border-radius: 5px;
+  background: rgba(52, 120, 246, 0.08);
+  color: #0f4aa8;
+  padding: 1px 4px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+
+@utility mermaid-diagram {
+  overflow: auto;
+  border: 1px solid rgba(52, 120, 246, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.68);
+  padding: 10px;
+  & svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
+}
+
+@utility mermaid-error {
+  overflow: auto;
+  border: 1px solid rgba(52, 120, 246, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.68);
+  padding: 10px;
+}
+
+/* ── Code Block Language Label ── */
+
+@utility code-lang-label {
+  &::before {
+    content: attr(data-language);
+    display: block;
+    margin-bottom: 8px;
+    color: #93c5fd;
+    font-family: "DM Sans", "Segoe UI", system-ui, sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+}
+
+/* ── Markdown Body ── */
+
+@utility markdown-body {
+  color: #25272d;
+
+  & > :first-child {
+    margin-top: 0;
+  }
+  & > :last-child {
+    margin-bottom: 0;
+  }
+
+  & p,
+  & ul,
+  & ol,
+  & blockquote,
+  & table,
+  & pre,
+  & .mermaid-diagram {
+    margin: 10px 0 0;
+  }
+
+  & h1,
+  & h2,
+  & h3 {
+    margin: 14px 0 6px;
+    color: var(--color-ink);
+    line-height: 1.2;
+    letter-spacing: 0;
+  }
+
+  & h1 { font-size: 18px; }
+  & h2 { font-size: 16px; }
+  & h3 { font-size: 14px; }
+
+  & ul,
+  & ol {
+    padding-left: 20px;
+  }
+
+  & li + li {
+    margin-top: 4px;
+  }
+
+  & a {
+    color: var(--color-accent-deep);
+    text-decoration: none;
+  }
+
+  & blockquote {
+    border-left: 3px solid rgba(52, 120, 246, 0.32);
+    padding-left: 10px;
+    color: #4f5661;
+  }
+
+  & table {
+    width: 100%;
+    border-collapse: collapse;
+    overflow: hidden;
+    border-radius: 8px;
+  }
+
+  & th,
+  & td {
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    padding: 6px 8px;
+    text-align: left;
+  }
+
+  & th {
+    background: rgba(52, 120, 246, 0.07);
+    color: var(--color-ink);
+  }
+
+  & pre {
+    overflow: auto;
+    border: 1px solid rgba(52, 120, 246, 0.14);
+    border-radius: 10px;
+    background: #0f172a;
+    color: #e5edf8;
+    padding: 12px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  & pre code {
+    display: block;
+    white-space: pre;
+  }
+}
+
+/* ── Scrollbar ── */
+
+@utility scrollbar-thin {
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.08);
+    border-radius: 3px;
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.16);
+  }
+}
+
+@utility scrollbar-thin-history {
+  &::-webkit-scrollbar {
+    width: 6px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: var(--radius-pill);
+  }
+  &::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.2);
+  }
+}
+
+/* ── Resize Grip ── */
+
+@utility resize-grip {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 16px;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  z-index: 10;
+  &::after {
+    content: '';
+    width: 32px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(0, 0, 0, 0.12);
+    transition: background 150ms ease, width 150ms ease;
+  }
+  &:hover::after {
+    background: rgba(0, 0, 0, 0.24);
+    width: 40px;
+  }
+}
+
+/* ── Context Progress Ring (SVG) ── */
+
+@utility ring-track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.2);
+  stroke-width: 2.2;
+}
+
+@utility ring-progress {
+  fill: none;
+  stroke: var(--ring-color, #ffffff);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 200ms ease, stroke 200ms ease;
+  transform: rotate(-90deg);
+  transform-origin: 16px 16px;
+}
+
+/* ── Tool Rows ── */
+
+@utility tool-rows {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  & div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    border-top: 1px solid rgba(0, 0, 0, 0.05);
+    padding-top: 6px;
+    color: var(--color-muted);
+    font-size: 12px;
+  }
+  & strong {
+    color: var(--color-accent-deep);
+  }
+}
+
+/* ── Approval Box ── */
+
+@utility approval-button {
+  border-radius: var(--radius-pill);
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-accent-deep);
+  background: rgba(52, 120, 246, 0.08);
+  border: 1px solid rgba(52, 120, 246, 0.12);
+  transition:
+    transform 160ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 160ms ease,
+    opacity 160ms ease;
+  &:hover {
+    background: rgba(52, 120, 246, 0.14);
+  }
+  &:active {
+    transform: scale(0.97);
+  }
+}
+
+/* ── History Item Button Override ── */
+
+@utility history-item-btn {
+  font-size: 12px !important;
+  padding: 6px 12px !important;
+  min-height: auto !important;
+  height: 28px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+/* ── Status Rail ── */
+
+@utility status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.04);
+  font-weight: 600;
+}
+
+@utility config-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: var(--radius-pill);
+  background: rgba(0, 0, 0, 0.04);
+  font-weight: 600;
+}
+
+/* ── Form Fields ── */
+
+@utility field {
+  display: grid;
+  gap: 5px;
+  color: #48484a;
+  font-size: 13px;
+  font-weight: 600;
+  & span {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  & em {
+    color: var(--color-muted);
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 500;
+  }
+  & input,
+  & select {
+    width: 100%;
+    min-width: 0;
+    min-height: 36px;
+    border: 1px solid var(--color-glass-border);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.8);
+    padding: 7px 10px;
+    color: var(--color-ink);
+    outline: none;
+  }
+}
+
+@utility slider-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 86px;
+  gap: 10px;
+  align-items: center;
+  & input[type="range"] {
+    padding: 0;
+    accent-color: var(--color-accent);
+  }
+  & input[type="number"] {
+    text-align: right;
+  }
+}
+
+@utility secret-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  & button:disabled {
+    opacity: 0.4;
+  }
+}
+
+@utility toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #48484a;
+  font-size: 13px;
+  font-weight: 600;
+  & input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--color-accent);
+  }
+}
+
+/* ── Settings Section ── */
+
+@utility settings-section {
+  border: 1px solid var(--color-glass-border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.5);
+  padding: 14px;
+  margin-bottom: 12px;
+}
+
+/* ================================================================
+   Dark Mode Overrides
+   ================================================================ */
+
+@media (prefers-color-scheme: dark) {
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+
+  .user-bubble {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .thinking-header {
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .thinking-header:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .thinking-details {
+    border-left-color: rgba(255, 255, 255, 0.1);
+  }
+
+  .resize-grip::after {
+    background: rgba(255, 255, 255, 0.16);
+  }
+  .resize-grip:hover::after {
+    background: rgba(255, 255, 255, 0.32);
+  }
+
+  .ring-track {
+    stroke: rgba(255, 255, 255, 0.2);
+  }
+
+  .context-progress-text {
+    color: rgba(255, 255, 255, 0.7);
+  }
+}

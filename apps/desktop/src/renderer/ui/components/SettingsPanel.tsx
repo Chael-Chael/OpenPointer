@@ -49,10 +49,10 @@ export function SettingsPanel(props: SettingsPanelProps) {
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-label="OpenMagicPointer settings">
       <div className="modal-card">
-        <header className="settings-header">
+        <header className="flex items-center justify-between gap-3 mb-4">
           <div>
-            <p>Agent backends</p>
-            <h2>Connection settings</h2>
+            <p className="m-0 mb-1 text-accent text-[11px] font-bold uppercase tracking-[0.04em]">Agent backends</p>
+            <h2 className="m-0 text-xl font-bold leading-tight text-ink">Connection settings</h2>
           </div>
           <button className="ghost-button" onClick={onClose}>Close</button>
         </header>
@@ -66,7 +66,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </label>
         </section>
         {/* BACKEND_GRID_PLACEHOLDER */}
-        <div className="backend-grid">
+        <div className="grid grid-cols-2 gap-3 max-md:grid-cols-1">
           <BackendCard title="Local VLM" status={backendReadiness(draftAwareSettings, 'local-vlm')}>
             <label className="toggle-row">
               <input type="checkbox" checked={settings.localVlmEnabled} onChange={(event) => updateSettings({ localVlmEnabled: event.target.checked })} />
@@ -75,27 +75,26 @@ export function SettingsPanel(props: SettingsPanelProps) {
             <TextField label="Base URL" value={settings.localVlmBaseUrl} onChange={(value) => updateSettings({ localVlmBaseUrl: value })} placeholder="https://provider.example/v1" />
             <TextField label="Model" value={settings.localVlmModel} onChange={(value) => updateSettings({ localVlmModel: value })} placeholder="Optional model name" />
 
-            <div className="model-fetch-row" style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', marginTop: '4px' }}>
+            <div className="flex gap-2 items-end mt-1">
               <button
                 type="button"
-                className="ghost-button"
-                style={{ fontSize: '11px', padding: '4px 10px', height: '28px', borderRadius: '8px' }}
+                className="ghost-button !text-[11px] !py-1 !px-2.5 !h-7 !rounded-lg"
                 onClick={fetchModels}
                 disabled={isFetchingModels || !settings.localVlmBaseUrl}
               >
                 {isFetchingModels ? 'Fetching...' : 'Fetch vision models'}
               </button>
-              {fetchModelsError && <span style={{ color: '#e5383b', fontSize: '11px' }}>{fetchModelsError}</span>}
+              {fetchModelsError && <span className="text-danger text-[11px]">{fetchModelsError}</span>}
             </div>
 
             {fetchedModels && fetchedModels.length > 0 && (
-              <div className="fetched-models-list" style={{ marginTop: '8px', maxHeight: '100px', overflowY: 'auto', border: '1px solid var(--glass-border)', borderRadius: '8px', padding: '6px', background: 'rgba(0,0,0,0.02)' }}>
-                <p style={{ margin: '0 0 4px', fontSize: '11px', fontWeight: 'bold', color: 'var(--muted)' }}>Select a vision model:</p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+              <div className="mt-2 max-h-[100px] overflow-y-auto border border-glass-border rounded-lg p-1.5 bg-black/[0.02]">
+                <p className="m-0 mb-1 text-[11px] font-bold text-muted">Select a vision model:</p>
+                <div className="flex flex-wrap gap-1">
                   {fetchedModels.map((m) => (
                     <span
                       key={m}
-                      style={{ cursor: 'pointer', background: 'var(--accent-soft)', color: 'var(--accent-deep)', fontSize: '10px', padding: '2px 6px', borderRadius: '4px', border: '1px solid rgba(52,120,246,0.15)' }}
+                      className="cursor-pointer bg-accent-soft text-accent-deep text-[10px] py-0.5 px-1.5 rounded border border-accent/15 hover:brightness-95 hover:scale-[1.02] active:scale-[0.98] transition-all duration-150"
                       onClick={() => updateSettings({ localVlmModel: m })}
                     >
                       {m}
@@ -105,7 +104,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
               </div>
             )}
 
-            <label className="field" style={{ marginTop: '10px' }}>
+            <label className="field mt-2.5">
               <span>
                 Context window size
                 <em>Default: 32k</em>
@@ -181,7 +180,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           </BackendCard>
         </div>
         {/* RUNTIME_SECTION_PLACEHOLDER */}
-        <section className="settings-section runtime-section">
+        <section className="settings-section grid grid-cols-[minmax(200px,1fr)_repeat(3,minmax(0,auto))] items-center gap-3 mt-3 max-md:grid-cols-1">
           <label className="field">
             <span>CUA mode</span>
             <select value={settings.cuaMode} onChange={(event) => updateSettings({ cuaMode: event.target.value as AppSettings['cuaMode'] })}>
@@ -217,7 +216,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
             </select>
           </label>
           {(settings?.newDialogBehavior ?? 'continue') === 'interval' && (
-            <div style={{ marginTop: '12px' }}>
+            <div className="mt-3">
               <NumberSlider
                 label="New dialog interval"
                 value={settings?.newDialogInterval ?? 300}
@@ -231,11 +230,11 @@ export function SettingsPanel(props: SettingsPanelProps) {
           )}
         </section>
 
-        <section className="settings-section appearance-section">
+        <section className="settings-section grid grid-cols-2 gap-3 max-md:grid-cols-1">
           <NumberSlider
             label="Pill width"
             value={pillWidth}
-            min={280}
+            min={240}
             max={900}
             step={10}
             unit="px"
@@ -252,7 +251,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
           />
         </section>
 
-        <div className="modal-actions">
+        <div className="flex justify-end mt-4">
           <button className="primary-button" onClick={saveSettings}>Save settings</button>
         </div>
       </div>
