@@ -40,6 +40,7 @@ export type ClaudeAgentBridgeConfig = {
   executable?: string;
   model?: string;
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  permissionStorePath?: string;
   sdk?: {
     query(args: unknown): AsyncIterable<unknown>;
   };

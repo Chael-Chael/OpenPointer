@@ -630,7 +630,8 @@ function bridgeConfig(settings = getSettings()): AgentBridgeRegistryConfig {
       baseUrl: settings.claudeAgentBaseUrl || undefined,
       executable: settings.claudeAgentExecutable || undefined,
       model: settings.claudeAgentModel || undefined,
-      effort: settings.claudeAgentEffort || 'high'
+      effort: settings.claudeAgentEffort || 'high',
+      permissionStorePath: join(app.getPath('userData'), 'claude-permissions.json')
     },
     codex:
       settings.codexAppServerUrl || settings.codexExecutablePath

@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 import type { AgentContextEnvelope, AgentEvent } from '@openmagicpointer/core';
 import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { buildAgentInput, buildAgentInstructions, buildToolDiscoveryEvent } from './prompt.js';
 import type { AgentBridge, AgentRunOptions, ApprovalDecision, ClaudeAgentBridgeConfig } from './types.js';
@@ -13,6 +13,16 @@ let cachedClaudePath: string | undefined;
 type PendingToolApproval = {
   resolve(decision: ApprovalDecision): void;
   timeout: NodeJS.Timeout;
+};
+
+type PermissionRule = {
+  toolName: string;
+  ruleContent?: string;
+};
+
+type PermissionStore = {
+  version: 1;
+  rules: PermissionRule[];
 };
 
 class EventQueue<T> {
@@ -41,11 +51,6 @@ class EventQueue<T> {
     }
   }
 }
-
-type CachedPermissionRule = {
-  toolName: string;
-  ruleContent?: string;
-};
 
 type PermissionResult =
   | { behavior: 'allow'; toolUseID?: string; updatedPermissions?: unknown[]; decisionClassification?: 'user_temporary' | 'user_permanent' }
@@ -82,7 +87,7 @@ const DEFAULT_PATHS: Record<string, string[]> = {
 export class ClaudeAgentBridge implements AgentBridge {
   id = 'claude-agent' as const;
   private pendingToolApprovals = new Map<string, PendingToolApproval>();
-  private alwaysAllowedRules: CachedPermissionRule[] = [];
+  private persistedPermissionRules: PermissionRule[] | null = null;
   private resolvedPermissionResults = new Map<string, PermissionResult>();
   private inFlightPermissionResults = new Map<string, Promise<PermissionResult>>();
   private approvalEvents: EventQueue<AgentEvent> | null = null;
@@ -172,7 +177,7 @@ export class ClaudeAgentBridge implements AgentBridge {
     if (this.inFlightPermissionResults.has(permissionKey)) {
       return this.inFlightPermissionResults.get(permissionKey) as Promise<PermissionResult>;
     }
-    if (this.isAlwaysAllowed(toolName, input)) {
+    if (this.isPersistentlyAllowed(toolName, input)) {
       return { behavior: 'allow', toolUseID, decisionClassification: 'user_permanent' };
     }
     const id = toolUseID || `claude-approval-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -202,7 +207,7 @@ export class ClaudeAgentBridge implements AgentBridge {
       this.pendingToolApprovals.set(id, {
         resolve: (decision) => {
           if (decision === 'always_allow') {
-            this.rememberAlwaysAllowed(toolName, input, updatedPermissions);
+            this.rememberPersistentAlwaysAllowed(toolName, input, updatedPermissions);
             resolve({ behavior: 'allow', toolUseID, updatedPermissions, decisionClassification: 'user_permanent' });
             return;
           }
@@ -236,19 +241,49 @@ export class ClaudeAgentBridge implements AgentBridge {
     }
   }
 
-  private isAlwaysAllowed(toolName: string, input: Record<string, unknown>): boolean {
-    return this.alwaysAllowedRules.some((rule) => permissionRuleMatches(rule, toolName, input));
+  private isPersistentlyAllowed(toolName: string, input: Record<string, unknown>): boolean {
+    return this.loadPersistentPermissionRules().some((rule) => permissionRuleMatches(rule, toolName, input));
   }
 
-  private rememberAlwaysAllowed(toolName: string, input: Record<string, unknown>, updates: unknown[] | undefined): void {
-    const rules = permissionRulesFromUpdates(updates);
-    if (rules.length === 0) {
-      rules.push({ toolName, ruleContent: typeof input.command === 'string' ? input.command : undefined });
+  private rememberPersistentAlwaysAllowed(toolName: string, input: Record<string, unknown>, updates: unknown[] | undefined): void {
+    const storePath = this.config?.permissionStorePath;
+    if (!storePath) return;
+    const nextRules = permissionRulesFromUpdates(updates);
+    if (nextRules.length === 0) {
+      nextRules.push({ toolName, ruleContent: typeof input.command === 'string' ? input.command : undefined });
     }
-    for (const rule of rules) {
-      if (!this.alwaysAllowedRules.some((existing) => existing.toolName === rule.toolName && existing.ruleContent === rule.ruleContent)) {
-        this.alwaysAllowedRules.push(rule);
+    const rules = this.loadPersistentPermissionRules();
+    let changed = false;
+    for (const rule of nextRules) {
+      if (!rules.some((existing) => existing.toolName === rule.toolName && existing.ruleContent === rule.ruleContent)) {
+        rules.push(rule);
+        changed = true;
       }
+    }
+    if (!changed) return;
+    this.persistedPermissionRules = rules;
+    mkdirSync(dirname(storePath), { recursive: true });
+    writeFileSync(storePath, JSON.stringify({ version: 1, rules } satisfies PermissionStore, null, 2), 'utf8');
+  }
+
+  private loadPersistentPermissionRules(): PermissionRule[] {
+    if (this.persistedPermissionRules) return this.persistedPermissionRules;
+    const storePath = this.config?.permissionStorePath;
+    if (!storePath || !existsSync(storePath)) {
+      this.persistedPermissionRules = [];
+      return this.persistedPermissionRules;
+    }
+    try {
+      const parsed = JSON.parse(readFileSync(storePath, 'utf8'));
+      if (!isRecord(parsed) || parsed.version !== 1 || !Array.isArray(parsed.rules)) {
+        this.persistedPermissionRules = [];
+        return this.persistedPermissionRules;
+      }
+      this.persistedPermissionRules = parsed.rules.filter(isPermissionRule);
+      return this.persistedPermissionRules;
+    } catch {
+      this.persistedPermissionRules = [];
+      return this.persistedPermissionRules;
     }
   }
 
@@ -401,27 +436,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
-function permissionRulesFromUpdates(updates: unknown[] | undefined): CachedPermissionRule[] {
-  const rules: CachedPermissionRule[] = [];
+function isPermissionRule(value: unknown): value is PermissionRule {
+  return (
+    isRecord(value) &&
+    typeof value.toolName === 'string' &&
+    (value.ruleContent === undefined || typeof value.ruleContent === 'string')
+  );
+}
+
+function permissionRulesFromUpdates(updates: unknown[] | undefined): PermissionRule[] {
+  const rules: PermissionRule[] = [];
   if (!updates) return rules;
   for (const update of updates) {
-    if (!update || typeof update !== 'object') continue;
-    const record = update as Record<string, unknown>;
-    if (record.behavior !== 'allow' || !Array.isArray(record.rules)) continue;
-    for (const rule of record.rules) {
-      if (!rule || typeof rule !== 'object') continue;
-      const ruleRecord = rule as Record<string, unknown>;
-      if (typeof ruleRecord.toolName !== 'string') continue;
+    if (!isRecord(update) || update.behavior !== 'allow' || !Array.isArray(update.rules)) continue;
+    for (const rule of update.rules) {
+      if (!isPermissionRule(rule)) continue;
       rules.push({
-        toolName: ruleRecord.toolName,
-        ruleContent: typeof ruleRecord.ruleContent === 'string' ? ruleRecord.ruleContent : undefined
+        toolName: rule.toolName,
+        ruleContent: rule.ruleContent
       });
     }
   }
   return rules;
 }
 
-function permissionRuleMatches(rule: CachedPermissionRule, toolName: string, input: Record<string, unknown>): boolean {
+function permissionRuleMatches(rule: PermissionRule, toolName: string, input: Record<string, unknown>): boolean {
   if (rule.toolName !== toolName) return false;
   if (!rule.ruleContent) return true;
   if (typeof input.command === 'string') return input.command === rule.ruleContent;

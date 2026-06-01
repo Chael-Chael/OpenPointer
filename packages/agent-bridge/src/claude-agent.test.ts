@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { ClaudeAgentBridge } from './claude-agent.js';
 import { buildAgentContextEnvelope } from './routing.js';
 import type { PointerContext } from '@openmagicpointer/core';
@@ -11,6 +14,20 @@ const context: PointerContext = {
   nearby: [],
   createdAt: 1
 };
+
+const tempDirs: string[] = [];
+
+function tempPermissionStorePath(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'omp-claude-permissions-'));
+  tempDirs.push(dir);
+  return join(dir, 'claude-permissions.json');
+}
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 describe('ClaudeAgentBridge', () => {
   it('surfaces SDK tool permission requests and resolves one-time approval decisions', async () => {
@@ -79,5 +96,70 @@ describe('ClaudeAgentBridge', () => {
       updatedPermissions: [{ type: 'addRules', rules: [{ toolName: 'mcp__zotero__search' }], behavior: 'allow', destination: 'session' }]
     });
     await iterator.return?.();
+  });
+
+  it('persists always-allow rules across bridge instances', async () => {
+    const permissionStorePath = tempPermissionStorePath();
+    const suggestions = [{ type: 'addRules', rules: [{ toolName: 'mcp__zotero__search' }], behavior: 'allow', destination: 'session' }];
+    const firstBridge = new ClaudeAgentBridge({
+      enabled: true,
+      permissionStorePath,
+      sdk: {
+        async *query(args: unknown) {
+          const options = (args as { options: { canUseTool: (...args: unknown[]) => Promise<unknown> } }).options;
+          await options.canUseTool('mcp__zotero__search', {}, {
+            toolUseID: 'tool-3',
+            title: 'Claude wants to use Zotero MCP.',
+            displayName: 'Zotero MCP',
+            suggestions
+          });
+          yield { type: 'result', result: 'done' };
+        }
+      }
+    });
+    const envelope = buildAgentContextEnvelope({ instruction: 'summarize this paper', mode: 'text', context, backend: 'claude-agent' });
+    const firstIterator = firstBridge.run(envelope)[Symbol.asyncIterator]();
+
+    expect((await firstIterator.next()).value.type).toBe('tool.discovery');
+    expect((await firstIterator.next()).value.type).toBe('run.started');
+    const approval = (await firstIterator.next()).value;
+    expect(approval).toMatchObject({ type: 'approval.requested', id: 'tool-3', tool: 'Zotero MCP' });
+    await firstBridge.approve('tool-3', 'always_allow');
+    expect((await firstIterator.next()).value).toMatchObject({ type: 'run.completed', text: 'done' });
+    await firstIterator.return?.();
+
+    expect(JSON.parse(readFileSync(permissionStorePath, 'utf8'))).toMatchObject({
+      version: 1,
+      rules: [{ toolName: 'mcp__zotero__search' }]
+    });
+
+    let secondDecision: unknown;
+    const secondBridge = new ClaudeAgentBridge({
+      enabled: true,
+      permissionStorePath,
+      sdk: {
+        async *query(args: unknown) {
+          const options = (args as { options: { canUseTool: (...args: unknown[]) => Promise<unknown> } }).options;
+          secondDecision = await options.canUseTool('mcp__zotero__search', {}, {
+            toolUseID: 'tool-4',
+            title: 'Claude wants to use Zotero MCP.',
+            displayName: 'Zotero MCP',
+            suggestions
+          });
+          yield { type: 'result', result: 'done' };
+        }
+      }
+    });
+    const secondIterator = secondBridge.run(envelope)[Symbol.asyncIterator]();
+
+    expect((await secondIterator.next()).value.type).toBe('tool.discovery');
+    expect((await secondIterator.next()).value.type).toBe('run.started');
+    expect((await secondIterator.next()).value).toMatchObject({ type: 'run.completed', text: 'done' });
+    expect(secondDecision).toMatchObject({
+      behavior: 'allow',
+      toolUseID: 'tool-4',
+      decisionClassification: 'user_permanent'
+    });
+    await secondIterator.return?.();
   });
 });
