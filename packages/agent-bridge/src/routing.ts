@@ -1,7 +1,7 @@
 import type { AgentBackendId, AgentContextEnvelope, AgentInputMode, AgentToolPolicy, CuaDirective, PointerContext } from '@openmagicpointer/core';
 
 const OPERATION_PATTERN =
-  /\b(click|merge|add|insert|fill|type|open|move|drag|scroll|operate|select)\b|(?:\u70b9|\u9ede)(?:\u51fb|\u64ca)|\u5408\u5e76|\u6dfb\u52a0|\u52a0\u5165|\u586b(?:\u5145)?|\u8f93\u5165|\u6253\u5f00|\u64cd\u4f5c|\u9009\u62e9/iu;
+  /\b(click|merge|add|insert|paste|fill|type|open|move|drag|scroll|operate|select|selection|selected|highlight|read|copy)\b|(?:\u70b9|\u9ede)(?:\u51fb|\u64ca)|\u5408\u5e76|\u6dfb\u52a0|\u52a0\u5165|\u63d2\u5165|\u7c98\u8d34|\u66ff\u6362|\u6539\u5199|\u586b(?:\u5145)?|\u8f93\u5165|\u8bfb\u53d6|\u8bc6\u522b|\u590d\u5236|\u9ad8\u4eae|\u6253\u5f00|\u64cd\u4f5c|\u9009\u62e9|\u9009\u4e2d/iu;
 const FORCE_CUA_PATTERN = /\b(force|must|directly).*(cua|desktop|computer)|\u5f3a\u5236.*(cua|\u684c\u9762|\u7535\u8111)|\u76f4\u63a5\u64cd\u4f5c/iu;
 
 export function buildAgentContextEnvelope(args: {
@@ -41,15 +41,28 @@ function buildPreferredTools(operationIntent: boolean): string[] {
 }
 
 function contextAttachments(context: PointerContext): AgentContextEnvelope['attachments'] {
-  if (!context.visual?.imageBase64 || !context.visual.mimeType) return [];
-  return [
-    {
+  const attachments: AgentContextEnvelope['attachments'] = [];
+  if (context.visual?.imageBase64 && context.visual.mimeType) {
+    attachments.push({
       type: 'screenshot',
+      scope: 'pointer',
+      label: 'Pointer context screenshot',
       mimeType: context.visual.mimeType,
       dataUrl: `data:${context.visual.mimeType};base64,${context.visual.imageBase64}`,
       crop: context.visual.crop
-    }
-  ];
+    });
+  }
+  if (context.windowSnapshot?.imageBase64 && context.windowSnapshot.mimeType) {
+    attachments.push({
+      type: 'screenshot',
+      scope: 'window',
+      label: 'Full window screenshot',
+      mimeType: context.windowSnapshot.mimeType,
+      dataUrl: `data:${context.windowSnapshot.mimeType};base64,${context.windowSnapshot.imageBase64}`,
+      crop: context.windowSnapshot.bounds
+    });
+  }
+  return attachments;
 }
 
 function buildCuaDirective(instruction: string, context: PointerContext, mode: 'prefer' | 'require'): CuaDirective {

@@ -5,6 +5,7 @@ import type { AgentContextEnvelope, AgentEvent } from '@openmagicpointer/core';
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
+import { materializeAttachmentFiles } from './attachments.js';
 import { buildAgentInput, buildAgentInstructions, buildToolDiscoveryEvent } from './prompt.js';
 import type { AgentBridge, AgentRunOptions, ApprovalDecision, ClaudeAgentBridgeConfig } from './types.js';
 
@@ -123,10 +124,11 @@ export class ClaudeAgentBridge implements AgentBridge {
     this.resolvedPermissionResults.clear();
     this.inFlightPermissionResults.clear();
     const permissionEnv = await this.ensurePermissionServer();
+    const runEnvelope = materializeAttachmentFiles(envelope);
 
     try {
       const sdkMessages = sdk.query({
-        prompt: `${buildAgentInstructions(envelope)}\n\n${buildAgentInput(envelope)}`,
+        prompt: `${buildAgentInstructions(runEnvelope)}\n\n${buildAgentInput(runEnvelope)}`,
         options: {
           allowedTools: allowedToolsForEnvelope(envelope),
           canUseTool: (toolName: string, input: Record<string, unknown>, permissionOptions: Record<string, unknown>) =>

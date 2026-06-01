@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen } from 'electron';
+import { app, BrowserWindow, clipboard, desktopCapturer, globalShortcut, ipcMain, screen, type NativeImage } from 'electron';
 import { activeWindow } from 'get-windows';
 import { uIOhook } from 'uiohook-napi';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -16,10 +16,18 @@ import {
 import type { AgentContextEnvelope, AgentEvent, Point, PointerContext, PointerEntity, Rect } from '@openmagicpointer/core';
 import { buildPointerContext } from '@openmagicpointer/grounding';
 import { OMP_CHANNELS } from '../shared/ipc.js';
-import type { CursorPayload, HoldProgressPayload, SubmitInstructionRequest } from '../shared/types.js';
+import type {
+  CursorPayload,
+  HoldProgressPayload,
+  InsertTextRequest,
+  InsertTextResponse,
+  ReadSelectionRequest,
+  ReadSelectionResponse,
+  SubmitInstructionRequest
+} from '../shared/types.js';
 import { CuaBroker } from './cua-broker.js';
 import { CuaGroundingProvider } from './cua-grounding.js';
-import { CuaSidecarManager } from './cua-sidecar.js';
+import { CuaSidecarManager, type CuaToolResult } from './cua-sidecar.js';
 import { loadLocalEnv } from './env.js';
 import { getClaudeAgentApiKey, getCodexApiKey, getHermesApiKey, getLocalVlmApiKey, getOpenCodeApiKey, getSettings, saveSettings } from './settings.js';
 import { ChatHistoryManager } from './history.js';
@@ -51,7 +59,7 @@ const chatHistory = new ChatHistoryManager();
 // Single source of truth for the CUA tools exposed to the agent. This list is
 // both advertised to the model (envelope.toolServers[].tools) and enforced by
 // the broker as a whitelist, so the agent cannot invoke unlisted driver tools.
-const CUA_AGENT_TOOLS = [
+const CUA_DRIVER_AGENT_TOOLS = [
   'list_windows',
   'get_window_state',
   'click',
@@ -64,6 +72,8 @@ const CUA_AGENT_TOOLS = [
   'drag',
   'set_value'
 ];
+const OMP_AGENT_TOOLS = ['read_selected_text', 'insert_text'];
+const CUA_AGENT_TOOLS = [...CUA_DRIVER_AGENT_TOOLS, ...OMP_AGENT_TOOLS];
 
 const hold = {
   active: false,
@@ -477,19 +487,27 @@ function registerIpc(): void {
     // makes the composer blink whenever background grounding refreshes.
     return cuaGrounding.preview(req.cursor, await activeWindowInfo());
   });
+  ipcMain.handle(OMP_CHANNELS.ReadSelection, async (_event, req?: ReadSelectionRequest) => {
+    return readSelectedText(req);
+  });
+  ipcMain.handle(OMP_CHANNELS.InsertText, async (_event, req: InsertTextRequest) => {
+    return insertText(req);
+  });
   ipcMain.handle(OMP_CHANNELS.RequestWindowContext, async (_event, req: { cursor: CursorPayload }) => {
     const settings = getSettings();
-    const activeInfo = await activeWindowInfo();
+    const activeInfo = await activeWindowPreviewInfo();
     if (settings.cuaMode !== 'off') {
-      const cuaWindow = await cuaGrounding.previewWindow(req.cursor, activeInfo);
+      const cuaWindow = await cuaGrounding.previewWindow(req.cursor, activeInfo?.window);
       if (cuaWindow.status === 'matched') return cuaWindow;
     }
     if (activeInfo) {
       return {
         status: 'matched',
         source: 'active-window',
-        window: activeInfo,
-        windowId: activeInfo.windowId
+        window: activeInfo.window,
+        windowId: activeInfo.window.windowId,
+        pid: activeInfo.pid,
+        bounds: activeInfo.bounds
       };
     }
     return { status: 'fallback', source: 'active-window', error: 'No active window information available.' };
@@ -508,6 +526,8 @@ function registerIpc(): void {
     const cursor = req.cursor ?? lastActivationCursor ?? lastCursor ?? cursorPayload();
     const includeCua = Boolean(req.includeCua) && settings.cuaMode !== 'off';
     const providedCuaEntities = includeCua ? (req.cuaEntities ?? []) : [];
+    const selectedTextResult = req.includeSelectedText ? await readSelectedText({ cursor, windowContext: req.windowContext }) : undefined;
+    const selectedText = selectedTextResult?.status === 'matched' ? selectedTextResult.text : undefined;
     const context = req.includeScreenshot
       ? await capturePointerContext(
           cursor,
@@ -515,9 +535,12 @@ function registerIpc(): void {
           req.selectedEntity,
           includeCua && providedCuaEntities.length === 0,
           providedCuaEntities,
-          req.windowContext
+          req.windowContext,
+          req.windowPid,
+          req.windowBounds,
+          selectedText
         )
-      : await buildLightPointerContext(cursor, req.selectedEntity, providedCuaEntities, includeCua, req.windowContext);
+      : await buildLightPointerContext(cursor, req.selectedEntity, providedCuaEntities, includeCua, req.windowContext, req.windowPid, req.windowBounds, selectedText);
 
     const conversationId = req.conversationId || `conv-${Date.now()}`;
     await chatHistory.appendTurn(conversationId, {
@@ -546,6 +569,7 @@ function registerIpc(): void {
         ? await cuaBroker.ensureStarted({
             requireApprovalBeforeCua: settings.requireApprovalBeforeCua,
             allowedTools: CUA_AGENT_TOOLS,
+            localTools: createOpenMagicPointerTools(context),
             emit: (agentEvent) => event.sender.send(OMP_CHANNELS.AgentEvent, agentEvent)
           })
         : undefined;
@@ -666,13 +690,290 @@ function bridgeConfig(settings = getSettings()): AgentBridgeRegistryConfig {
   };
 }
 
+type ClipboardSnapshot = {
+  text: string;
+  html: string;
+  rtf: string;
+  image?: NativeImage;
+};
+
+function createOpenMagicPointerTools(context: PointerContext): Record<string, (args: Record<string, unknown>) => Promise<CuaToolResult>> {
+  return {
+    read_selected_text: async () => toolResultFromReadSelection(await readSelectedText({ cursor: context.cursor, windowContext: context.window })),
+    insert_text: async (args) => {
+      const text = typeof args.text === 'string' ? args.text : '';
+      if (!text) return toolError('insert_text: missing required string field `text`.');
+      const clickTarget = typeof args.click_target === 'boolean' ? args.click_target : true;
+      return toolResultFromInsertText(
+        await insertText({
+          text,
+          cursor: context.cursor,
+          windowContext: context.window,
+          targetEntity: context.target,
+          clickTarget
+        })
+      );
+    }
+  };
+}
+
+async function readSelectedText(req: ReadSelectionRequest = {}): Promise<ReadSelectionResponse> {
+  const settings = getSettings();
+  if (settings.cuaMode === 'off') {
+    return { status: 'unavailable', error: 'CUA mode is off.' };
+  }
+
+  const cursor = req.cursor ?? lastActivationCursor ?? lastCursor ?? cursorPayload();
+  const snapshot = snapshotClipboard();
+  try {
+    return await withOverlayHidden(cursor.displayId, async () => {
+      const target = await resolveCuaSelectionTarget(cursor, req.windowContext);
+      if (!target) {
+        return { status: 'unavailable', error: 'No CUA window matched the selection cursor.' };
+      }
+
+      const uiaSelection = await readSelectedTextViaUia(target);
+      if (uiaSelection) {
+        return uiaSelection;
+      }
+
+      clipboard.clear();
+      const result = await cuaSidecar.callTool('hotkey', {
+        pid: target.pid,
+        window_id: Number(target.windowId),
+        keys: ['ctrl', 'c']
+      });
+      if (result.isError) {
+        return {
+          status: 'unavailable',
+          pid: target.pid,
+          windowId: target.windowId,
+          error: cuaToolResultText(result) ?? 'CUA hotkey copy failed.'
+        };
+      }
+
+      await wait(180);
+      const text = clipboard.readText();
+      return text.trim()
+        ? { status: 'matched', text, source: 'cua-hotkey-clipboard', pid: target.pid, windowId: target.windowId }
+        : { status: 'empty', source: 'cua-hotkey-clipboard', pid: target.pid, windowId: target.windowId };
+    });
+  } catch (error) {
+    return { status: 'unavailable', error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    restoreClipboard(snapshot);
+  }
+}
+
+type UiaSelectionToolPayload = {
+  status?: 'matched' | 'empty';
+  text?: string;
+  pid?: number;
+  window_id?: number;
+  source?: string;
+};
+
+async function readSelectedTextViaUia(target: {
+  pid: number;
+  windowId: string;
+}): Promise<ReadSelectionResponse | undefined> {
+  try {
+    const result = await cuaSidecar.callTool('get_selected_text', {
+      pid: target.pid,
+      window_id: Number(target.windowId)
+    });
+    if (result.isError) {
+      return undefined;
+    }
+
+    const structured = result.structuredContent as UiaSelectionToolPayload | undefined;
+    if (structured?.status === 'matched' || structured?.status === 'empty') {
+      return {
+        status: structured.status,
+        text: structured.text,
+        source: 'uia-textpattern',
+        pid: structured.pid ?? target.pid,
+        windowId:
+          typeof structured.window_id === 'number' ? String(structured.window_id) : target.windowId
+      };
+    }
+  } catch {
+    // Older sidecars may not expose `get_selected_text`; the hotkey/clipboard
+    // fallback below remains the compatibility path.
+  }
+  return undefined;
+}
+
+async function insertText(req: InsertTextRequest): Promise<InsertTextResponse> {
+  const text = req.text;
+  if (!text) return { status: 'unavailable', error: 'Missing text to insert.' };
+  const settings = getSettings();
+  if (settings.cuaMode === 'off') {
+    return { status: 'unavailable', error: 'CUA mode is off.' };
+  }
+
+  const cursor = req.cursor ?? lastActivationCursor ?? lastCursor ?? cursorPayload();
+  const snapshot = snapshotClipboard();
+  try {
+    return await withOverlayHidden(cursor.displayId, async () => {
+      const target = await resolveCuaSelectionTarget(cursor, req.windowContext);
+      if (!target) {
+        return { status: 'unavailable', error: 'No CUA window matched the insertion target.' };
+      }
+
+      if (req.clickTarget !== false) {
+        const focused = await focusInsertionTarget(target, cursor, req.targetEntity);
+        if (!focused.ok) {
+          return {
+            status: 'unavailable',
+            source: 'cua-click-paste',
+            pid: target.pid,
+            windowId: target.windowId,
+            error: focused.error
+          };
+        }
+        await wait(120);
+      }
+
+      clipboard.writeText(text);
+      const result = await cuaSidecar.callTool('hotkey', {
+        pid: target.pid,
+        window_id: Number(target.windowId),
+        keys: ['ctrl', 'v']
+      });
+      if (result.isError) {
+        return {
+          status: 'unavailable',
+          source: 'cua-click-paste',
+          pid: target.pid,
+          windowId: target.windowId,
+          error: cuaToolResultText(result) ?? 'CUA paste hotkey failed.'
+        };
+      }
+
+      await wait(180);
+      return { status: 'matched', source: 'cua-click-paste', pid: target.pid, windowId: target.windowId };
+    });
+  } catch (error) {
+    return { status: 'unavailable', error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    restoreClipboard(snapshot);
+  }
+}
+
+async function resolveCuaSelectionTarget(
+  cursor: CursorPayload,
+  preferredWindowInfo?: PointerContext['window']
+): Promise<{ pid: number; windowId: string; bounds?: Rect } | undefined> {
+  const preview = await cuaGrounding.previewWindow(cursor, preferredWindowInfo ?? (await activeWindowInfo()));
+  if (preview.status === 'matched' && typeof preview.pid === 'number' && preview.windowId) {
+    return { pid: preview.pid, windowId: preview.windowId, bounds: preview.bounds };
+  }
+  return undefined;
+}
+
+async function focusInsertionTarget(
+  target: { pid: number; windowId: string; bounds?: Rect },
+  cursor: CursorPayload,
+  targetEntity?: PointerEntity
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const ref = targetEntity?.groundingRef?.provider === 'cua' ? targetEntity.groundingRef : undefined;
+  const clickArgs: Record<string, unknown> = {
+    pid: ref?.pid ?? target.pid,
+    window_id: Number(ref?.windowId ?? target.windowId)
+  };
+  if (typeof ref?.elementIndex === 'number') {
+    clickArgs.element_index = ref.elementIndex;
+  } else {
+    const point = insertionPoint(cursor, target.bounds, ref?.screenRect);
+    if (!point) return { ok: true };
+    clickArgs.x = point.x;
+    clickArgs.y = point.y;
+  }
+
+  const result = await cuaSidecar.callTool('click', clickArgs);
+  if (result.isError) return { ok: false, error: cuaToolResultText(result) ?? 'CUA click failed before insertion.' };
+  return { ok: true };
+}
+
+function insertionPoint(cursor: CursorPayload, bounds?: Rect, preferredRect?: Rect): { x: number; y: number } | undefined {
+  if (!bounds) return undefined;
+  const screenPoint = preferredRect
+    ? {
+        x: preferredRect.x + preferredRect.width / 2,
+        y: preferredRect.y + preferredRect.height / 2
+      }
+    : { x: cursor.x, y: cursor.y };
+  return {
+    x: screenPoint.x - bounds.x,
+    y: screenPoint.y - bounds.y
+  };
+}
+
+function toolResultFromReadSelection(response: ReadSelectionResponse): CuaToolResult {
+  if (response.status === 'matched') {
+    return toolText(`Selected text: ${response.text ?? ''}`, response);
+  }
+  return response.status === 'empty'
+    ? toolText('No selected text was available.', response)
+    : toolError(response.error ?? 'read_selected_text failed.', response);
+}
+
+function toolResultFromInsertText(response: InsertTextResponse): CuaToolResult {
+  return response.status === 'matched'
+    ? toolText('Inserted text into the target application.', response)
+    : toolError(response.error ?? 'insert_text failed.', response);
+}
+
+function toolText(text: string, structuredContent?: unknown): CuaToolResult {
+  return { content: [{ type: 'text', text }], structuredContent };
+}
+
+function toolError(text: string, structuredContent?: unknown): CuaToolResult {
+  return { content: [{ type: 'text', text }], structuredContent, isError: true };
+}
+
+function cuaToolResultText(result: CuaToolResult): string | undefined {
+  return result.content
+    ?.map((part) => part.text)
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+}
+
+function snapshotClipboard(): ClipboardSnapshot {
+  const image = clipboard.readImage();
+  return {
+    text: clipboard.readText(),
+    html: clipboard.readHTML(),
+    rtf: clipboard.readRTF(),
+    image: image.isEmpty() ? undefined : image
+  };
+}
+
+function restoreClipboard(snapshot: ClipboardSnapshot): void {
+  if (!snapshot.text && !snapshot.html && !snapshot.rtf && !snapshot.image) {
+    clipboard.clear();
+    return;
+  }
+  clipboard.write({
+    text: snapshot.text || undefined,
+    html: snapshot.html || undefined,
+    rtf: snapshot.rtf || undefined,
+    image: snapshot.image
+  });
+}
+
 async function capturePointerContext(
   cursor: CursorPayload,
   targetPath?: Point[],
   selectedEntity?: PointerEntity,
   useCua = true,
   seedCuaEntities: PointerEntity[] = [],
-  preferredWindowInfo?: PointerContext['window']
+  preferredWindowInfo?: PointerContext['window'],
+  preferredWindowPid?: number,
+  preferredWindowBounds?: Rect,
+  selectionText?: string
 ): Promise<PointerContext> {
   // Signal the renderer that a submit-time screenshot is being taken so the
   // pointer can tint accordingly. `withCua` distinguishes a plain screenshot
@@ -681,21 +982,25 @@ async function capturePointerContext(
   broadcast(OMP_CHANNELS.CaptureActivity, { phase: 'start', withCua });
   let capture: Awaited<ReturnType<typeof captureContextImage>>;
   let windowInfo: PointerContext['window'];
+  let windowSnapshot: PointerContext['windowSnapshot'];
   let cuaPreview: Awaited<ReturnType<CuaGroundingProvider['preview']>> | undefined;
   try {
     const hiddenResult = await withOverlayHidden(cursor.displayId, async () => {
       const currentWindow = preferredWindowInfo ?? (await activeWindowInfo());
-      const [contextImage, groundingPreview] = await Promise.all([
+      const [contextImage, fullWindowImage, groundingPreview] = await Promise.all([
         captureContextImage(cursor, targetPath),
+        captureWindowSnapshot(cursor, currentWindow, preferredWindowPid, preferredWindowBounds),
         useCua ? cuaGrounding.preview(cursor, currentWindow) : Promise.resolve(undefined)
       ]);
       return {
         capture: contextImage,
+        windowSnapshot: fullWindowImage,
         windowInfo: currentWindow,
         cuaPreview: groundingPreview
       };
     });
     capture = hiddenResult.capture;
+    windowSnapshot = hiddenResult.windowSnapshot;
     windowInfo = hiddenResult.windowInfo;
     cuaPreview = hiddenResult.cuaPreview;
   } finally {
@@ -718,13 +1023,15 @@ async function capturePointerContext(
     cursor,
     source: 'desktop',
     window: windowInfo,
+    windowSnapshot,
     entities,
     gestureKind: targetPath && targetPath.length > 1 ? 'rectangle' : 'hover',
     gesturePath: targetPath && targetPath.length > 0 ? targetPath : [{ x: cursor.localX, y: cursor.localY, t: Date.now() }],
     screenshotId: capture.id,
     imageBase64: capture.imageBase64,
     mimeType: capture.mimeType,
-    crop: capture.crop
+    crop: capture.crop,
+    selectionText
   });
 
   if (selectedEntity?.groundingRef || seededCuaEntities.length > 0) {
@@ -748,9 +1055,24 @@ async function buildLightPointerContext(
   selectedEntity: PointerEntity | undefined,
   cuaEntities: PointerEntity[],
   includeCua: boolean,
-  preferredWindowInfo?: PointerContext['window']
+  preferredWindowInfo?: PointerContext['window'],
+  preferredWindowPid?: number,
+  preferredWindowBounds?: Rect,
+  selectionText?: string
 ): Promise<PointerContext> {
-  const windowInfo = preferredWindowInfo ?? (await activeWindowInfo());
+  let windowInfo = preferredWindowInfo ?? (await activeWindowInfo());
+  let windowSnapshot: PointerContext['windowSnapshot'];
+  if (preferredWindowBounds || preferredWindowInfo?.windowId) {
+    const hiddenResult = await withOverlayHidden(cursor.displayId, async () => {
+      const currentWindow = preferredWindowInfo ?? (await activeWindowInfo());
+      return {
+        windowInfo: currentWindow,
+        windowSnapshot: await captureWindowSnapshot(cursor, currentWindow, preferredWindowPid, preferredWindowBounds)
+      };
+    });
+    windowInfo = hiddenResult.windowInfo;
+    windowSnapshot = hiddenResult.windowSnapshot;
+  }
   let groundingPreview: Awaited<ReturnType<CuaGroundingProvider['preview']>> | undefined;
   let groundedEntities = includeCua ? cuaEntities.filter((entity) => entity.groundingRef?.provider === 'cua') : [];
   if (includeCua && groundedEntities.length === 0) {
@@ -762,9 +1084,11 @@ async function buildLightPointerContext(
     cursor,
     source: 'desktop',
     window: windowInfo,
+    windowSnapshot,
     entities,
     gestureKind: 'hover',
-    gesturePath: [{ x: cursor.localX, y: cursor.localY, t: Date.now() }]
+    gesturePath: [{ x: cursor.localX, y: cursor.localY, t: Date.now() }],
+    selectionText
   });
 
   if (selectedEntity?.groundingRef || groundedEntities.length > 0) {
@@ -805,18 +1129,45 @@ function dedupeEntities(entities: PointerEntity[]): PointerEntity[] {
 }
 
 async function activeWindowInfo(): Promise<PointerContext['window']> {
+  return (await activeWindowPreviewInfo())?.window;
+}
+
+async function activeWindowPreviewInfo(): Promise<{ window: NonNullable<PointerContext['window']>; pid?: number; bounds?: Rect } | undefined> {
   try {
     const info = await activeWindow({ screenRecordingPermission: false, accessibilityPermission: false });
     if (!info) return undefined;
     return {
-      title: info.title,
-      app: info.owner?.name,
-      process: info.owner?.name,
-      windowId: String(info.id)
+      window: {
+        title: info.title,
+        app: info.owner?.name,
+        process: info.owner?.name,
+        windowId: String(info.id)
+      },
+      pid: info.owner?.processId,
+      bounds: info.bounds
     };
   } catch {
     return undefined;
   }
+}
+
+async function captureWindowSnapshot(
+  cursor: CursorPayload,
+  windowInfo?: PointerContext['window'],
+  pid?: number,
+  bounds?: Rect
+): Promise<NonNullable<PointerContext['windowSnapshot']> | undefined> {
+  const capture =
+    (await captureWindowViaCuaVision(windowInfo, pid)) ??
+    (bounds ? await captureWindowSourceImage(bounds, windowInfo) : undefined) ??
+    (bounds ? await captureScreenRegion(cursor, bounds, 'window') : undefined);
+  if (!capture) return undefined;
+  return {
+    screenshotId: capture.id,
+    imageBase64: capture.imageBase64,
+    mimeType: capture.mimeType,
+    bounds: capture.crop
+  };
 }
 
 function visualEntities(cursor: CursorPayload, crop: Rect, targetPath?: Point[]): PointerEntity[] {
@@ -876,6 +1227,129 @@ async function captureContextImage(
   };
 }
 
+async function captureWindowViaCuaVision(
+  windowInfo: PointerContext['window'] | undefined,
+  pid: number | undefined
+): Promise<{
+  id: string;
+  imageBase64: string;
+  mimeType: 'image/png' | 'image/jpeg';
+  crop: Rect;
+} | undefined> {
+  const hwnd = Number(windowInfo?.windowId);
+  if (!Number.isFinite(hwnd) || hwnd <= 0 || typeof pid !== 'number') return undefined;
+  try {
+    const result = await cuaSidecar.callTool('get_window_state', {
+      pid,
+      window_id: hwnd,
+      capture_mode: 'vision'
+    });
+    if (result.isError) return undefined;
+    const image = result.content?.find((part) => part.type === 'image' && typeof part.data === 'string');
+    if (!image?.data) return undefined;
+    const structured = result.structuredContent as { screenshot_width?: number; screenshot_height?: number } | undefined;
+    const width = Number(structured?.screenshot_width) || 0;
+    const height = Number(structured?.screenshot_height) || 0;
+    return {
+      id: `window-cua-${Date.now()}`,
+      imageBase64: image.data,
+      mimeType: image.mimeType === 'image/jpeg' ? 'image/jpeg' : 'image/png',
+      crop: { x: 0, y: 0, width, height }
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+async function captureWindowSourceImage(
+  bounds: Rect,
+  windowInfo?: PointerContext['window']
+): Promise<{
+  id: string;
+  imageBase64: string;
+  mimeType: 'image/jpeg';
+  crop: Rect;
+} | undefined> {
+  const scale = Math.max(1, screen.getDisplayMatching(bounds).scaleFactor || 1);
+  const sources = await desktopCapturer.getSources({
+    types: ['window'],
+    thumbnailSize: {
+      width: Math.max(1, Math.round(bounds.width * scale)),
+      height: Math.max(1, Math.round(bounds.height * scale))
+    }
+  });
+  const source = findWindowSource(sources, windowInfo);
+  if (!source || source.thumbnail.isEmpty()) return undefined;
+  const image = source.thumbnail;
+  const size = image.getSize();
+  const jpeg = image.toJPEG(82);
+  return {
+    id: `window-${Date.now()}`,
+    imageBase64: jpeg.toString('base64'),
+    mimeType: 'image/jpeg',
+    crop: { x: 0, y: 0, width: size.width, height: size.height }
+  };
+}
+
+function findWindowSource(sources: Electron.DesktopCapturerSource[], windowInfo?: PointerContext['window']): Electron.DesktopCapturerSource | undefined {
+  const windowId = windowInfo?.windowId?.trim();
+  if (windowId) {
+    const byId = sources.find((source) => source.id.split(':').includes(windowId) || source.id.includes(windowId));
+    if (byId) return byId;
+  }
+
+  const title = normalizeSourceText(windowInfo?.title);
+  const app = normalizeSourceText(windowInfo?.app ?? windowInfo?.process);
+  if (!title && !app) return undefined;
+  return sources.find((source) => {
+    const name = normalizeSourceText(source.name);
+    if (title && (name === title || name.includes(title) || title.includes(name))) return true;
+    return Boolean(app && name.includes(app));
+  });
+}
+
+function normalizeSourceText(value: string | undefined): string {
+  return value?.toLowerCase().replace(/\s+/g, ' ').trim() ?? '';
+}
+
+async function captureScreenRegion(
+  cursor: CursorPayload,
+  region: Rect,
+  idPrefix: string
+): Promise<
+  | {
+      id: string;
+      imageBase64: string;
+      mimeType: 'image/jpeg';
+      crop: Rect;
+    }
+  | undefined
+> {
+  const regionDisplay = displayForRegion(region, cursor);
+  const sources = await desktopCapturer.getSources({
+    types: ['screen'],
+    thumbnailSize: {
+      width: Math.round(regionDisplay.size.width * regionDisplay.scaleFactor),
+      height: Math.round(regionDisplay.size.height * regionDisplay.scaleFactor)
+    }
+  });
+  const source = sources.find((item) => item.display_id === String(regionDisplay.id)) ?? sources[0];
+  if (!source || source.thumbnail.isEmpty()) return undefined;
+
+  const image = source.thumbnail;
+  const size = image.getSize();
+  const scale = imageScaleForDisplay(regionDisplay, size.width, size.height, cursor.dpr);
+  const crop = cropForScreenRegion(region, regionDisplay, size.width, size.height, scale, cursor);
+  if (!crop) return undefined;
+  const jpeg = image.crop(crop).toJPEG(82);
+  return {
+    id: `${idPrefix}-${Date.now()}`,
+    imageBase64: jpeg.toString('base64'),
+    mimeType: 'image/jpeg',
+    crop
+  };
+}
+
 function cropForRequest(
   cursor: CursorPayload,
   screenWidth: number,
@@ -899,6 +1373,49 @@ function cropForRequest(
   const x = Math.round(Math.max(0, Math.min(screenWidth - width, imageX - width / 2)));
   const y = Math.round(Math.max(0, Math.min(screenHeight - height, imageY - height / 2)));
   return { x, y, width, height };
+}
+
+function cropForScreenRegion(
+  region: Rect,
+  display: Electron.Display,
+  imageWidth: number,
+  imageHeight: number,
+  scale: { x: number; y: number },
+  cursor: CursorPayload
+): Rect | undefined {
+  const physical = regionUsesPhysicalCoordinates(region, cursor);
+  const x = physical ? region.x - display.bounds.x * scale.x : (region.x - display.bounds.x) * scale.x;
+  const y = physical ? region.y - display.bounds.y * scale.y : (region.y - display.bounds.y) * scale.y;
+  const width = physical ? region.width : region.width * scale.x;
+  const height = physical ? region.height : region.height * scale.y;
+  const left = Math.floor(Math.max(0, x));
+  const top = Math.floor(Math.max(0, y));
+  const right = Math.ceil(Math.min(imageWidth, x + width));
+  const bottom = Math.ceil(Math.min(imageHeight, y + height));
+  if (right <= left || bottom <= top) return undefined;
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function displayForRegion(region: Rect, cursor: CursorPayload): Electron.Display {
+  const center = { x: region.x + region.width / 2, y: region.y + region.height / 2 };
+  const display = screen.getAllDisplays().find((item) => pointInRect(center.x, center.y, item.bounds));
+  if (display) return display;
+
+  const dpr = Math.max(1, cursor.dpr || 1);
+  const dipCenter = { x: center.x / dpr, y: center.y / dpr };
+  return (
+    screen.getAllDisplays().find((item) => pointInRect(dipCenter.x, dipCenter.y, item.bounds)) ??
+    screen.getDisplayMatching({ x: cursor.x, y: cursor.y, width: 1, height: 1 })
+  );
+}
+
+function regionUsesPhysicalCoordinates(region: Rect, cursor: CursorPayload): boolean {
+  const dpr = Math.max(1, cursor.dpr || 1);
+  return dpr > 1 && !pointInRect(cursor.x, cursor.y, region) && pointInRect(cursor.x * dpr, cursor.y * dpr, region);
+}
+
+function pointInRect(x: number, y: number, rect: Rect): boolean {
+  return x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height;
 }
 
 function imageScaleForDisplay(display: Electron.Display, imageWidth: number, imageHeight: number, fallbackDpr: number): { x: number; y: number } {

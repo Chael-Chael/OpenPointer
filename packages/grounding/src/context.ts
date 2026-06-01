@@ -5,6 +5,7 @@ export type BuildContextInput = {
   cursor: PointerContext['cursor'];
   source?: PointerContext['source'];
   window?: PointerContext['window'];
+  windowSnapshot?: PointerContext['windowSnapshot'];
   entities?: PointerEntity[];
   gesturePath?: Point[];
   gestureKind?: PointerGestureKind;
@@ -12,12 +13,21 @@ export type BuildContextInput = {
   imageBase64?: string;
   mimeType?: 'image/png' | 'image/jpeg';
   crop?: Rect;
+  selectionText?: string;
 };
 
 export function buildPointerContext(input: BuildContextInput): PointerContext {
   const entities = input.entities ?? [];
   const gesture = buildGesture(input.gesturePath ?? [], input.gestureKind, entities);
   const target = pickTarget(input.cursor.localX, input.cursor.localY, entities, gesture);
+  const selectionText = input.selectionText?.trim() ? input.selectionText : undefined;
+  const selection =
+    selectionText || target?.kind === 'input'
+      ? {
+          text: selectionText,
+          insertionTarget: target?.kind === 'input' ? target : undefined
+        }
+      : undefined;
   return {
     id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     source: input.source ?? 'desktop',
@@ -25,7 +35,7 @@ export function buildPointerContext(input: BuildContextInput): PointerContext {
     window: input.window,
     target,
     entities,
-    selection: target?.kind === 'input' ? { insertionTarget: target } : undefined,
+    selection,
     visual:
       input.screenshotId || input.crop || input.imageBase64
         ? {
@@ -35,6 +45,7 @@ export function buildPointerContext(input: BuildContextInput): PointerContext {
             mimeType: input.mimeType
           }
         : undefined,
+    windowSnapshot: input.windowSnapshot,
     gesture,
     // Up to 24 elements (complex windows like browsers/IDEs far exceed 8) with
     // role/name and the grounding reference so the agent can target an element

@@ -29,6 +29,11 @@ describe('buildPointerContext target selection', () => {
     expect(context.selection?.insertionTarget?.id).toBe('field');
   });
 
+  it('preserves selected text in the pointer context', () => {
+    const context = buildPointerContext({ cursor, selectionText: 'selected text' });
+    expect(context.selection?.text).toBe('selected text');
+  });
+
   it('caps nearby at 24 entities', () => {
     const entities = Array.from({ length: 30 }, (_, i) => entity(`e${i}`, { x: i * 10, y: 0, width: 5, height: 5 }));
     const context = buildPointerContext({ cursor, entities });

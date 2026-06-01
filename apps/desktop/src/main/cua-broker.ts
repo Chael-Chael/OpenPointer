@@ -2,7 +2,7 @@ import type { AgentEvent } from '@openmagicpointer/core';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
-import { CuaSidecarManager } from './cua-sidecar.js';
+import { CuaSidecarManager, type CuaToolResult } from './cua-sidecar.js';
 
 type BrokerOptions = {
   requireApprovalBeforeCua: boolean;
@@ -10,6 +10,7 @@ type BrokerOptions = {
   // rejects any call whose name is not in this set, so the agent cannot reach
   // unlisted driver tools even if it knows their names.
   allowedTools: string[];
+  localTools?: Record<string, (args: Record<string, unknown>) => Promise<CuaToolResult>>;
   emit(event: AgentEvent): void;
 };
 
@@ -18,7 +19,20 @@ type PendingApproval = {
   timeout: NodeJS.Timeout;
 };
 
-const STATE_CHANGING_TOOLS = new Set(['click', 'double_click', 'right_click', 'type_text', 'press_key', 'hotkey', 'scroll', 'drag', 'set_value', 'focus']);
+const STATE_CHANGING_TOOLS = new Set([
+  'click',
+  'double_click',
+  'right_click',
+  'type_text',
+  'press_key',
+  'hotkey',
+  'scroll',
+  'drag',
+  'set_value',
+  'focus',
+  'read_selected_text',
+  'insert_text'
+]);
 
 export class CuaBroker {
   private server: Server | null = null;
@@ -95,7 +109,8 @@ export class CuaBroker {
           return;
         }
       }
-      const result = await this.sidecar.callTool(name, args);
+      const localTool = this.options?.localTools?.[name];
+      const result = localTool ? await localTool(args) : await this.sidecar.callTool(name, args);
       sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });

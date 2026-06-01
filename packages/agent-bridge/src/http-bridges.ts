@@ -1,4 +1,5 @@
 import type { AgentContextEnvelope, AgentEvent } from '@openmagicpointer/core';
+import { materializeAttachmentFiles } from './attachments.js';
 import { buildAgentInput, buildAgentInstructions, buildToolDiscoveryEvent } from './prompt.js';
 import { postRunAndStream } from './http-stream.js';
 import type { AgentBridge, AgentRunOptions, HttpAgentBridgeConfig } from './types.js';
@@ -9,6 +10,7 @@ export class HermesBridge implements AgentBridge {
   constructor(private readonly config: HttpAgentBridgeConfig | undefined) {}
 
   async *run(envelope: AgentContextEnvelope, options: AgentRunOptions = {}): AsyncIterable<AgentEvent> {
+    const runEnvelope = materializeAttachmentFiles(envelope);
     yield buildToolDiscoveryEvent(envelope);
     yield* postRunAndStream({
       backend: this.id,
@@ -18,15 +20,17 @@ export class HermesBridge implements AgentBridge {
       signal: options.signal,
       path: '/runs',
       body: {
-        input: buildAgentInput(envelope),
-        instructions: buildAgentInstructions(envelope),
+        input: buildAgentInput(runEnvelope),
+        instructions: buildAgentInstructions(runEnvelope),
         session_id: options.sessionKey,
         metadata: {
-          requestId: envelope.requestId,
+          requestId: runEnvelope.requestId,
           source: 'openmagicpointer'
         },
-        attachments: envelope.attachments.map((attachment) => ({
+        attachments: runEnvelope.attachments.map((attachment) => ({
           type: attachment.type,
+          scope: attachment.scope,
+          label: attachment.label,
           mime_type: attachment.mimeType,
           data_url: attachment.dataUrl,
           temp_path: attachment.tempPath,
@@ -43,6 +47,7 @@ export class OpenCodeBridge implements AgentBridge {
   constructor(private readonly config: HttpAgentBridgeConfig | undefined) {}
 
   async *run(envelope: AgentContextEnvelope, options: AgentRunOptions = {}): AsyncIterable<AgentEvent> {
+    const runEnvelope = materializeAttachmentFiles(envelope);
     yield buildToolDiscoveryEvent(envelope);
     yield* postRunAndStream({
       backend: this.id,
@@ -52,9 +57,18 @@ export class OpenCodeBridge implements AgentBridge {
       signal: options.signal,
       path: '/runs',
       body: {
-        prompt: `${buildAgentInstructions(envelope)}\n\n${buildAgentInput(envelope)}`,
+        prompt: `${buildAgentInstructions(runEnvelope)}\n\n${buildAgentInput(runEnvelope)}`,
         sessionKey: options.sessionKey,
-        metadata: { requestId: envelope.requestId }
+        metadata: { requestId: runEnvelope.requestId },
+        attachments: runEnvelope.attachments.map((attachment) => ({
+          type: attachment.type,
+          scope: attachment.scope,
+          label: attachment.label,
+          mime_type: attachment.mimeType,
+          data_url: attachment.dataUrl,
+          temp_path: attachment.tempPath,
+          crop: attachment.crop
+        }))
       }
     });
   }
@@ -70,6 +84,7 @@ export class CodexBridge implements AgentBridge {
       yield { type: 'run.failed', error: 'Codex app-server is not configured. Set OMP_CODEX_APP_SERVER_URL for coding workflows.', recoverable: true };
       return;
     }
+    const runEnvelope = materializeAttachmentFiles(envelope);
     yield buildToolDiscoveryEvent(envelope);
     yield* postRunAndStream({
       backend: this.id,
@@ -80,9 +95,18 @@ export class CodexBridge implements AgentBridge {
       path: '/runs',
       body: {
         thread: options.sessionKey,
-        input: buildAgentInput(envelope),
-        instructions: buildAgentInstructions(envelope),
-        metadata: { requestId: envelope.requestId, workflow: 'coding' }
+        input: buildAgentInput(runEnvelope),
+        instructions: buildAgentInstructions(runEnvelope),
+        metadata: { requestId: runEnvelope.requestId, workflow: 'coding' },
+        attachments: runEnvelope.attachments.map((attachment) => ({
+          type: attachment.type,
+          scope: attachment.scope,
+          label: attachment.label,
+          mime_type: attachment.mimeType,
+          data_url: attachment.dataUrl,
+          temp_path: attachment.tempPath,
+          crop: attachment.crop
+        }))
       }
     });
   }

@@ -60,8 +60,13 @@ function WindowGlyph({ size = 14 }: { size?: number }) {
 const initialCursor: CursorPayload = { x: 300, y: 300, localX: 300, localY: 300, displayId: 0, dpr: 1 };
 
 function imageSrcForContext(context: PointerContext): string | undefined {
-  if (!context.visual?.imageBase64 || !context.visual.mimeType) return undefined;
-  return `data:${context.visual.mimeType};base64,${context.visual.imageBase64}`;
+  if (context.visual?.imageBase64 && context.visual.mimeType) {
+    return `data:${context.visual.mimeType};base64,${context.visual.imageBase64}`;
+  }
+  if (context.windowSnapshot?.imageBase64 && context.windowSnapshot.mimeType) {
+    return `data:${context.windowSnapshot.mimeType};base64,${context.windowSnapshot.imageBase64}`;
+  }
+  return undefined;
 }
 
 function entityLabel(entity: Pick<PointerEntity, 'text' | 'name' | 'role' | 'kind'>): string {
@@ -147,11 +152,12 @@ function PointerContextPreview({ context }: { context: PointerContext }) {
   const cuaEntities = context.nearby.filter((entity) => entity.groundingRef?.provider === 'cua');
   const target = context.target;
   const cropLabel = formatRect(context.visual?.crop);
+  const windowSnapshotLabel = formatRect(context.windowSnapshot?.bounds);
   const targetLabel = target ? entityLabel(target) : undefined;
   const targetRect = formatRect(target?.bbox);
   const windowLabel = context.window?.title || context.window?.app || context.window?.process;
 
-  if (!imageSrc && !context.grounding && !target && cuaEntities.length === 0) return null;
+  if (!imageSrc && !context.grounding && !target && cuaEntities.length === 0 && !context.windowSnapshot) return null;
 
   return (
     <div className="pointer-context-card mt-2 max-w-[85%] self-end overflow-hidden rounded-[var(--radius-pill)] border border-white/12 bg-white/[0.08] text-white/[0.86] shadow-[0_6px_18px_rgba(0,0,0,0.08)]">
@@ -160,6 +166,7 @@ function PointerContextPreview({ context }: { context: PointerContext }) {
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="context-chip">Text</span>
           {context.visual && <span className="context-chip">Screenshot{cropLabel ? ` ${cropLabel}` : ''}</span>}
+          {context.windowSnapshot && <span className="context-chip">Window shot{windowSnapshotLabel ? ` ${windowSnapshotLabel}` : ''}</span>}
           {context.grounding && (
             <span className={`context-chip ${context.grounding.status === 'matched' ? 'context-chip-cua' : ''}`}>
               CUA {context.grounding.status}
@@ -1350,6 +1357,8 @@ export function App() {
     const cuaEnabled = settings?.cuaMode !== 'off';
     const hasCuaContext = submittedCuaEntities.length > 0;
     const submittedWindowContext = windowPreview?.window;
+    const submittedWindowPid = windowPreview?.pid;
+    const submittedWindowBounds = windowPreview?.bounds;
     const hasWindowContext = Boolean(submittedWindowContext);
     const instructionText = text || defaultContextInstruction(hasSelectionContext, hasCuaContext, hasWindowContext);
     if ((!text && !hasSelectionContext && !hasCuaContext && !hasWindowContext) || state === 'submitting') return;
@@ -1400,8 +1409,10 @@ export function App() {
         targetPath: selectedEntity ? undefined : targetPath,
         selectedEntity,
         windowContext: submittedWindowContext,
+        windowPid: submittedWindowPid,
+        windowBounds: submittedWindowBounds,
         includeScreenshot: hasSelectionContext,
-        includeCua: cuaEnabled && hasCuaContext,
+        includeCua: cuaEnabled,
         cuaEntities: submittedCuaEntities,
         conversationId: currentConversationId ?? undefined
       });

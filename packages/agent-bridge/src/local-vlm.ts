@@ -1,6 +1,6 @@
 import { OpenAICompatibleBackend, isUnsupportedImageInputError, type ChatMessage } from '@openmagicpointer/backends';
 import { estimateTextTokens, type AgentContextEnvelope, type AgentEvent } from '@openmagicpointer/core';
-import { buildLocalVlmPrompt, dataUrlFromEnvelope } from './prompt.js';
+import { buildLocalVlmPrompt, dataUrlsFromEnvelope } from './prompt.js';
 import type { AgentBridge, AgentRunOptions, LocalVlmBridgeConfig } from './types.js';
 
 export class LocalVlmBridge implements AgentBridge {
@@ -81,7 +81,7 @@ async function* streamLocalAnswer(
 
 function buildLocalMessages(envelope: AgentContextEnvelope, includeImage: boolean): ChatMessage[] {
   const prompt = buildLocalVlmPrompt(envelope);
-  const dataUrl = includeImage ? dataUrlFromEnvelope(envelope) : undefined;
+  const dataUrls = includeImage ? dataUrlsFromEnvelope(envelope) : [];
 
   const messages: ChatMessage[] = [
     {
@@ -94,16 +94,13 @@ function buildLocalMessages(envelope: AgentContextEnvelope, includeImage: boolea
     const previousTurns = envelope.history.slice(0, -1);
     for (const turn of previousTurns) {
       if (turn.role === 'user') {
-        const turnDataUrl =
-          includeImage && turn.pointerContext?.visual?.imageBase64
-            ? `data:${turn.pointerContext.visual.mimeType || 'image/jpeg'};base64,${turn.pointerContext.visual.imageBase64}`
-            : undefined;
+        const turnDataUrls = includeImage ? dataUrlsFromPointerContext(turn.pointerContext) : [];
         messages.push({
           role: 'user',
-          content: turnDataUrl
+          content: turnDataUrls.length > 0
             ? [
                 { type: 'text', text: turn.text },
-                { type: 'image_url', image_url: { url: turnDataUrl } }
+                ...turnDataUrls.map((dataUrl) => ({ type: 'image_url' as const, image_url: { url: dataUrl } }))
               ]
             : turn.text
         });
@@ -118,15 +115,25 @@ function buildLocalMessages(envelope: AgentContextEnvelope, includeImage: boolea
 
   messages.push({
     role: 'user',
-    content: dataUrl
+    content: dataUrls.length > 0
       ? [
           { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: dataUrl } }
+          ...dataUrls.map((dataUrl) => ({ type: 'image_url' as const, image_url: { url: dataUrl } }))
         ]
       : prompt
   });
 
   return messages;
+}
+
+function dataUrlsFromPointerContext(context: import('@openmagicpointer/core').PointerContext | undefined): string[] {
+  if (!context) return [];
+  const urls: string[] = [];
+  if (context.visual?.imageBase64) urls.push(`data:${context.visual.mimeType || 'image/jpeg'};base64,${context.visual.imageBase64}`);
+  if (context.windowSnapshot?.imageBase64) {
+    urls.push(`data:${context.windowSnapshot.mimeType || 'image/jpeg'};base64,${context.windowSnapshot.imageBase64}`);
+  }
+  return urls;
 }
 
 async function summarizeHistory(backend: OpenAICompatibleBackend, history: import('@openmagicpointer/core').ChatTurn[]): Promise<string> {

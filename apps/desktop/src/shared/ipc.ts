@@ -10,6 +10,8 @@ export const OMP_CHANNELS = {
   SetInteractive: 'omp:overlay:set-interactive',
   RequestWindowContext: 'omp:window-context:request',
   RequestGrounding: 'omp:grounding:request',
+  ReadSelection: 'omp:selection:read',
+  InsertText: 'omp:text:insert',
   CaptureActivity: 'omp:capture:activity',
   SubmitInstruction: 'omp:agent:submit',
   AgentEvent: 'omp:agent:event',

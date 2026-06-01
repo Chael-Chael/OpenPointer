@@ -111,6 +111,12 @@ export type PointerContext = {
     imageBase64?: string;
     mimeType?: 'image/png' | 'image/jpeg';
   };
+  windowSnapshot?: {
+    screenshotId?: string;
+    bounds?: Rect;
+    imageBase64?: string;
+    mimeType?: 'image/png' | 'image/jpeg';
+  };
   gesture?: PointerGesture;
   nearby: Array<Pick<PointerEntity, 'id' | 'kind' | 'text' | 'bbox' | 'confidence' | 'role' | 'name' | 'groundingRef'>>;
   grounding?: {
@@ -132,6 +138,8 @@ export type AgentToolPolicy = 'agent_decides' | 'prefer' | 'require';
 
 export type AgentAttachment = {
   type: 'screenshot';
+  scope?: 'pointer' | 'window';
+  label?: string;
   mimeType: 'image/jpeg' | 'image/png';
   dataUrl?: string;
   tempPath?: string;

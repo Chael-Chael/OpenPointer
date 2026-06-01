@@ -26,6 +26,9 @@ export type SubmitInstructionRequest = {
   targetPath?: Point[];
   selectedEntity?: PointerEntity;
   windowContext?: PointerContext['window'];
+  windowPid?: number;
+  windowBounds?: Rect;
+  includeSelectedText?: boolean;
   includeScreenshot?: boolean;
   includeCua?: boolean;
   cuaEntities?: PointerEntity[];
@@ -57,6 +60,36 @@ export type GroundingPreviewRequest = {
 
 export type WindowPreviewRequest = {
   cursor: CursorPayload;
+};
+
+export type ReadSelectionRequest = {
+  cursor?: CursorPayload;
+  windowContext?: PointerContext['window'];
+};
+
+export type ReadSelectionResponse = {
+  status: 'matched' | 'empty' | 'unavailable';
+  text?: string;
+  source?: 'uia-textpattern' | 'cua-hotkey-clipboard';
+  pid?: number;
+  windowId?: string;
+  error?: string;
+};
+
+export type InsertTextRequest = {
+  text: string;
+  cursor?: CursorPayload;
+  windowContext?: PointerContext['window'];
+  targetEntity?: PointerEntity;
+  clickTarget?: boolean;
+};
+
+export type InsertTextResponse = {
+  status: 'matched' | 'unavailable';
+  source?: 'cua-click-paste';
+  pid?: number;
+  windowId?: string;
+  error?: string;
 };
 
 export type WindowPreviewResponse = {
@@ -100,6 +133,8 @@ export type DesktopApi = {
   setInteractive(value: boolean): void;
   requestWindowContext(req: WindowPreviewRequest): Promise<WindowPreviewResponse>;
   requestGrounding(req: GroundingPreviewRequest): Promise<GroundingPreviewResponse>;
+  readSelection(req?: ReadSelectionRequest): Promise<ReadSelectionResponse>;
+  insertText(req: InsertTextRequest): Promise<InsertTextResponse>;
   submitInstruction(req: SubmitInstructionRequest): Promise<SubmitInstructionResponse>;
   approveAgentRequest(id: string, decision: ApprovalDecision): Promise<void>;
   cancelRun(): void;

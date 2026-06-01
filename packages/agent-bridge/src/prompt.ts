@@ -4,9 +4,10 @@ const TOOL_DISCOVERY_MESSAGE = 'Agent may use available MCP tools, skills, or CU
 
 export function buildToolDiscoveryEvent(envelope: AgentContextEnvelope) {
   const skills = envelope.routing.preferredTools.filter((tool) => tool.includes('skill')).map((tool) => tool.replace(/-/g, ' '));
+  const serverTools = envelope.toolServers?.flatMap((server) => server.tools.map((tool) => `${server.id}:${tool}`)) ?? [];
   return {
     type: 'tool.discovery' as const,
-    tools: envelope.routing.preferredTools,
+    tools: [...envelope.routing.preferredTools, ...serverTools],
     skills,
     message: TOOL_DISCOVERY_MESSAGE
   };
@@ -43,9 +44,7 @@ export function buildAgentInput(envelope: AgentContextEnvelope): string {
     'Pointer context detail:',
     JSON.stringify(summarizePointerContext(envelope.pointerContext), null, 2),
     '',
-    envelope.attachments.length > 0
-      ? `Attachments: ${envelope.attachments.map((attachment) => `${attachment.type}:${attachment.mimeType}`).join(', ')}`
-      : 'Attachments: none'
+    formatAttachments(envelope)
   ].join('\n');
 }
 
@@ -61,6 +60,10 @@ export function buildLocalVlmPrompt(envelope: AgentContextEnvelope): string {
 
 export function dataUrlFromEnvelope(envelope: AgentContextEnvelope): string | undefined {
   return envelope.attachments.find((attachment) => attachment.dataUrl)?.dataUrl;
+}
+
+export function dataUrlsFromEnvelope(envelope: AgentContextEnvelope): string[] {
+  return envelope.attachments.map((attachment) => attachment.dataUrl).filter((dataUrl): dataUrl is string => Boolean(dataUrl));
 }
 
 function summarizePointerContext(context: PointerContext) {
@@ -86,6 +89,14 @@ function summarizePointerContext(context: PointerContext) {
           crop: context.visual.crop,
           mimeType: context.visual.mimeType,
           hasImageBase64: Boolean(context.visual.imageBase64)
+        }
+      : undefined,
+    windowSnapshot: context.windowSnapshot
+      ? {
+          screenshotId: context.windowSnapshot.screenshotId,
+          bounds: context.windowSnapshot.bounds,
+          mimeType: context.windowSnapshot.mimeType,
+          hasImageBase64: Boolean(context.windowSnapshot.imageBase64)
         }
       : undefined,
     gesture: context.gesture
@@ -119,6 +130,13 @@ function summarizeConversationContextHistory(envelope: AgentContextEnvelope) {
               hasImage: Boolean(context.visual.imageBase64)
             }
           : undefined,
+        windowSnapshot: context.windowSnapshot
+          ? {
+              bounds: context.windowSnapshot.bounds,
+              mimeType: context.windowSnapshot.mimeType,
+              hasImage: Boolean(context.windowSnapshot.imageBase64)
+            }
+          : undefined,
         cua:
           context.grounding || cuaEntities.length > 0
             ? {
@@ -150,7 +168,7 @@ function summarizeMultimodalContext(envelope: AgentContextEnvelope) {
     },
     visual: context.visual
       ? {
-          attachment: envelope.attachments[0] ? `${envelope.attachments[0].type}:${envelope.attachments[0].mimeType}` : undefined,
+          attachment: attachmentLabel(envelope, 'pointer'),
           crop: context.visual.crop,
           gesture: context.gesture
             ? {
@@ -158,6 +176,12 @@ function summarizeMultimodalContext(envelope: AgentContextEnvelope) {
                 region: context.gesture.region
               }
             : undefined
+        }
+      : undefined,
+    windowSnapshot: context.windowSnapshot
+      ? {
+          attachment: attachmentLabel(envelope, 'window'),
+          bounds: context.windowSnapshot.bounds
         }
       : undefined,
     cua:
@@ -200,6 +224,34 @@ function summarizeMultimodalContext(envelope: AgentContextEnvelope) {
   };
 }
 
+function attachmentLabel(envelope: AgentContextEnvelope, scope: 'pointer' | 'window'): string | undefined {
+  const attachment = envelope.attachments.find((item) => item.scope === scope);
+  return attachment
+    ? `${attachment.scope ?? 'context'}:${attachment.type}:${attachment.mimeType}${attachment.tempPath ? `:${attachment.tempPath}` : ''}`
+    : undefined;
+}
+
+function formatAttachments(envelope: AgentContextEnvelope): string {
+  if (envelope.attachments.length === 0) return 'Attachments: none';
+  return [
+    'Attachments:',
+    ...envelope.attachments.map((attachment, index) =>
+      [
+        `- ${index + 1}. ${attachment.label ?? attachment.scope ?? 'context screenshot'}`,
+        `scope=${attachment.scope ?? 'context'}`,
+        `type=${attachment.type}`,
+        `mime=${attachment.mimeType}`,
+        attachment.crop ? `rect=${JSON.stringify(attachment.crop)}` : '',
+        attachment.tempPath ? `file=${attachment.tempPath}` : '',
+        attachment.dataUrl ? 'dataUrl=present' : ''
+      ]
+        .filter(Boolean)
+        .join(' ')
+    ),
+    'Use the attached screenshot image content as visual evidence. If a file path is provided, read that local image file instead of claiming the screenshot is unavailable.'
+  ].join('\n');
+}
+
 function formatCuaDirective(directive: CuaDirective): string {
   return [
     'CUA directive:',
@@ -218,5 +270,11 @@ function formatCuaDirective(directive: CuaDirective): string {
 }
 
 function formatToolServers(toolServers: NonNullable<AgentContextEnvelope['toolServers']>): string {
-  return ['Local tool servers:', JSON.stringify(toolServers, null, 2)].join('\n');
+  return [
+    'Local tool servers:',
+    JSON.stringify(toolServers, null, 2),
+    'OpenMagicPointer local CUA tools include:',
+    '- read_selected_text({}): read the currently selected text from the target app.',
+    '- insert_text({ "text": string, "click_target"?: boolean }): insert text at the current pointer/target location.'
+  ].join('\n');
 }

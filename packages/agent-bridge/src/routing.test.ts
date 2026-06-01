@@ -39,6 +39,26 @@ describe('buildAgentContextEnvelope', () => {
     expect(envelope.attachments[0]?.dataUrl).toContain('data:image/jpeg;base64,abc');
   });
 
+  it('attaches the full window screenshot alongside the pointer screenshot', () => {
+    const envelope = buildAgentContextEnvelope({
+      instruction: 'Analyze this window',
+      mode: 'text',
+      context: {
+        ...context,
+        windowSnapshot: {
+          screenshotId: 'window-1',
+          bounds: { x: 20, y: 40, width: 900, height: 700 },
+          imageBase64: 'window-abc',
+          mimeType: 'image/jpeg'
+        }
+      }
+    });
+    expect(envelope.attachments).toHaveLength(2);
+    expect(envelope.attachments.map((attachment) => attachment.scope)).toEqual(['pointer', 'window']);
+    expect(envelope.attachments[1]?.dataUrl).toContain('data:image/jpeg;base64,window-abc');
+    expect(envelope.attachments[1]?.crop).toEqual({ x: 20, y: 40, width: 900, height: 700 });
+  });
+
   it('adds a CUA directive for explicit desktop operation intent', () => {
     const envelope = buildAgentContextEnvelope({
       instruction: 'merge these selected items',
