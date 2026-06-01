@@ -39,6 +39,7 @@ const windows = new Map<number, BrowserWindow>();
 const overlayInteractive = new Map<number, boolean>();
 let cursorTimer: NodeJS.Timeout | null = null;
 let active = false;
+let activeDisplayId: number | null = null;
 let lastCursor: CursorPayload | null = null;
 let lastActivationCursor: CursorPayload | null = null;
 let activeAbort: AbortController | null = null;
@@ -116,8 +117,12 @@ async function createOverlay(display: Electron.Display): Promise<void> {
   win.webContents.on('did-finish-load', () => {
     if (!win.isVisible()) win.showInactive();
     const payload = cursorPayload();
-    win.webContents.send(OMP_CHANNELS.Cursor, payload);
-    if (active) win.webContents.send(OMP_CHANNELS.Activate, payload);
+    if (payload.displayId === display.id) win.webContents.send(OMP_CHANNELS.Cursor, payload);
+    if (active && activeDisplayId === display.id) {
+      win.webContents.send(OMP_CHANNELS.Activate, lastActivationCursor ?? payload);
+    } else {
+      win.webContents.send(OMP_CHANNELS.Deactivate);
+    }
   });
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
     console.error('[omp] overlay failed to load', { displayId: display.id, errorCode, errorDescription, validatedURL });
@@ -152,6 +157,19 @@ function broadcast(channel: string, payload?: unknown): void {
   for (const win of windows.values()) {
     if (!win.isDestroyed()) win.webContents.send(channel, payload);
   }
+}
+
+function sendToDisplay(displayId: number, channel: string, payload?: unknown): void {
+  const win = windows.get(displayId);
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send(channel, payload);
+}
+
+function displayIdForWebContents(sender: Electron.WebContents): number | undefined {
+  for (const [displayId, win] of windows) {
+    if (!win.isDestroyed() && win.webContents === sender) return displayId;
+  }
+  return undefined;
 }
 
 function setOverlayInteractive(displayId: number, value: boolean): void {
@@ -258,25 +276,47 @@ function unregisterEscapeShortcut(): void {
 
 function activate(cursor = cursorPayload()): void {
   active = true;
+  activeDisplayId = cursor.displayId;
   lastActivationCursor = cursor;
   registerEscapeShortcut();
-  const activeWin = windows.get(cursor.displayId);
-  for (const win of windows.values()) {
+  const activeWin = windows.get(activeDisplayId);
+  for (const [displayId, win] of windows) {
     if (win.isDestroyed()) continue;
     win.setAlwaysOnTop(true, 'screen-saver');
     win.moveTop();
+    setOverlayInteractive(displayId, displayId === activeDisplayId);
+    if (displayId !== activeDisplayId) win.webContents.send(OMP_CHANNELS.Deactivate);
   }
   if (activeWin && !activeWin.isDestroyed()) {
-    setOverlayInteractive(cursor.displayId, true);
+    activeWin.show();
+    activeWin.focus();
+    activeWin.webContents.focus();
+    activeWin.webContents.send(OMP_CHANNELS.Activate, cursor);
+  }
+}
+
+function focusActiveOverlayWithoutActivate(cursor: CursorPayload): void {
+  active = true;
+  activeDisplayId = cursor.displayId;
+  registerEscapeShortcut();
+  const activeWin = windows.get(cursor.displayId);
+  for (const [displayId, win] of windows) {
+    if (win.isDestroyed()) continue;
+    win.setAlwaysOnTop(true, 'screen-saver');
+    win.moveTop();
+    setOverlayInteractive(displayId, displayId === cursor.displayId);
+    if (displayId !== cursor.displayId) win.webContents.send(OMP_CHANNELS.Deactivate);
+  }
+  if (activeWin && !activeWin.isDestroyed()) {
     activeWin.show();
     activeWin.focus();
     activeWin.webContents.focus();
   }
-  broadcast(OMP_CHANNELS.Activate, cursor);
 }
 
 function deactivate(): void {
   active = false;
+  activeDisplayId = null;
   unregisterEscapeShortcut();
   activeAbort?.abort();
   activeAbort = null;
@@ -312,7 +352,7 @@ function startCursorLoop(): void {
   cursorTimer = setInterval(() => {
     const payload = cursorPayload();
     lastCursor = payload;
-    broadcast(OMP_CHANNELS.Cursor, payload);
+    sendToDisplay(payload.displayId, OMP_CHANNELS.Cursor, payload);
   }, 33);
 }
 
@@ -364,8 +404,12 @@ function completeHold(): void {
   if (!hold.active || !hold.start) return;
   hold.completed = true;
   clearHoldTimers();
+  if (hold.startedWhileActive) {
+    focusActiveOverlayWithoutActivate(hold.start);
+  } else {
+    activate(hold.start);
+  }
   broadcastHold({ cursor: hold.start, progress: 1, state: 'completed', startedWhileActive: hold.startedWhileActive });
-  activate(hold.start);
   hold.active = false;
   hold.startedWhileActive = false;
 }
@@ -388,7 +432,7 @@ function clearHoldTimers(): void {
 }
 
 function broadcastHold(payload: HoldProgressPayload): void {
-  broadcast(OMP_CHANNELS.HoldProgress, payload);
+  sendToDisplay(payload.cursor.displayId, OMP_CHANNELS.HoldProgress, payload);
 }
 
 function isPrimaryMouseButton(button: unknown): boolean {
@@ -434,9 +478,14 @@ function registerIpc(): void {
   ipcMain.on(OMP_CHANNELS.CancelRun, () => activeAbort?.abort());
 
   ipcMain.on(OMP_CHANNELS.RendererReady, (event) => {
+    const displayId = displayIdForWebContents(event.sender);
     const payload = cursorPayload();
-    event.sender.send(OMP_CHANNELS.Cursor, payload);
-    if (active) event.sender.send(OMP_CHANNELS.Activate, lastActivationCursor ?? payload);
+    if (displayId === undefined || payload.displayId === displayId) event.sender.send(OMP_CHANNELS.Cursor, payload);
+    if (active && displayId !== undefined && activeDisplayId === displayId) {
+      event.sender.send(OMP_CHANNELS.Activate, lastActivationCursor ?? payload);
+    } else {
+      event.sender.send(OMP_CHANNELS.Deactivate);
+    }
   });
 
   ipcMain.handle(OMP_CHANNELS.GetSettings, () => getSettings());
@@ -567,7 +616,7 @@ function registerIpc(): void {
     const controller = new AbortController();
     activeAbort = controller;
     activeBridge = createAgentBridge(backend, config);
-    void streamBridgeEvents(event.sender, activeBridge, envelope, controller, settings.localVlmEnabled && backend !== 'local-vlm');
+    void streamBridgeEvents(event.sender, activeBridge, envelope, controller, settings.localVlmEnabled && backend !== 'local-vlm', cuaBrokerSession?.sessionId);
     return { requestId: envelope.requestId, backend, conversationId };
   });
 }
@@ -577,7 +626,8 @@ async function streamBridgeEvents(
   bridge: AgentBridge,
   envelope: AgentContextEnvelope,
   controller: AbortController,
-  allowLocalFallback: boolean
+  allowLocalFallback: boolean,
+  cuaBrokerSessionId?: string
 ): Promise<void> {
   let emittedStarted = false;
   let sawTerminal = false;
@@ -588,6 +638,7 @@ async function streamBridgeEvents(
   const events: AgentEvent[] = [];
 
   const forward = (agentEvent: AgentEvent) => {
+    if (sender.isDestroyed() || activeAbort !== controller || activeBridge !== bridge) return;
     sender.send(OMP_CHANNELS.AgentEvent, agentEvent);
     if (agentEvent.type === 'run.completed' || agentEvent.type === 'run.failed') sawTerminal = true;
     if (agentEvent.type === 'tool.started' || agentEvent.type === 'tool.completed') {
@@ -596,39 +647,60 @@ async function streamBridgeEvents(
     events.push(agentEvent);
   };
 
-  for await (const agentEvent of bridge.run(envelope, { signal: controller.signal, sessionKey: sessionKeyForContext(envelope.pointerContext) })) {
-    if (agentEvent.type === 'run.failed' && agentEvent.recoverable && allowLocalFallback && !emittedStarted) {
-      // Recover silently via the local VLM instead of surfacing the primary failure to the UI.
-      const localEnvelope: AgentContextEnvelope = { ...envelope, routing: { ...envelope.routing, backend: 'local-vlm' } };
-      forward({ type: 'assistant.delta', text: 'Agent backend is unavailable. Falling back to local VLM.' });
-      const localBridge = createAgentBridge('local-vlm', bridgeConfig(getSettings()));
-      for await (const localEvent of localBridge.run(localEnvelope, { signal: controller.signal })) {
-        forward(localEvent);
-        if (localEvent.type === 'assistant.delta') fullAnswer += localEvent.text;
+  try {
+    for await (const agentEvent of bridge.run(envelope, { signal: controller.signal, sessionKey: sessionKeyForContext(envelope.pointerContext) })) {
+      if (activeAbort !== controller || activeBridge !== bridge) break;
+      if (agentEvent.type === 'run.failed' && agentEvent.recoverable && allowLocalFallback && !emittedStarted) {
+        // Recover silently via the local VLM instead of surfacing the primary failure to the UI.
+        const localEnvelope: AgentContextEnvelope = { ...envelope, routing: { ...envelope.routing, backend: 'local-vlm' } };
+        forward({ type: 'assistant.delta', text: 'Agent backend is unavailable. Falling back to local VLM.' });
+        const localBridge = createAgentBridge('local-vlm', bridgeConfig(getSettings()));
+        for await (const localEvent of localBridge.run(localEnvelope, { signal: controller.signal })) {
+          if (activeAbort !== controller || activeBridge !== bridge) break;
+          forward(localEvent);
+          if (localEvent.type === 'assistant.delta') fullAnswer += localEvent.text;
+        }
+        break;
       }
-      break;
+      forward(agentEvent);
+      if (agentEvent.type === 'run.started') emittedStarted = true;
+      if (agentEvent.type === 'assistant.delta') fullAnswer += agentEvent.text;
     }
-    forward(agentEvent);
-    if (agentEvent.type === 'run.started') emittedStarted = true;
-    if (agentEvent.type === 'assistant.delta') fullAnswer += agentEvent.text;
+
+    // Guarantee the UI leaves the streaming state even if the runtime stream
+    // closed without a terminal (run.completed / run.failed) event.
+    if (!controller.signal.aborted && activeAbort === controller && activeBridge === bridge && !sawTerminal) {
+      forward({ type: 'run.completed', text: fullAnswer || undefined });
+    }
+  } catch (error) {
+    if (!controller.signal.aborted && activeAbort === controller && activeBridge === bridge && !sawTerminal) {
+      forward({
+        type: 'run.failed',
+        error: error instanceof Error ? error.message : String(error),
+        recoverable: true
+      });
+    }
+  } finally {
+    if (activeAbort === controller) activeAbort = null;
+    if (activeBridge === bridge) activeBridge = null;
+    if (cuaBrokerSessionId) cuaBroker.releaseSession(cuaBrokerSessionId);
   }
 
-  // Guarantee the UI leaves the streaming state even if the runtime stream
-  // closed without a terminal (run.completed / run.failed) event.
-  if (!sawTerminal) forward({ type: 'run.completed', text: fullAnswer || undefined });
-
-  const thinkingTime = Math.round((Date.now() - startTime) / 1000);
-
-  if (envelope.conversationId && fullAnswer) {
-    await chatHistory.appendTurn(envelope.conversationId, {
-      id: `turn-${Date.now()}-assistant`,
-      role: 'assistant',
-      text: fullAnswer,
-      timestamp: Date.now(),
-      thinkingTime: thinkingTime > 0 ? thinkingTime : undefined,
-      toolEvents: toolEvents.length > 0 ? toolEvents : undefined,
-      events: events.length > 0 ? events : undefined
-    });
+  if (!controller.signal.aborted && envelope.conversationId && fullAnswer) {
+    const thinkingTime = Math.round((Date.now() - startTime) / 1000);
+    try {
+      await chatHistory.appendTurn(envelope.conversationId, {
+        id: `turn-${Date.now()}-assistant`,
+        role: 'assistant',
+        text: fullAnswer,
+        timestamp: Date.now(),
+        thinkingTime: thinkingTime > 0 ? thinkingTime : undefined,
+        toolEvents: toolEvents.length > 0 ? toolEvents : undefined,
+        events: events.length > 0 ? events : undefined
+      });
+    } catch (error) {
+      console.warn('[omp] failed to persist assistant turn', error);
+    }
   }
 }
 
@@ -678,7 +750,7 @@ async function capturePointerContext(
   // pointer can tint accordingly. `withCua` distinguishes a plain screenshot
   // (purple) from a screenshot that is paired with CUA grounding (teal).
   const withCua = useCua || Boolean(selectedEntity?.groundingRef) || seedCuaEntities.some((entity) => entity.groundingRef?.provider === 'cua');
-  broadcast(OMP_CHANNELS.CaptureActivity, { phase: 'start', withCua });
+  sendToDisplay(cursor.displayId, OMP_CHANNELS.CaptureActivity, { phase: 'start', withCua });
   let capture: Awaited<ReturnType<typeof captureContextImage>>;
   let windowInfo: PointerContext['window'];
   let cuaPreview: Awaited<ReturnType<CuaGroundingProvider['preview']>> | undefined;
@@ -699,7 +771,7 @@ async function capturePointerContext(
     windowInfo = hiddenResult.windowInfo;
     cuaPreview = hiddenResult.cuaPreview;
   } finally {
-    broadcast(OMP_CHANNELS.CaptureActivity, { phase: 'end', withCua });
+    sendToDisplay(cursor.displayId, OMP_CHANNELS.CaptureActivity, { phase: 'end', withCua });
   }
 
   const manualEntities = targetPath && targetPath.length > 1 ? visualEntities(cursor, capture.crop, targetPath) : [];
@@ -726,6 +798,7 @@ async function capturePointerContext(
     mimeType: capture.mimeType,
     crop: capture.crop
   });
+  if (selectedEntity) context.target = selectedEntity;
 
   if (selectedEntity?.groundingRef || seededCuaEntities.length > 0) {
     context.grounding = groundingFromEntities(selectedEntity ? [selectedEntity, ...cuaEntities] : cuaEntities);
@@ -766,6 +839,7 @@ async function buildLightPointerContext(
     gestureKind: 'hover',
     gesturePath: [{ x: cursor.localX, y: cursor.localY, t: Date.now() }]
   });
+  if (selectedEntity) context.target = selectedEntity;
 
   if (selectedEntity?.groundingRef || groundedEntities.length > 0) {
     context.grounding = groundingFromEntities(selectedEntity ? [selectedEntity, ...groundedEntities] : groundedEntities);

@@ -6,6 +6,7 @@ const CURSOR_OFFSET_X = 36;
 // shell up. The hard upper bound (and the absolute clip guard) is PANEL_MAX.
 const PANEL_COMFORT_HEIGHT = 360;
 const PANEL_MIN_HEIGHT = 160;
+const PANEL_MAX_HEIGHT = 800;
 export const DEFAULT_STREAM_PANEL_HEIGHT = PANEL_COMFORT_HEIGHT;
 
 export function computeShellPosition(cursorX: number, cursorY: number, shellWidth = 520, pillHeight = 24, hasPanel = false) {
@@ -41,7 +42,7 @@ export function computeShellPosition(cursorX: number, cursorY: number, shellWidt
  */
 export function availablePanelHeight(shellY: number, pillHeight = 24): number {
   const available = window.innerHeight - shellY - pillHeight - SHELL_MARGIN;
-  return Math.max(PANEL_MIN_HEIGHT, available);
+  return Math.min(PANEL_MAX_HEIGHT, Math.max(PANEL_MIN_HEIGHT, available));
 }
 
 export function resolvedPanelHeight(shellY: number, pillHeight = 24, preferredHeight: number | null = null): number {

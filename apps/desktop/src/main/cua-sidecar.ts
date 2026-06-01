@@ -19,6 +19,7 @@ export type CuaToolResult = {
 export class CuaSidecarManager {
   private proc: ChildProcessWithoutNullStreams | null = null;
   private reader: Interface | null = null;
+  private startPromise: Promise<void> | null = null;
   private nextId = 1;
   private pending = new Map<number, PendingCall>();
 
@@ -40,10 +41,28 @@ export class CuaSidecarManager {
     this.reader = null;
     this.proc?.kill();
     this.proc = null;
+    this.startPromise = null;
   }
 
   private async ensureStarted(): Promise<void> {
-    if (this.proc && !this.proc.killed) return;
+    if (this.proc && !this.proc.killed) {
+      if (this.startPromise) await this.startPromise;
+      return;
+    }
+    if (this.startPromise) {
+      await this.startPromise;
+      return;
+    }
+
+    this.startPromise = this.startProcess();
+    try {
+      await this.startPromise;
+    } finally {
+      this.startPromise = null;
+    }
+  }
+
+  private async startProcess(): Promise<void> {
     const binary = resolveCuaDriverPath(this.repoRoot);
     if (!binary) {
       throw new Error('CUA driver binary not found. Build vendor/cua or set OMP_CUA_DRIVER_PATH.');
@@ -63,6 +82,7 @@ export class CuaSidecarManager {
     });
     proc.on('exit', () => {
       this.proc = null;
+      this.startPromise = null;
       this.reader?.close();
       this.reader = null;
       for (const [id, pending] of this.pending) {
@@ -72,15 +92,20 @@ export class CuaSidecarManager {
       }
     });
 
-    await this.request(
-      'initialize',
-      {
-        protocolVersion: '2025-06-18',
-        capabilities: {},
-        clientInfo: { name: 'OpenMagicPointer', version: app.getVersion() }
-      },
-      5000
-    );
+    try {
+      await this.request(
+        'initialize',
+        {
+          protocolVersion: '2025-06-18',
+          capabilities: {},
+          clientInfo: { name: 'OpenMagicPointer', version: app.getVersion() }
+        },
+        5000
+      );
+    } catch (error) {
+      this.stop();
+      throw error;
+    }
   }
 
   private request(method: string, params: unknown, timeoutMs: number): Promise<unknown> {

@@ -18,31 +18,28 @@ type PendingApproval = {
   timeout: NodeJS.Timeout;
 };
 
+type BrokerSession = {
+  options: BrokerOptions;
+  createdAt: number;
+};
+
 const STATE_CHANGING_TOOLS = new Set(['click', 'double_click', 'right_click', 'type_text', 'press_key', 'hotkey', 'scroll', 'drag', 'set_value', 'focus']);
 
 export class CuaBroker {
   private server: Server | null = null;
+  private serverPromise: Promise<void> | null = null;
   private endpoint: string | null = null;
-  private sessionId = randomUUID();
-  private options: BrokerOptions | null = null;
+  private sessions = new Map<string, BrokerSession>();
   private pendingApprovals = new Map<string, PendingApproval>();
 
   constructor(private readonly sidecar: CuaSidecarManager) {}
 
   async ensureStarted(options: BrokerOptions): Promise<{ endpoint: string; sessionId: string }> {
-    this.options = options;
-    if (this.server && this.endpoint) return { endpoint: this.endpoint, sessionId: this.sessionId };
-    this.sessionId = randomUUID();
-    this.server = createServer((req, res) => {
-      void this.handleRequest(req, res);
-    });
-    await new Promise<void>((resolve, reject) => {
-      this.server?.once('error', reject);
-      this.server?.listen(0, '127.0.0.1', () => resolve());
-    });
-    const address = this.server.address() as AddressInfo;
-    this.endpoint = `http://127.0.0.1:${address.port}/sessions/${this.sessionId}/tools/call`;
-    return { endpoint: this.endpoint, sessionId: this.sessionId };
+    if (!this.server || !this.endpoint) await this.ensureServer();
+    const sessionId = randomUUID();
+    this.sessions.set(sessionId, { options, createdAt: Date.now() });
+    this.pruneSessions();
+    return { endpoint: `${this.endpoint}/sessions/${sessionId}/tools/call`, sessionId };
   }
 
   hasPendingApproval(id: string): boolean {
@@ -57,6 +54,10 @@ export class CuaBroker {
     pending.resolve(decision);
   }
 
+  releaseSession(sessionId: string): void {
+    this.sessions.delete(sessionId);
+  }
+
   stop(): void {
     for (const [id, pending] of this.pendingApprovals) {
       clearTimeout(pending.timeout);
@@ -65,12 +66,55 @@ export class CuaBroker {
     }
     this.server?.close();
     this.server = null;
+    this.serverPromise = null;
     this.endpoint = null;
+    this.sessions.clear();
+  }
+
+  private async ensureServer(): Promise<void> {
+    if (this.server && this.endpoint) return;
+    if (this.serverPromise) {
+      await this.serverPromise;
+      return;
+    }
+    this.serverPromise = this.startServer();
+    try {
+      await this.serverPromise;
+    } finally {
+      this.serverPromise = null;
+    }
+  }
+
+  private async startServer(): Promise<void> {
+    this.server = createServer((req, res) => {
+      void this.handleRequest(req, res);
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        this.server?.once('error', reject);
+        this.server?.listen(0, '127.0.0.1', () => resolve());
+      });
+      const address = this.server.address() as AddressInfo;
+      this.endpoint = `http://127.0.0.1:${address.port}`;
+    } catch (error) {
+      this.server?.close();
+      this.server = null;
+      this.endpoint = null;
+      throw error;
+    }
+  }
+
+  private pruneSessions(maxSessions = 32): void {
+    if (this.sessions.size <= maxSessions) return;
+    const stale = [...this.sessions.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt).slice(0, this.sessions.size - maxSessions);
+    for (const [sessionId] of stale) this.sessions.delete(sessionId);
   }
 
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
-      if (req.method !== 'POST' || req.url !== `/sessions/${this.sessionId}/tools/call`) {
+      const sessionId = sessionIdFromUrl(req.url);
+      const session = sessionId ? this.sessions.get(sessionId) : undefined;
+      if (req.method !== 'POST' || !sessionId || !session) {
         sendJson(res, 404, { error: 'Not found.' });
         return;
       }
@@ -83,13 +127,13 @@ export class CuaBroker {
       }
       // Enforce the tool whitelist. The advertised tool list is not a security
       // boundary on its own; reject anything not explicitly allowed.
-      const allowed = this.options?.allowedTools ?? [];
+      const allowed = session.options.allowedTools;
       if (!allowed.includes(name)) {
         sendJson(res, 403, { error: `CUA tool "${name}" is not allowed.` });
         return;
       }
-      if (this.options?.requireApprovalBeforeCua && STATE_CHANGING_TOOLS.has(name)) {
-        const approved = await this.requestApproval(name);
+      if (session.options.requireApprovalBeforeCua && STATE_CHANGING_TOOLS.has(name)) {
+        const approved = await this.requestApproval(session, name);
         if (!approved) {
           sendJson(res, 403, { error: 'CUA tool call denied by user.' });
           return;
@@ -102,9 +146,9 @@ export class CuaBroker {
     }
   }
 
-  private async requestApproval(tool: string): Promise<boolean> {
+  private async requestApproval(session: BrokerSession, tool: string): Promise<boolean> {
     const id = `cua-approval-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    this.options?.emit({
+    session.options.emit({
       type: 'approval.requested',
       id,
       reason: `CUA tool "${tool}" can change desktop state.`,
@@ -120,6 +164,12 @@ export class CuaBroker {
     });
     return decision === 'approve';
   }
+}
+
+function sessionIdFromUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  const match = /^\/sessions\/([^/]+)\/tools\/call(?:\?.*)?$/.exec(url);
+  return match?.[1];
 }
 
 async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {

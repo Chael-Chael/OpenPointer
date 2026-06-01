@@ -16,11 +16,11 @@ describe('buildPointerContext target selection', () => {
     expect(context.target?.id).toBe('small');
   });
 
-  it('falls back to the first entity when none contain the cursor', () => {
+  it('leaves target unset when no entity contains the cursor', () => {
     const a = entity('a', { x: 200, y: 200, width: 10, height: 10 });
     const b = entity('b', { x: 300, y: 300, width: 10, height: 10 });
     const context = buildPointerContext({ cursor, entities: [a, b] });
-    expect(context.target?.id).toBe('a');
+    expect(context.target).toBeUndefined();
   });
 
   it('marks input targets as the insertion target', () => {
