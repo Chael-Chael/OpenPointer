@@ -289,7 +289,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
               </BackendCard>
             </div>
 
-            <section className="settings-section grid grid-cols-[minmax(200px,1fr)_repeat(3,minmax(0,auto))] items-center gap-3 mt-3 max-md:grid-cols-1">
+            <section className="settings-section grid grid-cols-[minmax(200px,1fr)_repeat(4,minmax(0,auto))] items-center gap-3 mt-3 max-md:grid-cols-1">
               <label className="field">
                 <span>CUA mode</span>
                 <select value={settings.cuaMode} onChange={(event) => updateSettings({ cuaMode: event.target.value as AppSettings['cuaMode'] })}>
@@ -305,6 +305,14 @@ export function SettingsPanel(props: SettingsPanelProps) {
                   onChange={(event) => updateSettings({ requireApprovalBeforeCua: event.target.checked })}
                 />
                 <span>Require approval before CUA</span>
+              </label>
+              <label className="toggle-row">
+                <input
+                  type="checkbox"
+                  checked={settings.cuaDebugOverlayEnabled}
+                  onChange={(event) => updateSettings({ cuaDebugOverlayEnabled: event.target.checked })}
+                />
+                <span>Show CUA debug boxes</span>
               </label>
               <label className="toggle-row">
                 <input type="checkbox" checked={settings.longPressEnabled} onChange={(event) => updateSettings({ longPressEnabled: event.target.checked })} />

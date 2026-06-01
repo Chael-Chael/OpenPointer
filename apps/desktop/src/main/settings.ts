@@ -47,6 +47,7 @@ const DEFAULTS: AppSettings = {
   codexAppServerTransport: 'http-adapter',
   cuaMode: 'prefer',
   requireApprovalBeforeCua: true,
+  cuaDebugOverlayEnabled: false,
   activationHotkey: 'CommandOrControl+Shift+Space',
   longPressEnabled: true,
   voiceEnabled: true,

@@ -94,9 +94,11 @@ function summarizePointerContext(context: PointerContext) {
     windowSnapshot: context.windowSnapshot
       ? {
           screenshotId: context.windowSnapshot.screenshotId,
+          source: context.windowSnapshot.source,
           bounds: context.windowSnapshot.bounds,
           mimeType: context.windowSnapshot.mimeType,
-          hasImageBase64: Boolean(context.windowSnapshot.imageBase64)
+          hasImageBase64: Boolean(context.windowSnapshot.imageBase64),
+          error: context.windowSnapshot.error
         }
       : undefined,
     gesture: context.gesture
@@ -132,9 +134,11 @@ function summarizeConversationContextHistory(envelope: AgentContextEnvelope) {
           : undefined,
         windowSnapshot: context.windowSnapshot
           ? {
+              source: context.windowSnapshot.source,
               bounds: context.windowSnapshot.bounds,
               mimeType: context.windowSnapshot.mimeType,
-              hasImage: Boolean(context.windowSnapshot.imageBase64)
+              hasImage: Boolean(context.windowSnapshot.imageBase64),
+              error: context.windowSnapshot.error
             }
           : undefined,
         cua:
@@ -181,7 +185,9 @@ function summarizeMultimodalContext(envelope: AgentContextEnvelope) {
     windowSnapshot: context.windowSnapshot
       ? {
           attachment: attachmentLabel(envelope, 'window'),
-          bounds: context.windowSnapshot.bounds
+          source: context.windowSnapshot.source,
+          bounds: context.windowSnapshot.bounds,
+          error: context.windowSnapshot.error
         }
       : undefined,
     cua:

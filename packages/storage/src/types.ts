@@ -22,6 +22,7 @@ export type AppSettings = {
   codexAppServerTransport: 'http-adapter' | 'websocket' | 'stdio';
   cuaMode: 'off' | 'prefer' | 'require-on-explicit-command';
   requireApprovalBeforeCua: boolean;
+  cuaDebugOverlayEnabled: boolean;
   activationHotkey: string;
   longPressEnabled: boolean;
   voiceEnabled: boolean;

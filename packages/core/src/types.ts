@@ -113,9 +113,11 @@ export type PointerContext = {
   };
   windowSnapshot?: {
     screenshotId?: string;
+    source?: 'cua-window' | 'electron-window';
     bounds?: Rect;
     imageBase64?: string;
     mimeType?: 'image/png' | 'image/jpeg';
+    error?: string;
   };
   gesture?: PointerGesture;
   nearby: Array<Pick<PointerEntity, 'id' | 'kind' | 'text' | 'bbox' | 'confidence' | 'role' | 'name' | 'groundingRef'>>;

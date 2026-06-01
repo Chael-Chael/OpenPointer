@@ -78,6 +78,27 @@ function formatRect(rect: { x: number; y: number; width: number; height: number 
   return `${Math.round(rect.width)}x${Math.round(rect.height)} @ ${Math.round(rect.x)},${Math.round(rect.y)}`;
 }
 
+function entityDebugDetails(entity: PointerEntity): string[] {
+  const ref = entity.groundingRef;
+  const lines = [
+    entityLabel(entity),
+    `id: ${entity.id}`,
+    `kind: ${entity.kind}`,
+    entity.role ? `role: ${entity.role}` : undefined,
+    entity.name ? `name: ${entity.name}` : undefined,
+    entity.text ? `text: ${entity.text}` : undefined,
+    `origin: ${entity.origin}`,
+    `confidence: ${Math.round(entity.confidence * 100)}%`,
+    entity.bbox ? `bbox: ${formatRect(entity.bbox)}` : undefined,
+    ref?.screenRect ? `screen: ${formatRect(ref.screenRect)}` : undefined,
+    ref?.pid ? `pid: ${ref.pid}` : undefined,
+    ref?.windowId ? `window: ${ref.windowId}` : undefined,
+    typeof ref?.elementIndex === 'number' ? `element: ${ref.elementIndex}` : undefined,
+    ref?.actions?.length ? `actions: ${ref.actions.join(', ')}` : undefined
+  ];
+  return lines.filter((line): line is string => Boolean(line));
+}
+
 function windowPreviewLabel(preview: WindowPreviewResponse | null): string | undefined {
   const info = preview?.window;
   if (!info) return undefined;
@@ -1786,6 +1807,30 @@ export function App() {
     return [...byId.values()];
   }, [cuaEntities, cuaPickerCandidates, cuaPickerLocked, draftCuaEntities, highlightedSelectedCuaEntities, hoveredCuaEntityId]);
 
+  const debugCuaBoxEntities = useMemo(() => {
+    const byId = new Map<string, PointerEntity>();
+    for (const entity of visibleCuaCandidates) {
+      if (hasPreciseCuaRect(entity)) byId.set(entity.id, entity);
+    }
+    for (const entity of highlightedCuaCandidates) {
+      if (hasPreciseCuaRect(entity)) byId.set(entity.id, entity);
+    }
+    return [...byId.values()];
+  }, [highlightedCuaCandidates, visibleCuaCandidates]);
+
+  const showCuaDebugOverlay =
+    active &&
+    state === 'composing' &&
+    settings?.cuaDebugOverlayEnabled === true &&
+    settings?.cuaMode !== 'off' &&
+    !selecting &&
+    !selectionDrag &&
+    !settingsOpen &&
+    !historyOpen &&
+    !menuOpen &&
+    !selection &&
+    debugCuaBoxEntities.length > 0;
+
   const showCuaPicker =
     active &&
     state === 'composing' &&
@@ -1834,6 +1879,25 @@ export function App() {
   const cursorInsideCuaPicker =
     showCuaPicker &&
     pointInLocalRect(cursor.localX, cursor.localY, { x: cuaPickerLayout.left, y: cuaPickerLayout.top, width: cuaPickerLayout.width, height: cuaPickerLayout.height }, 2);
+  const cursorInsideCuaDebugBox =
+    showCuaDebugOverlay &&
+    debugCuaBoxEntities.some((entity) => {
+      const rect = highlightRectForEntity(entity);
+      return rect ? pointInLocalRect(cursor.localX, cursor.localY, rect, 2) : false;
+    });
+
+  const hoveredCuaEntity = useMemo(() => {
+    if (!hoveredCuaEntityId) return undefined;
+    return [...debugCuaBoxEntities, ...draftCuaEntities, ...cuaPickerCandidates, ...cuaEntities].find((entity) => entity.id === hoveredCuaEntityId);
+  }, [cuaEntities, cuaPickerCandidates, debugCuaBoxEntities, draftCuaEntities, hoveredCuaEntityId]);
+  const hoveredCuaRect = hoveredCuaEntity ? highlightRectForEntity(hoveredCuaEntity) : undefined;
+  const cuaDebugTooltipStyle: CSSProperties | undefined =
+    hoveredCuaEntity && hoveredCuaRect
+      ? {
+          left: clampNumber(hoveredCuaRect.x + hoveredCuaRect.width + 8, 12, Math.max(12, window.innerWidth - 320), 12),
+          top: clampNumber(hoveredCuaRect.y, 12, Math.max(12, window.innerHeight - 220), 12)
+        }
+      : undefined;
 
   const lockCuaPickerAtCurrentPosition = useCallback(() => {
     groundingRequestSeqRef.current += 1;
@@ -1885,7 +1949,7 @@ export function App() {
       Boolean(panelResizeDrag) ||
       Boolean(cuaPickerResizeDrag);
 
-    if (cursorInsideCuaPicker) {
+    if (cursorInsideCuaPicker || cursorInsideCuaDebugBox) {
       cuaPickerInteractiveRef.current = true;
       if (!lastInteractiveRef.current) {
         lastInteractiveRef.current = true;
@@ -1904,6 +1968,7 @@ export function App() {
   }, [
     active,
     backendDropdownOpen,
+    cursorInsideCuaDebugBox,
     cuaPickerResizeDrag,
     cursorInsideCuaPicker,
     historyOpen,
@@ -2001,25 +2066,40 @@ export function App() {
             </defs>
           </svg>
 
-          {highlightedCuaCandidates.map((entity) => {
-            const rect = highlightRectForEntity(entity);
-            if (!rect) return null;
-            const isSelected = draftCuaEntityIds.has(entity.id);
-            const isHovered = hoveredCuaEntityId === entity.id;
-            return (
-              <div
-                key={entity.id}
-                className={`cua-element-highlight cua-element-candidate${isSelected ? ' is-selected' : ''}${isHovered ? ' is-hovered' : ''}`}
-                style={{
-                  left: rect.x,
-                  top: rect.y,
-                  width: rect.width,
-                  height: rect.height
-                }}
-                title={entity.text ?? entity.name ?? entity.role ?? 'CUA element'}
-              />
-            );
-          })}
+          {showCuaDebugOverlay &&
+            debugCuaBoxEntities.map((entity) => {
+              const rect = highlightRectForEntity(entity);
+              if (!rect) return null;
+              const isSelected = draftCuaEntityIds.has(entity.id);
+              const isHovered = hoveredCuaEntityId === entity.id;
+              return (
+                <div
+                  key={entity.id}
+                  className={`cua-element-highlight cua-element-candidate${isSelected ? ' is-selected' : ''}${isHovered ? ' is-hovered' : ''}`}
+                  style={{
+                    left: rect.x,
+                    top: rect.y,
+                    width: rect.width,
+                    height: rect.height
+                  }}
+                  onMouseEnter={() => setHoveredCuaEntityId(entity.id)}
+                  onMouseLeave={() => setHoveredCuaEntityId(null)}
+                  onMouseDown={(event) => selectCuaEntity(entity, event)}
+                  onClick={(event) => selectCuaEntity(entity, event)}
+                  title={entityDebugDetails(entity).join('\n')}
+                />
+              );
+            })}
+
+          {showCuaDebugOverlay && hoveredCuaEntity && cuaDebugTooltipStyle && (
+            <div className="cua-debug-tooltip" style={cuaDebugTooltipStyle}>
+              {entityDebugDetails(hoveredCuaEntity).map((line, index) => (
+                <div key={`${hoveredCuaEntity.id}-${index}`} className={index === 0 ? 'cua-debug-tooltip-title' : undefined}>
+                  {line}
+                </div>
+              ))}
+            </div>
+          )}
 
           {showCuaPicker && (
             <div className="cua-picker-panel" style={cuaPickerStyle}>

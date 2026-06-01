@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 import type { AgentContextEnvelope, AgentEvent } from '@openmagicpointer/core';
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { materializeAttachmentFiles } from './attachments.js';
 import { buildAgentInput, buildAgentInstructions, buildToolDiscoveryEvent } from './prompt.js';
@@ -497,16 +497,16 @@ function getRealBinaryPath(inputPath: string): string | undefined {
   if (!existsSync(resolved)) return undefined;
 
   const ext = process.platform === 'win32' ? '.exe' : '';
+  const lower = resolved.toLowerCase();
+  const isWrapperExt = lower.endsWith('.cmd') || lower.endsWith('.ps1') || lower.endsWith('.bat');
+  const isJs = lower.endsWith('.js');
 
-  // If it's already a native executable file, return it
-  if (resolved.toLowerCase().endsWith(ext) && !resolved.toLowerCase().endsWith('.js') && !resolved.toLowerCase().endsWith('.cmd') && !resolved.toLowerCase().endsWith('.ps1') && !resolved.toLowerCase().endsWith('.bat')) {
-    return resolved;
-  }
-
-  // If it's a directory, check common binary locations inside it
-  const isDir = existsSync(resolved) && existsSync(join(resolved, '..')) && !resolved.toLowerCase().endsWith('.cmd') && !resolved.toLowerCase().endsWith('.ps1') && !resolved.toLowerCase().endsWith('.bat') && !resolved.toLowerCase().endsWith('.js');
-  if (isDir) {
+  // If it's a directory, search common binary locations inside it.
+  let stat: import('fs').Stats | undefined;
+  try { stat = statSync(resolved); } catch { /* ignore */ }
+  if (stat?.isDirectory()) {
     const candidates = [
+      join(resolved, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'),
       join(resolved, `claude${ext}`),
       join(resolved, 'bin', `claude${ext}`),
       join(resolved, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', `claude${ext}`),
@@ -516,24 +516,35 @@ function getRealBinaryPath(inputPath: string): string | undefined {
     for (const cand of candidates) {
       if (existsSync(cand)) return cand;
     }
-  } else {
-    // It's a wrapper file (e.g. claude.cmd, claude.ps1, claude.bat, claude.js, or extensionless wrapper)
-    // Check siblings and children of the parent directory
-    const parentDir = dirname(resolved);
-    const candidates = [
-      join(parentDir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'),
-      join(parentDir, `claude${ext}`),
-      join(parentDir, 'bin', `claude${ext}`),
-      join(parentDir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', `claude${ext}`),
-      join(parentDir, 'node_modules', '@anthropic-ai', 'claude-code-win32-x64', 'bin', `claude${ext}`),
-      join(parentDir, 'node_modules', '@anthropic-ai', 'claude-code', 'node_modules', '@anthropic-ai', 'claude-code-win32-x64', 'bin', `claude${ext}`)
-    ];
-    for (const cand of candidates) {
-      if (existsSync(cand)) return cand;
-    }
+    return resolved;
   }
 
-  return resolved; // Fallback to whatever exists
+  // For files: prefer a sibling npm install of the real cli.js when present.
+  // This handles npm-installed wrappers on every platform — including the
+  // extensionless `claude` shell script on Linux/macOS, where SDK spawning
+  // requires the JS entrypoint rather than the wrapper.
+  const parentDir = dirname(resolved);
+  const cliJs = join(parentDir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+  if (existsSync(cliJs)) return cliJs;
+
+  // If it's a recognized native executable (and not a JS/script wrapper), use it directly.
+  if (!isJs && !isWrapperExt && (process.platform !== 'win32' || lower.endsWith('.exe'))) {
+    return resolved;
+  }
+
+  // Otherwise, fall back to scanning sibling/child binary locations for a real CLI.
+  const candidates = [
+    join(parentDir, `claude${ext}`),
+    join(parentDir, 'bin', `claude${ext}`),
+    join(parentDir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', `claude${ext}`),
+    join(parentDir, 'node_modules', '@anthropic-ai', 'claude-code-win32-x64', 'bin', `claude${ext}`),
+    join(parentDir, 'node_modules', '@anthropic-ai', 'claude-code', 'node_modules', '@anthropic-ai', 'claude-code-win32-x64', 'bin', `claude${ext}`)
+  ];
+  for (const cand of candidates) {
+    if (existsSync(cand) && cand !== resolved) return cand;
+  }
+
+  return resolved;
 }
 
 function findClaudeExecutable(config?: ClaudeAgentBridgeConfig): string | undefined {

@@ -25,6 +25,7 @@ function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
     codexAppServerTransport: 'http-adapter',
     cuaMode: 'off',
     requireApprovalBeforeCua: false,
+    cuaDebugOverlayEnabled: false,
     activationHotkey: '',
     longPressEnabled: false,
     voiceEnabled: false,

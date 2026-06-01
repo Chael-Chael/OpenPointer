@@ -1227,13 +1227,21 @@ async function captureWindowSnapshot(
   pid?: number,
   bounds?: Rect
 ): Promise<NonNullable<PointerContext['windowSnapshot']> | undefined> {
-  const capture =
-    (await captureWindowViaCuaVision(windowInfo, pid)) ??
-    (bounds ? await captureWindowSourceImage(bounds, windowInfo) : undefined) ??
-    (bounds ? await captureScreenRegion(cursor, bounds, 'window') : undefined);
-  if (!capture) return undefined;
+  const cuaCapture = await captureWindowViaCuaVision(windowInfo, pid);
+  const capture = cuaCapture.capture ?? (bounds ? await captureWindowSourceImage(bounds, windowInfo) : undefined);
+  if (!capture) {
+    return cuaCapture.error
+      ? {
+          screenshotId: `window-missing-${Date.now()}`,
+          source: 'cua-window',
+          bounds,
+          error: cuaCapture.error
+        }
+      : undefined;
+  }
   return {
     screenshotId: capture.id,
+    source: capture.source,
     imageBase64: capture.imageBase64,
     mimeType: capture.mimeType,
     bounds: capture.crop
@@ -1301,33 +1309,41 @@ async function captureWindowViaCuaVision(
   windowInfo: PointerContext['window'] | undefined,
   pid: number | undefined
 ): Promise<{
-  id: string;
-  imageBase64: string;
-  mimeType: 'image/png' | 'image/jpeg';
-  crop: Rect;
-} | undefined> {
+  capture?: {
+    id: string;
+    source: 'cua-window';
+    imageBase64: string;
+    mimeType: 'image/png' | 'image/jpeg';
+    crop: Rect;
+  };
+  error?: string;
+}> {
   const hwnd = Number(windowInfo?.windowId);
-  if (!Number.isFinite(hwnd) || hwnd <= 0 || typeof pid !== 'number') return undefined;
+  if (!Number.isFinite(hwnd) || hwnd <= 0) return { error: 'Missing or invalid HWND for CUA window capture.' };
+  if (typeof pid !== 'number') return { error: 'Missing pid for CUA window capture.' };
   try {
     const result = await cuaSidecar.callTool('get_window_state', {
       pid,
       window_id: hwnd,
       capture_mode: 'vision'
     });
-    if (result.isError) return undefined;
+    if (result.isError) return { error: cuaToolResultText(result) ?? 'CUA vision capture returned an error.' };
     const image = result.content?.find((part) => part.type === 'image' && typeof part.data === 'string');
-    if (!image?.data) return undefined;
+    if (!image?.data) return { error: 'CUA vision capture returned no image content.' };
     const structured = result.structuredContent as { screenshot_width?: number; screenshot_height?: number } | undefined;
     const width = Number(structured?.screenshot_width) || 0;
     const height = Number(structured?.screenshot_height) || 0;
     return {
-      id: `window-cua-${Date.now()}`,
-      imageBase64: image.data,
-      mimeType: image.mimeType === 'image/jpeg' ? 'image/jpeg' : 'image/png',
-      crop: { x: 0, y: 0, width, height }
+      capture: {
+        id: `window-cua-${Date.now()}`,
+        source: 'cua-window',
+        imageBase64: image.data,
+        mimeType: image.mimeType === 'image/jpeg' ? 'image/jpeg' : 'image/png',
+        crop: { x: 0, y: 0, width, height }
+      }
     };
-  } catch {
-    return undefined;
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -1336,6 +1352,7 @@ async function captureWindowSourceImage(
   windowInfo?: PointerContext['window']
 ): Promise<{
   id: string;
+  source: 'electron-window';
   imageBase64: string;
   mimeType: 'image/jpeg';
   crop: Rect;
@@ -1355,6 +1372,7 @@ async function captureWindowSourceImage(
   const jpeg = image.toJPEG(82);
   return {
     id: `window-${Date.now()}`,
+    source: 'electron-window',
     imageBase64: jpeg.toString('base64'),
     mimeType: 'image/jpeg',
     crop: { x: 0, y: 0, width: size.width, height: size.height }
