@@ -66,15 +66,17 @@ function contextAttachments(context: PointerContext): AgentContextEnvelope['atta
 }
 
 function buildCuaDirective(instruction: string, context: PointerContext, mode: 'prefer' | 'require'): CuaDirective {
+  const targetBbox = context.target ? (context.target.groundingRef?.screenRect ?? context.target.bbox) : context.visual?.crop;
+  const coordinateSpace = context.target?.groundingRef?.screenRect ? 'screen' : context.target?.bbox ? 'window' : context.visual?.crop && !context.target ? 'crop' : 'screen';
   return {
     enabled: true,
     mode,
     objective: instruction,
     target: {
-      kind: context.target?.bbox ? 'element' : context.visual?.crop ? 'region' : 'point',
+      kind: context.target ? 'element' : context.visual?.crop ? 'region' : 'point',
       screenPoint: { x: context.cursor.x, y: context.cursor.y, displayId: context.cursor.displayId },
-      bbox: context.target?.bbox ?? context.visual?.crop,
-      coordinateSpace: context.target?.bbox ? 'screen' : context.visual?.crop ? 'crop' : 'screen',
+      bbox: targetBbox,
+      coordinateSpace,
       description: context.target?.text ?? context.target?.name ?? 'Pointer target'
     },
     allowedActions: ['screenshot', 'click', 'doubleClick', 'type', 'scroll', 'drag', 'hotkey'],

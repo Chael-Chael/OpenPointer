@@ -1,7 +1,7 @@
 import type { PointerEntity, PointerEntityKind, Rect } from '@openmagicpointer/core';
 import type { CursorPayload } from '../shared/types.js';
 
-export type DisplayBounds = { x: number; y: number; width: number; height: number };
+export type DisplayBounds = { id?: number; x: number; y: number; width: number; height: number; scaleFactor?: number };
 
 /**
  * Pure geometry + matching helpers for CUA grounding. Kept free of Electron
@@ -105,13 +105,95 @@ export function displayForRect(rect: Rect, displays: DisplayBounds[]): DisplayBo
   return best?.display ?? displays[0];
 }
 
+function displayScale(display: DisplayBounds, fallback = 1): number {
+  return Math.max(1, display.scaleFactor ?? fallback);
+}
+
+function physicalWidth(display: DisplayBounds, fallbackScale = 1): number {
+  return display.width * displayScale(display, fallbackScale);
+}
+
+function physicalHeight(display: DisplayBounds, fallbackScale = 1): number {
+  return display.height * displayScale(display, fallbackScale);
+}
+
+function rangesOverlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
+  return aStart < bEnd && aEnd > bStart;
+}
+
+export function physicalOriginForDisplay(display: DisplayBounds, displays: DisplayBounds[], fallbackScale = display.scaleFactor ?? 1): { x: number; y: number } {
+  const leftEdge = display.x;
+  const topEdge = display.y;
+  const rightEdge = display.x + display.width;
+  const bottomEdge = display.y + display.height;
+  const physicalX =
+    leftEdge >= 0
+      ? displays
+          .filter(
+            (candidate) =>
+              candidate.x >= 0 &&
+              candidate.x + candidate.width <= leftEdge &&
+              rangesOverlap(candidate.y, candidate.y + candidate.height, topEdge, bottomEdge)
+          )
+          .reduce((sum, candidate) => sum + physicalWidth(candidate, fallbackScale), 0)
+      : -displays
+          .filter(
+            (candidate) =>
+              candidate.x >= leftEdge && candidate.x < 0 && rangesOverlap(candidate.y, candidate.y + candidate.height, topEdge, bottomEdge)
+          )
+          .reduce((sum, candidate) => sum + physicalWidth(candidate, fallbackScale), 0);
+  const physicalY =
+    topEdge >= 0
+      ? displays
+          .filter(
+            (candidate) =>
+              candidate.y >= 0 &&
+              candidate.y + candidate.height <= topEdge &&
+              rangesOverlap(candidate.x, candidate.x + candidate.width, leftEdge, rightEdge)
+          )
+          .reduce((sum, candidate) => sum + physicalHeight(candidate, fallbackScale), 0)
+      : -displays
+          .filter(
+            (candidate) =>
+              candidate.y >= topEdge && candidate.y < 0 && rangesOverlap(candidate.x, candidate.x + candidate.width, leftEdge, rightEdge)
+          )
+          .reduce((sum, candidate) => sum + physicalHeight(candidate, fallbackScale), 0);
+
+  return { x: physicalX, y: physicalY };
+}
+
+export function providerPointForCursor(
+  cursor: Pick<CursorPayload, 'localX' | 'localY' | 'dpr'>,
+  display: DisplayBounds,
+  displays: DisplayBounds[]
+): { x: number; y: number } {
+  const scale = displayScale(display, cursor.dpr);
+  const origin = physicalOriginForDisplay(display, displays, scale);
+  return {
+    x: origin.x + cursor.localX * scale,
+    y: origin.y + cursor.localY * scale
+  };
+}
+
 /**
  * Convert a physical (or DIP) screen rect to display-local DIP coordinates.
  * `coordinateScale` collapses physical pixels back to DIPs; the matching
  * display origin is then subtracted so the rect is local to that display.
  */
-export function screenRectToLocal(rect: Rect, coordinateScale: number, displays: DisplayBounds[]): Rect {
+export function screenRectToLocal(rect: Rect, coordinateScale: number, displays: DisplayBounds[], displayHint?: DisplayBounds): Rect {
   const scale = Math.max(1, coordinateScale || 1);
+  if (displayHint && scale > 1) {
+    const displaySpecificScale = displayScale(displayHint, scale);
+    const physicalOrigin = physicalOriginForDisplay(displayHint, displays, displaySpecificScale);
+    const localRect = {
+      x: (rect.x - physicalOrigin.x) / displaySpecificScale,
+      y: (rect.y - physicalOrigin.y) / displaySpecificScale,
+      width: rect.width / displaySpecificScale,
+      height: rect.height / displaySpecificScale
+    };
+    if (isPlausibleDisplayLocalRect(localRect, displayHint)) return localRect;
+  }
+
   const dipRect = {
     x: rect.x / scale,
     y: rect.y / scale,
@@ -127,6 +209,11 @@ export function screenRectToLocal(rect: Rect, coordinateScale: number, displays:
     width: dipRect.width,
     height: dipRect.height
   };
+}
+
+function isPlausibleDisplayLocalRect(rect: Rect, display: DisplayBounds): boolean {
+  const margin = Math.max(96, Math.min(display.width, display.height) * 0.08);
+  return rect.x + rect.width >= -margin && rect.x <= display.width + margin && rect.y + rect.height >= -margin && rect.y <= display.height + margin;
 }
 
 /**

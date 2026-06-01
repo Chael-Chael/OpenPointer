@@ -351,8 +351,7 @@
   box-shadow:
     0 0 0 1px rgba(255, 255, 255, 0.5) inset,
     0 8px 24px rgba(15, 118, 110, 0.12);
-  cursor: pointer;
-  pointer-events: auto;
+  pointer-events: none;
   z-index: 4;
   animation: selection-appear 120ms ease;
 }
@@ -386,13 +385,14 @@
     0 0 0 2px rgba(52, 120, 246, 0.2),
     0 10px 30px rgba(37, 99, 235, 0.18);
   z-index: 7;
+  animation: cua-highlight-flash 720ms ease-in-out infinite;
 }
 
 .cua-picker-panel {
   position: fixed;
   z-index: 8;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) 12px;
+  grid-template-rows: auto minmax(0, 1fr) auto 12px;
   gap: 8px;
   min-width: 280px;
   min-height: 160px;
@@ -493,6 +493,54 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.cua-picker-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.cua-picker-action {
+  min-height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 800;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.cua-picker-action:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.cua-picker-action:disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
+.cua-picker-action.is-secondary {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.cua-picker-action.is-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.cua-picker-action.is-primary {
+  background: rgba(20, 184, 166, 0.86);
+  border-color: rgba(153, 246, 228, 0.42);
+}
+
+.cua-picker-action.is-primary:hover:not(:disabled) {
+  background: rgba(13, 148, 136, 0.95);
 }
 
 .cua-picker-resize-handle {

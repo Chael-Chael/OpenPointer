@@ -75,7 +75,7 @@ function pickTarget(x: number, y: number, entities: PointerEntity[], gesture?: P
     .filter((entity): entity is PointerEntity & { bbox: Rect } => Boolean(entity.bbox))
     .filter((entity) => pointInRect(x, y, entity.bbox))
     .sort((a, b) => rectArea(a.bbox) - rectArea(b.bbox));
-  return containing[0] ?? entities[0];
+  return containing[0];
 }
 
 function pointInRect(x: number, y: number, rect: Rect): boolean {

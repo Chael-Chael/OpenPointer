@@ -11,6 +11,7 @@ import {
   normalizeRect,
   normalizeText,
   parseTreeMarkdown,
+  providerPointForCursor,
   pointInRect,
   resolveHoveredEntity,
   screenRectToLocal
@@ -51,7 +52,9 @@ export class CuaGroundingProvider {
   async previewWindow(cursor: CursorPayload, windowInfo?: PointerContext['window']): Promise<WindowPreviewResponse> {
     try {
       const windows = await this.listWindows();
-      const matched = matchWindow(windows, cursor, windowInfo);
+      const displays = currentDisplayBounds();
+      const cursorDisplay = displays.find((display) => display.id === cursor.displayId) ?? displayForCursor(cursor, displays);
+      const matched = matchWindow(windows, cursor, windowInfo, displays, cursorDisplay);
       if (!matched || typeof matched.pid !== 'number' || typeof matched.window_id !== 'number') {
         return { status: 'fallback', source: 'cua', error: 'No confident CUA window match.' };
       }
@@ -80,7 +83,11 @@ export class CuaGroundingProvider {
   async preview(cursor: CursorPayload, windowInfo?: PointerContext['window']): Promise<CuaGroundingSnapshot> {
     try {
       const windows = await this.listWindows();
-      const matched = matchWindow(windows, cursor, windowInfo);
+      // Fetch displays once and reuse across every element; resolving them
+      // per-element via screen.getDisplayMatching is a costly native call.
+      const displays = currentDisplayBounds();
+      const cursorDisplay = displays.find((display) => display.id === cursor.displayId) ?? displayForCursor(cursor, displays);
+      const matched = matchWindow(windows, cursor, windowInfo, displays, cursorDisplay);
       if (!matched || typeof matched.pid !== 'number' || typeof matched.window_id !== 'number') {
         return { status: 'fallback', entities: [], error: 'No confident CUA window match.' };
       }
@@ -97,12 +104,9 @@ export class CuaGroundingProvider {
         return { status: 'unavailable', entities: [], error: cuaErrorText(state) ?? 'CUA get_window_state reported an error.' };
       }
       const structured = state.structuredContent as { elements?: CuaElementRecord[]; element_count?: number; tree_markdown?: string } | undefined;
-      const coordinateScale = usesPhysicalCoordinates(matched.bounds, cursor) ? Math.max(1, cursor.dpr || 1) : 1;
-      // Fetch displays once and reuse across every element; resolving them
-      // per-element via screen.getDisplayMatching is a costly native call.
-      const displays: DisplayBounds[] = screen.getAllDisplays().map((display) => ({ ...display.bounds }));
+      const coordinateScale = usesPhysicalCoordinates(matched.bounds, cursor, cursorDisplay, displays) ? Math.max(1, cursorDisplay?.scaleFactor ?? cursor.dpr ?? 1) : 1;
       let entities = (structured?.elements ?? [])
-        .map((element) => entityFromCuaElement(element, matched.pid!, String(matched.window_id), coordinateScale, displays))
+        .map((element) => entityFromCuaElement(element, matched.pid!, String(matched.window_id), coordinateScale, displays, cursorDisplay))
         .filter((entity): entity is PointerEntity => Boolean(entity))
         // Drop pure layout containers with no actions and no label; they add
         // noise to the element list and the model's `nearby` context.
@@ -111,14 +115,11 @@ export class CuaGroundingProvider {
       // Release builds of cua-driver omit the structured `elements` array (it is
       // added by the source patch) but still render `tree_markdown`. Fall back to
       // parsing that so grounding works without a patched/compiled driver. These
-      // elements have no per-element bbox, so they inherit the window bounds and
-      // resolve at the window level instead of pixel-precise hover.
+      // elements have no per-element bbox, so they remain list-only instead of
+      // rendering inaccurate window-sized highlights.
       let coordinateless = false;
       if (entities.length === 0 && structured?.tree_markdown) {
-        const windowRect = matched.bounds ? screenRectToLocal(normalizeRect(matched.bounds) ?? matched.bounds, coordinateScale, displays) : undefined;
-        entities = parseTreeMarkdown(structured.tree_markdown).map((element) =>
-          entityFromTreeElement(element, matched.pid!, String(matched.window_id), windowRect)
-        );
+        entities = parseTreeMarkdown(structured.tree_markdown).map((element) => entityFromTreeElement(element, matched.pid!, String(matched.window_id)));
         entities = entities.filter((entity) => !isNoiseEntity(entity));
         coordinateless = entities.length > 0;
       }
@@ -159,7 +160,24 @@ export class CuaGroundingProvider {
   }
 }
 
-function matchWindow(windows: CuaWindowRecord[], cursor: CursorPayload, windowInfo?: PointerContext['window']): CuaWindowRecord | undefined {
+function currentDisplayBounds(): DisplayBounds[] {
+  return screen.getAllDisplays().map((display) => ({
+    id: display.id,
+    x: display.bounds.x,
+    y: display.bounds.y,
+    width: display.bounds.width,
+    height: display.bounds.height,
+    scaleFactor: display.scaleFactor
+  }));
+}
+
+function matchWindow(
+  windows: CuaWindowRecord[],
+  cursor: CursorPayload,
+  windowInfo: PointerContext['window'] | undefined,
+  displays: DisplayBounds[],
+  cursorDisplay: DisplayBounds | undefined
+): CuaWindowRecord | undefined {
   let best: { record: CuaWindowRecord; score: number } | undefined;
   for (const record of windows) {
     if (!record.bounds || typeof record.pid !== 'number' || typeof record.window_id !== 'number') continue;
@@ -170,7 +188,7 @@ function matchWindow(windows: CuaWindowRecord[], cursor: CursorPayload, windowIn
     }
 
     let score = 0;
-    if (pointInProviderRect(cursor, record.bounds)) score += 6;
+    if (pointInProviderRect(cursor, record.bounds, cursorDisplay, displays)) score += 6;
     const title = normalizeText(record.title);
     const appName = normalizeText(record.app_name);
     const currentTitle = normalizeText(windowInfo?.title);
@@ -187,12 +205,13 @@ function entityFromCuaElement(
   pid: number,
   windowId: string,
   coordinateScale: number,
-  displays: DisplayBounds[]
+  displays: DisplayBounds[],
+  displayHint: DisplayBounds | undefined
 ): PointerEntity | undefined {
   if (typeof element.element_index !== 'number') return undefined;
   const screenRect = rectFromCuaElement(element);
   if (!screenRect) return undefined;
-  const localRect = screenRectToLocal(screenRect, coordinateScale, displays);
+  const localRect = screenRectToLocal(screenRect, coordinateScale, displays, displayHint);
   const role = element.control_type ?? 'Unknown';
   const label = firstNonEmpty(element.name, element.value, element.help_text, element.automation_id, role);
   return {
@@ -250,7 +269,7 @@ function rectFromCenter(center: CuaElementRecord['center']): Rect | undefined {
   return { x: x - 9, y: y - 9, width: 18, height: 18 };
 }
 
-function entityFromTreeElement(element: ParsedTreeElement, pid: number, windowId: string, windowRect: Rect | undefined): PointerEntity {
+function entityFromTreeElement(element: ParsedTreeElement, pid: number, windowId: string): PointerEntity {
   const role = element.control_type || 'Unknown';
   const label = firstNonEmpty(element.name, element.value, element.help_text, element.automation_id, role);
   return {
@@ -259,9 +278,6 @@ function entityFromTreeElement(element: ParsedTreeElement, pid: number, windowId
     text: label,
     role,
     name: element.name,
-    // Release driver gives no per-element bbox; inherit the window bounds so the
-    // element still has a location for the agent and any window-level overlay.
-    bbox: windowRect,
     accessibilityPath: `cua:${pid}:${windowId}:${element.element_index}`,
     confidence: 0.6,
     origin: 'accessibility',
@@ -275,13 +291,27 @@ function entityFromTreeElement(element: ParsedTreeElement, pid: number, windowId
   };
 }
 
-function pointInProviderRect(cursor: CursorPayload, rect: Rect): boolean {
-  return pointInRect(cursor.x, cursor.y, rect) || pointInRect(cursor.x * cursor.dpr, cursor.y * cursor.dpr, rect);
+function displayForCursor(cursor: CursorPayload, displays: DisplayBounds[]): DisplayBounds | undefined {
+  return displays.find((display) => pointInRect(cursor.x, cursor.y, display));
 }
 
-function usesPhysicalCoordinates(rect: Rect | undefined, cursor: CursorPayload): boolean {
+function pointInProviderRect(cursor: CursorPayload, rect: Rect, cursorDisplay: DisplayBounds | undefined, displays: DisplayBounds[]): boolean {
+  if (pointInRect(cursor.x, cursor.y, rect)) return true;
+  if (cursorDisplay) {
+    const providerPoint = providerPointForCursor(cursor, cursorDisplay, displays);
+    if (pointInRect(providerPoint.x, providerPoint.y, rect)) return true;
+  }
+  return pointInRect(cursor.x * cursor.dpr, cursor.y * cursor.dpr, rect);
+}
+
+function usesPhysicalCoordinates(rect: Rect | undefined, cursor: CursorPayload, cursorDisplay: DisplayBounds | undefined, displays: DisplayBounds[]): boolean {
   if (!rect || cursor.dpr <= 1) return false;
-  return !pointInRect(cursor.x, cursor.y, rect) && pointInRect(cursor.x * cursor.dpr, cursor.y * cursor.dpr, rect);
+  if (pointInRect(cursor.x, cursor.y, rect)) return false;
+  if (cursorDisplay) {
+    const providerPoint = providerPointForCursor(cursor, cursorDisplay, displays);
+    if (pointInRect(providerPoint.x, providerPoint.y, rect)) return true;
+  }
+  return pointInRect(cursor.x * cursor.dpr, cursor.y * cursor.dpr, rect);
 }
 
 function cuaErrorText(result: CuaToolResult): string | undefined {

@@ -72,6 +72,15 @@ describe('screenRectToLocal', () => {
     const local = screenRectToLocal({ x: 100, y: 100, width: 40, height: 20 }, 1, [primary]);
     expect(local).toEqual({ x: 100, y: 100, width: 40, height: 20 });
   });
+
+  it('keeps secondary display origins stable under mixed DPI scaling', () => {
+    const abovePrimary: DisplayBounds = { id: 3, x: 0, y: -900, width: 1920, height: 900, scaleFactor: 1 };
+    const mixedPrimary: DisplayBounds = { id: 1, x: 0, y: 0, width: 1920, height: 1080, scaleFactor: 1 };
+    const mixedSecondary: DisplayBounds = { id: 2, x: 1920, y: 0, width: 1280, height: 720, scaleFactor: 1.5 };
+    const physical = { x: 2070, y: 150, width: 300, height: 60 };
+    const local = screenRectToLocal(physical, 1.5, [abovePrimary, mixedPrimary, mixedSecondary], mixedSecondary);
+    expect(local).toEqual({ x: 100, y: 100, width: 200, height: 40 });
+  });
 });
 
 describe('kindFromControlType', () => {

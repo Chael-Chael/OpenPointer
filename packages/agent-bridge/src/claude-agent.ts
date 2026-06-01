@@ -26,6 +26,20 @@ type PermissionStore = {
   rules: PermissionRule[];
 };
 
+const CUA_AGENT_TOOLS = [
+  'list_windows',
+  'get_window_state',
+  'click',
+  'double_click',
+  'right_click',
+  'type_text',
+  'press_key',
+  'hotkey',
+  'scroll',
+  'drag',
+  'set_value'
+];
+
 class EventQueue<T> {
   private readonly items: T[] = [];
   private readonly waiters: Array<(result: IteratorResult<T>) => void> = [];
@@ -68,8 +82,11 @@ type PermissionRequestOptions = {
 // Hardcoded default paths per platform (npm global install locations)
 const DEFAULT_PATHS: Record<string, string[]> = {
   win32: [
+    join(process.env.APPDATA || '', 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'),
+    join(process.env.LOCALAPPDATA || '', 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'),
     join(process.env.APPDATA || '', 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'),
     join(process.env.LOCALAPPDATA || '', 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'),
+    'C:\\Program Files\\nodejs\\node_modules\\@anthropic-ai\\claude-code\\cli.js',
     'C:\\Program Files\\nodejs\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe'
   ],
   darwin: [
@@ -135,6 +152,7 @@ export class ClaudeAgentBridge implements AgentBridge {
             this.requestToolApproval(toolName, input, permissionOptions, approvalEvents),
           includePartialMessages: true,
           maxTurns: 12,
+          mcpServers: mcpServersForEnvelope(envelope),
           abortController: controller,
           env: { ...buildSdkEnv(this.config), ...permissionEnv },
           pathToClaudeCodeExecutable: claudePath,
@@ -503,6 +521,7 @@ function getRealBinaryPath(inputPath: string): string | undefined {
     // Check siblings and children of the parent directory
     const parentDir = dirname(resolved);
     const candidates = [
+      join(parentDir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'),
       join(parentDir, `claude${ext}`),
       join(parentDir, 'bin', `claude${ext}`),
       join(parentDir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', `claude${ext}`),
@@ -567,7 +586,7 @@ function findClaudeExecutable(config?: ClaudeAgentBridgeConfig): string | undefi
     const cmd = process.platform === 'win32' ? 'where' : 'which';
     const wrapper = execSync(`${cmd} claude`, { encoding: 'utf-8', timeout: 5000 }).trim().split('\n')[0];
     if (wrapper) {
-      const candidate = join(dirname(wrapper), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', `claude${ext}`);
+      const candidate = join(dirname(wrapper), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
       const realPath = getRealBinaryPath(candidate);
       if (realPath) {
         cachedClaudePath = realPath;
@@ -593,8 +612,69 @@ async function loadClaudeSdk(): Promise<ClaudeAgentBridgeConfig['sdk'] | null> {
 
 function allowedToolsForEnvelope(envelope: AgentContextEnvelope): string[] | undefined {
   if (envelope.routing.toolPolicy !== 'require') return undefined;
-  if (envelope.cuaDirective?.mode === 'require') return ['mcp__cua__*'];
-  return envelope.routing.preferredTools.map((tool) => (tool.includes('*') ? tool : `mcp__${tool}__*`));
+  const allowedTools = envelope.routing.preferredTools
+    // CUA can change desktop state, so keep it behind Claude Code's permission
+    // callback instead of auto-allowing it through the SDK `allowedTools` list.
+    .filter((tool) => tool !== 'cua' && tool !== 'mcp__cua__*')
+    .map((tool) => (tool.includes('*') ? tool : `mcp__${tool}__*`));
+  return allowedTools.length > 0 ? allowedTools : undefined;
+}
+
+function mcpServersForEnvelope(envelope: AgentContextEnvelope): Record<string, unknown> | undefined {
+  if (!hasCuaContext(envelope)) return undefined;
+  const command = findCuaDriverExecutable();
+  if (!command) return undefined;
+  return {
+    cua: {
+      type: 'stdio',
+      command,
+      args: ['mcp'],
+      timeout: 20000,
+      alwaysLoad: true,
+      tools: CUA_AGENT_TOOLS.map((name) => ({
+        name,
+        permission_policy: 'always_ask'
+      }))
+    }
+  };
+}
+
+function hasCuaContext(envelope: AgentContextEnvelope): boolean {
+  return Boolean(
+    envelope.cuaDirective?.enabled ||
+      envelope.toolServers?.some((server) => server.id === 'cua') ||
+      envelope.pointerContext.grounding?.provider === 'cua' ||
+      envelope.pointerContext.target?.groundingRef?.provider === 'cua' ||
+      envelope.pointerContext.entities.some((entity) => entity.groundingRef?.provider === 'cua') ||
+      envelope.pointerContext.nearby.some((entity) => entity.groundingRef?.provider === 'cua')
+  );
+}
+
+function findCuaDriverExecutable(): string | undefined {
+  const exe = process.platform === 'win32' ? 'cua-driver.exe' : 'cua-driver';
+  const maybeProcess = process as NodeJS.Process & { resourcesPath?: string };
+  const override = process.env.OMP_CUA_DRIVER_PATH?.trim() || process.env.CUA_DRIVER_PATH?.trim();
+  const cwd = process.cwd();
+  const candidates = [
+    override,
+    join(cwd, 'vendor', 'cua', 'libs', 'cua-driver', 'rust', 'target', 'release', exe),
+    join(cwd, 'vendor', 'cua', 'libs', 'cua-driver', 'rust', 'target', 'debug', exe),
+    join(cwd, '..', '..', 'vendor', 'cua', 'libs', 'cua-driver', 'rust', 'target', 'release', exe),
+    join(cwd, '..', '..', 'vendor', 'cua', 'libs', 'cua-driver', 'rust', 'target', 'debug', exe),
+    maybeProcess.resourcesPath ? join(maybeProcess.resourcesPath, exe) : undefined,
+    process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Programs', 'Cua', 'cua-driver', 'bin', exe) : undefined,
+    process.env.HOME ? join(process.env.HOME, '.cua-driver', 'packages', 'current', exe) : undefined
+  ].filter((candidate): candidate is string => Boolean(candidate));
+  const direct = candidates.find((candidate) => existsSync(candidate));
+  if (direct) return direct;
+  try {
+    const cmd = process.platform === 'win32' ? 'where cua-driver' : 'which cua-driver';
+    const found = execSync(cmd, { encoding: 'utf-8', timeout: 5000 }).trim().split(/\r?\n/)[0];
+    if (found && existsSync(found)) return found;
+  } catch {
+    /* ignore missing cua-driver on PATH */
+  }
+  return undefined;
 }
 
 function mapClaudeMessage(raw: unknown): AgentEvent {
