@@ -123,10 +123,10 @@ function resolveCuaDriverPath(repoRoot: string): string | undefined {
   if (override && existsSync(override)) return override;
   const exe = process.platform === 'win32' ? 'cua-driver.exe' : 'cua-driver';
   const candidates = [
-    join(process.resourcesPath ?? '', exe),
-    process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Programs', 'Cua', 'cua-driver', 'bin', exe) : '',
+    join(repoRoot, 'vendor', 'cua', 'libs', 'cua-driver', 'rust', 'target', 'release', exe),
     join(repoRoot, 'vendor', 'cua', 'libs', 'cua-driver', 'rust', 'target', 'debug', exe),
-    join(repoRoot, 'vendor', 'cua', 'libs', 'cua-driver', 'rust', 'target', 'release', exe)
+    join(process.resourcesPath ?? '', exe),
+    process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Programs', 'Cua', 'cua-driver', 'bin', exe) : ''
   ].filter(Boolean);
   return candidates.find((candidate) => existsSync(candidate));
 }

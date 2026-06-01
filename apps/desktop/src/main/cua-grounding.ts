@@ -6,7 +6,6 @@ import {
   type DisplayBounds,
   type ParsedTreeElement,
   firstNonEmpty,
-  isInteractiveEntity,
   isNoiseEntity,
   kindFromControlType,
   normalizeRect,
@@ -33,7 +32,11 @@ type CuaElementRecord = {
   automation_id?: string;
   help_text?: string;
   actions?: string[];
-  rect?: Rect;
+  rect?: Rect | [number, number, number, number];
+  bounds?: Rect | [number, number, number, number];
+  bounding_rect?: Rect | [number, number, number, number];
+  boundingRect?: Rect | [number, number, number, number];
+  frame?: Rect | [number, number, number, number];
   center?: { x: number; y: number };
   source?: 'uia' | 'msaa';
 };
@@ -74,8 +77,7 @@ export class CuaGroundingProvider {
         .filter((entity): entity is PointerEntity => Boolean(entity))
         // Drop pure layout containers with no actions and no label; they add
         // noise to the element list and the model's `nearby` context.
-        .filter((entity) => !isNoiseEntity(entity))
-        .filter((entity) => isInteractiveEntity(entity));
+        .filter((entity) => !isNoiseEntity(entity));
 
       // Release builds of cua-driver omit the structured `elements` array (it is
       // added by the source patch) but still render `tree_markdown`. Fall back to
@@ -88,7 +90,7 @@ export class CuaGroundingProvider {
         entities = parseTreeMarkdown(structured.tree_markdown).map((element) =>
           entityFromTreeElement(element, matched.pid!, String(matched.window_id), windowRect)
         );
-        entities = entities.filter((entity) => isInteractiveEntity(entity));
+        entities = entities.filter((entity) => !isNoiseEntity(entity));
         coordinateless = entities.length > 0;
       }
 
@@ -158,8 +160,8 @@ function entityFromCuaElement(
   coordinateScale: number,
   displays: DisplayBounds[]
 ): PointerEntity | undefined {
-  if (typeof element.element_index !== 'number' || !element.rect) return undefined;
-  const screenRect = normalizeRect(element.rect);
+  if (typeof element.element_index !== 'number') return undefined;
+  const screenRect = rectFromCuaElement(element);
   if (!screenRect) return undefined;
   const localRect = screenRectToLocal(screenRect, coordinateScale, displays);
   const role = element.control_type ?? 'Unknown';
@@ -183,6 +185,40 @@ function entityFromCuaElement(
       screenRect
     }
   };
+}
+
+function rectFromCuaElement(element: CuaElementRecord): Rect | undefined {
+  return (
+    normalizeRectLike(element.rect) ??
+    normalizeRectLike(element.bounds) ??
+    normalizeRectLike(element.bounding_rect) ??
+    normalizeRectLike(element.boundingRect) ??
+    normalizeRectLike(element.frame) ??
+    rectFromCenter(element.center)
+  );
+}
+
+function normalizeRectLike(value: Rect | [number, number, number, number] | undefined): Rect | undefined {
+  if (!value) return undefined;
+  if (Array.isArray(value)) {
+    const a = Number(value[0]);
+    const b = Number(value[1]);
+    const c = Number(value[2]);
+    const d = Number(value[3]);
+    if (![a, b, c, d].every(Number.isFinite)) return undefined;
+    const leftTopRightBottom = normalizeRect({ x: a, y: b, width: c - a, height: d - b });
+    if (leftTopRightBottom) return leftTopRightBottom;
+    return normalizeRect({ x: a, y: b, width: c, height: d });
+  }
+  return normalizeRect(value);
+}
+
+function rectFromCenter(center: CuaElementRecord['center']): Rect | undefined {
+  if (!center) return undefined;
+  const x = Number(center.x);
+  const y = Number(center.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+  return { x: x - 9, y: y - 9, width: 18, height: 18 };
 }
 
 function entityFromTreeElement(element: ParsedTreeElement, pid: number, windowId: string, windowRect: Rect | undefined): PointerEntity {

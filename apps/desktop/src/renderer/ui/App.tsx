@@ -66,9 +66,29 @@ type LocalRect = { x: number; y: number; width: number; height: number };
 const CUA_HIGHLIGHT_RADIUS_X = 560;
 const CUA_HIGHLIGHT_RADIUS_Y = 420;
 const MAX_CUA_HIGHLIGHTS = 40;
+const MAX_CUA_PICKER_ITEMS = 12;
+const CUA_GROUNDING_INITIAL_DELAY_MS = 60;
+const CUA_GROUNDING_REFRESH_MS = 420;
+const CUA_GROUNDING_STALE_MS = 1600;
+const CUA_GROUNDING_MIN_CURSOR_DELTA = 36;
+const DEFAULT_CUA_PICKER_SIZE = { width: 340, height: 360 };
+const CUA_PICKER_MIN_WIDTH = 280;
+const CUA_PICKER_MIN_HEIGHT = 160;
+
+function cursorDistanceSquared(a: CursorPayload, b: CursorPayload): number {
+  const dx = a.localX - b.localX;
+  const dy = a.localY - b.localY;
+  return dx * dx + dy * dy;
+}
 
 function rectsIntersect(a: LocalRect, b: LocalRect): boolean {
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+function distanceToLocalRectSquared(x: number, y: number, rect: LocalRect): number {
+  const dx = Math.max(rect.x - x, 0, x - (rect.x + rect.width));
+  const dy = Math.max(rect.y - y, 0, y - (rect.y + rect.height));
+  return dx * dx + dy * dy;
 }
 
 function contextRegionAroundCursor(cursor: CursorPayload): LocalRect {
@@ -90,6 +110,10 @@ function highlightRectForEntity(entity: PointerEntity): LocalRect | undefined {
   if (rect.width < 3 || rect.height < 3) return undefined;
   if (rect.width > window.innerWidth * 0.95 && rect.height > window.innerHeight * 0.75) return undefined;
   return rect;
+}
+
+function hasPreciseCuaRect(entity: PointerEntity): boolean {
+  return Boolean(highlightRectForEntity(entity));
 }
 
 function defaultContextInstruction(hasSelectionContext: boolean, hasCuaContext: boolean): string {
@@ -208,9 +232,15 @@ export function App() {
   const [selectionOrigin, setSelectionOrigin] = useState<{ x: number; y: number } | null>(null);
   const [selectionDrag, setSelectionDrag] = useState<SelectionDrag | null>(null);
   const [cuaEntities, setCuaEntities] = useState<PointerEntity[]>([]);
+  const [cuaPickerAnchor, setCuaPickerAnchor] = useState<CursorPayload>(initialCursor);
+  const [cuaPickerLocked, setCuaPickerLocked] = useState(false);
+  const [cuaPickerPosition, setCuaPickerPosition] = useState<{ left: number; top: number } | null>(null);
+  const [cuaPickerSize, setCuaPickerSize] = useState(DEFAULT_CUA_PICKER_SIZE);
+  const [cuaPickerResizeDrag, setCuaPickerResizeDrag] = useState<{ startX: number; startY: number; startWidth: number; startHeight: number } | null>(
+    null
+  );
   const [hoveredCuaEntityId, setHoveredCuaEntityId] = useState<string | null>(null);
-  const [selectedCuaEntityId, setSelectedCuaEntityId] = useState<string | null>(null);
-  const [selectedCuaEntity, setSelectedCuaEntity] = useState<PointerEntity | null>(null);
+  const [selectedCuaEntities, setSelectedCuaEntities] = useState<PointerEntity[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const conversationIdRef = useRef<string | null>(null);
   conversationIdRef.current = conversationId;
@@ -226,6 +256,7 @@ export function App() {
   const thinkingStartRef = useRef<number>(0);
   const streamPanelRef = useRef<HTMLDivElement | null>(null);
   const groundingRequestSeqRef = useRef(0);
+  const lastCuaSelectEventRef = useRef<{ id: string; at: number; type: string } | null>(null);
   // Submit-time screenshot signal from the main process (see CaptureActivity IPC).
   const [captureActivity, setCaptureActivity] = useState<{ active: boolean; withCua: boolean }>({ active: false, withCua: false });
   const [historyTurns, setHistoryTurns] = useState<import('@openmagicpointer/core').ChatTurn[]>([]);
@@ -269,6 +300,20 @@ export function App() {
   promptRef.current = prompt;
   const lastInteractiveRef = useRef(false);
   const lastGlobalContextMenuAtRef = useRef(0);
+  const liveCuaPreview =
+    active &&
+    state === 'composing' &&
+    settings?.cuaMode !== 'off' &&
+    !detached &&
+    !selecting &&
+    !selectionDrag &&
+    !selection &&
+    !settingsOpen &&
+    !historyOpen &&
+    !menuOpen &&
+    !captureActivity.active &&
+    !cuaPickerLocked &&
+    selectedCuaEntities.length === 0;
 
   useEffect(() => {
     void window.openMagicPointer.getSettings().then((value) => {
@@ -293,9 +338,11 @@ export function App() {
       if (payload.state === 'completed') {
         setCursor(payload.cursor);
         setHold(null);
-        if (activeRef.current) {
+        if (payload.startedWhileActive) {
           // Second long-press while popup is open → start rectangle selection
           const origin = { x: payload.cursor.localX, y: payload.cursor.localY };
+          setCuaPickerLocked(false);
+          setCuaPickerPosition(null);
           setSelectionOrigin(origin);
           setSelecting(true);
           setSelection({ x1: origin.x, y1: origin.y, x2: origin.x, y2: origin.y });
@@ -308,6 +355,9 @@ export function App() {
     });
     const offActivate = window.openMagicPointer.onActivate((payload) => {
       setCursor(payload);
+      setCuaPickerAnchor(payload);
+      setCuaPickerLocked(false);
+      setCuaPickerPosition(null);
       setActive(true);
       const restoreEpoch = conversationRestoreEpochRef.current;
       window.openMagicPointer.getSettings().then(async (currentSettings) => {
@@ -391,9 +441,12 @@ export function App() {
       setDetached(false);
       setSelection(null);
       setCuaEntities([]);
+      setCuaPickerAnchor(initialCursor);
+      setCuaPickerLocked(false);
+      setCuaPickerPosition(null);
+      setCuaPickerResizeDrag(null);
       setHoveredCuaEntityId(null);
-      setSelectedCuaEntityId(null);
-      setSelectedCuaEntity(null);
+      setSelectedCuaEntities([]);
       setDetachedPos(null);
       setSelecting(false);
       setSelectionOrigin(null);
@@ -459,7 +512,17 @@ export function App() {
         Boolean(selection) ||
         selecting ||
         Boolean(selectionDrag) ||
-        Boolean(panelResizeDrag));
+        Boolean(panelResizeDrag) ||
+        Boolean(cuaPickerResizeDrag) ||
+        (state === 'composing' &&
+          settings?.cuaMode !== 'off' &&
+          !settingsOpen &&
+          !historyOpen &&
+          !menuOpen &&
+          !selecting &&
+          !selectionDrag &&
+          !selection &&
+          cuaEntities.length > 0));
 
     function checkTarget(target: EventTarget | null) {
       if (forceInteractive) return true;
@@ -505,11 +568,28 @@ export function App() {
       window.removeEventListener('mouseover', onMouseOver);
       window.removeEventListener('mouseout', onMouseOut);
     };
-  }, [active, detached, menuOpen, backendDropdownOpen, settingsOpen, historyOpen, selection, selecting, selectionDrag, panelResizeDrag]);
+  }, [
+    active,
+    detached,
+    menuOpen,
+    backendDropdownOpen,
+    settingsOpen,
+    historyOpen,
+    selection,
+    selecting,
+    selectionDrag,
+    panelResizeDrag,
+    cuaPickerResizeDrag,
+    state,
+    settings?.cuaMode,
+    cuaEntities.length
+  ]);
 
   // Esc = deactivate; Right-click = toggle detach/reattach (enter/exit edit) or cancel local selection.
   useEffect(() => {
     function toggleEditDialog(contextCursor = cursorRef.current) {
+      setCuaPickerLocked(false);
+      setCuaPickerPosition(null);
       if (menuOpen) {
         setMenuOpen(false);
         return;
@@ -558,6 +638,7 @@ export function App() {
     const offGlobalContextMenu = window.openMagicPointer.onGlobalContextMenu((payload) => {
       lastGlobalContextMenuAtRef.current = Date.now();
       setCursor(payload);
+      setCuaPickerAnchor(payload);
       toggleEditDialog(payload);
     });
     window.addEventListener('keydown', onKeyDown, { capture: true });
@@ -646,47 +727,103 @@ export function App() {
   }, [active, selecting, selectionDrag, settingsOpen, captureActivity.active, state]);
 
   useEffect(() => {
-    if (!active || state !== 'composing' || settings?.cuaMode === 'off' || selecting || selectionDrag || settingsOpen || historyOpen || menuOpen || selection) {
-      setCuaEntities([]);
-      setHoveredCuaEntityId(null);
+    if (liveCuaPreview) setCuaPickerAnchor(cursor);
+  }, [cursor, liveCuaPreview]);
+
+  useEffect(() => {
+    const shouldClearPreview =
+      !active ||
+      state !== 'composing' ||
+      settings?.cuaMode === 'off' ||
+      detached ||
+      selecting ||
+      Boolean(selectionDrag) ||
+      Boolean(selection) ||
+      settingsOpen ||
+      historyOpen ||
+      menuOpen ||
+      captureActivity.active;
+
+    if (shouldClearPreview) {
+      if (selectedCuaEntities.length === 0) {
+        setCuaEntities([]);
+        setHoveredCuaEntityId(null);
+        setCuaPickerLocked(false);
+        setCuaPickerPosition(null);
+        setCuaPickerResizeDrag(null);
+      }
       return;
     }
-    // Traverse the current window's actionable accessibility tree immediately
-    // after activation, then refresh on a modest cadence so dynamic pages keep
-    // their CUA context current without hammering the driver.
-    const INITIAL_GROUNDING_DELAY_MS = 80;
-    const GROUNDING_REFRESH_MS = 1800;
+    if (!liveCuaPreview) return;
+
+    // Keep the CUA tree fresh while the user is moving the pointer in
+    // discovery mode. The picker itself is derived from the latest tree and the
+    // current cursor, so it follows the pointer without making every mousemove
+    // block on a native accessibility traversal.
     let cancelled = false;
     let inFlight = false;
+    let lastRequestedCursor: CursorPayload | null = null;
+    let lastCompletedAt = 0;
     const requestSeq = ++groundingRequestSeqRef.current;
-    const refreshGrounding = () => {
-      if (cancelled || inFlight) return;
+    const minCursorDeltaSquared = CUA_GROUNDING_MIN_CURSOR_DELTA * CUA_GROUNDING_MIN_CURSOR_DELTA;
+
+    const shouldRequestGrounding = (force = false) => {
+      if (force || !lastRequestedCursor) return true;
+      const now = Date.now();
+      const current = cursorRef.current;
+      return cursorDistanceSquared(current, lastRequestedCursor) >= minCursorDeltaSquared || now - lastCompletedAt >= CUA_GROUNDING_STALE_MS;
+    };
+
+    const refreshGrounding = (force = false) => {
+      if (cancelled || inFlight || !shouldRequestGrounding(force)) return;
+      const requestCursor = cursorRef.current;
+      lastRequestedCursor = requestCursor;
       inFlight = true;
       void window.openMagicPointer
-        .requestGrounding({ cursor: cursorRef.current })
+        .requestGrounding({ cursor: requestCursor })
         .then((preview) => {
           if (cancelled || groundingRequestSeqRef.current !== requestSeq) return;
           setCuaEntities(preview.entities);
-          setHoveredCuaEntityId(selectedCuaEntityId ?? preview.hoveredEntityId ?? null);
+          setHoveredCuaEntityId(cursorDistanceSquared(cursorRef.current, requestCursor) < minCursorDeltaSquared ? (preview.hoveredEntityId ?? null) : null);
+          lastCompletedAt = Date.now();
         })
         .catch(() => {
           if (cancelled || groundingRequestSeqRef.current !== requestSeq) return;
           setCuaEntities([]);
           setHoveredCuaEntityId(null);
+          lastCompletedAt = Date.now();
         })
         .finally(() => {
           inFlight = false;
+          if (!cancelled && cursorDistanceSquared(cursorRef.current, requestCursor) >= minCursorDeltaSquared) {
+            refreshGrounding();
+          }
         });
     };
-    const timer = window.setTimeout(refreshGrounding, INITIAL_GROUNDING_DELAY_MS);
-    const interval = window.setInterval(refreshGrounding, GROUNDING_REFRESH_MS);
+
+    const timer = window.setTimeout(() => refreshGrounding(true), CUA_GROUNDING_INITIAL_DELAY_MS);
+    const interval = window.setInterval(() => refreshGrounding(false), CUA_GROUNDING_REFRESH_MS);
     return () => {
       cancelled = true;
       groundingRequestSeqRef.current += 1;
       window.clearTimeout(timer);
       window.clearInterval(interval);
     };
-  }, [active, state, selecting, selectionDrag, settings?.cuaMode, settingsOpen, historyOpen, menuOpen, selection, selectedCuaEntityId]);
+  }, [
+    active,
+    captureActivity.active,
+    detached,
+    historyOpen,
+    liveCuaPreview,
+    menuOpen,
+    selectedCuaEntities.length,
+    selecting,
+    selection,
+    selectionDrag,
+    settings?.cuaMode,
+    settingsOpen,
+    state
+  ]);
 
   // Track submit-time screenshot capture so the pointer can tint while it runs.
   useEffect(() => {
@@ -729,7 +866,7 @@ export function App() {
     [cursor.localX, cursor.localY, pillWidth, pillHeight, hasPanel]
   );
   const effectiveShellPos = detachedPos ?? shellPosition;
-  const shouldUseLagFollow = active && !detachedPos && !pillDrag && !panelResizeDrag && !selecting && !selectionDrag;
+  const shouldUseLagFollow = active && !detachedPos && !pillDrag && !panelResizeDrag && !cuaPickerResizeDrag && !selecting && !selectionDrag;
   const transcript = useMemo(
     () =>
       events
@@ -791,6 +928,29 @@ export function App() {
     };
   }, [panelResizeDrag]);
 
+  useEffect(() => {
+    if (!cuaPickerResizeDrag) return;
+    const activeDrag = cuaPickerResizeDrag;
+    function onMouseMove(event: MouseEvent) {
+      const maxWidth = Math.max(CUA_PICKER_MIN_WIDTH, window.innerWidth - 24);
+      const maxHeight = Math.max(CUA_PICKER_MIN_HEIGHT, window.innerHeight - 24);
+      setCuaPickerSize({
+        width: clampNumber(activeDrag.startWidth + event.clientX - activeDrag.startX, CUA_PICKER_MIN_WIDTH, maxWidth, DEFAULT_CUA_PICKER_SIZE.width),
+        height: clampNumber(activeDrag.startHeight + event.clientY - activeDrag.startY, CUA_PICKER_MIN_HEIGHT, maxHeight, DEFAULT_CUA_PICKER_SIZE.height)
+      });
+    }
+    function onMouseUp() {
+      setCuaPickerResizeDrag(null);
+      window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+    }
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [cuaPickerResizeDrag]);
+
   const streamPanelStyle = useMemo<CSSProperties>(() => {
     // Cap the panel to the space actually left below the pill so it scrolls
     // internally instead of being clipped by the screen's bottom edge.
@@ -814,13 +974,27 @@ export function App() {
     });
   }
 
+  function onCuaPickerResizeMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    const layout = computeCuaPickerLayout();
+    setCuaPickerLocked(true);
+    setCuaPickerPosition({ left: layout.left, top: layout.top });
+    setCuaPickerResizeDrag({
+      startX: event.clientX,
+      startY: event.clientY,
+      startWidth: layout.width,
+      startHeight: layout.height
+    });
+  }
+
   async function submit(mode: 'text' | 'voice' = 'text', overrideText = prompt) {
     const text = overrideText.trim();
-    const selectedEntity = selectedCuaEntity ?? (selectedCuaEntityId ? cuaEntities.find((entity) => entity.id === selectedCuaEntityId) : undefined);
+    const submittedCuaEntities = selectedCuaEntities;
+    const selectedEntity = submittedCuaEntities[0];
     const hasSelectionContext = Boolean(selection);
     const cuaEnabled = settings?.cuaMode !== 'off';
-    const hasCuaContext = Boolean(selectedEntity);
-    const submittedCuaEntities = selectedEntity ? [selectedEntity] : [];
+    const hasCuaContext = submittedCuaEntities.length > 0;
     const instructionText = text || defaultContextInstruction(hasSelectionContext, hasCuaContext);
     if ((!text && !hasSelectionContext && !hasCuaContext) || state === 'submitting') return;
     if (!readiness.configured) {
@@ -849,8 +1023,9 @@ export function App() {
         ]
       : undefined;
     setSelection(null);
-    setSelectedCuaEntityId(null);
-    setSelectedCuaEntity(null);
+    setSelectedCuaEntities([]);
+    setCuaPickerLocked(false);
+    setCuaPickerPosition(null);
     setHoveredCuaEntityId(null);
     setCuaEntities([]);
     // Clear the composer now that the message has been sent, so its text does
@@ -1004,8 +1179,9 @@ export function App() {
     setState('composing');
     setSelection(null);
     setSelectionDrag(null);
-    setSelectedCuaEntityId(null);
-    setSelectedCuaEntity(null);
+    setSelectedCuaEntities([]);
+    setCuaPickerLocked(false);
+    setCuaPickerPosition(null);
     setHoveredCuaEntityId(null);
     setThinkingTime(0);
     setShowTools(false);
@@ -1025,6 +1201,10 @@ export function App() {
       setEvents([]);
       setPrompt('');
       setState('composing');
+      setSelectedCuaEntities([]);
+      setCuaPickerLocked(false);
+      setCuaPickerPosition(null);
+      setHoveredCuaEntityId(null);
       setHistoryOpen(false);
       window.setTimeout(() => focusPromptInput(inputRef.current), 0);
     }
@@ -1063,31 +1243,41 @@ export function App() {
     event.stopPropagation();
     setSelection(null);
     setSelectionDrag(null);
-    setSelectedCuaEntityId(null);
-    setSelectedCuaEntity(null);
+    setSelectedCuaEntities([]);
     window.setTimeout(() => focusPromptInput(inputRef.current), 0);
   }
 
-  function selectCuaEntity(entity: PointerEntity, event: ReactMouseEvent<HTMLDivElement>) {
+  function selectCuaEntity(entity: PointerEntity, event: ReactMouseEvent<HTMLElement>) {
     event.preventDefault();
     event.stopPropagation();
-    setSelectedCuaEntityId(entity.id);
-    setSelectedCuaEntity(entity);
+    const now = Date.now();
+    const last = lastCuaSelectEventRef.current;
+    if (event.type === 'click' && last?.id === entity.id && now - last.at < 300) return;
+    lastCuaSelectEventRef.current = { id: entity.id, at: now, type: event.type };
+    setSelectedCuaEntities((current) =>
+      current.some((selected) => selected.id === entity.id)
+        ? current.filter((selected) => selected.id !== entity.id)
+        : [...current.filter((selected) => selected.id !== entity.id), entity]
+    );
     setHoveredCuaEntityId(entity.id);
     setSelection(null);
     window.setTimeout(() => focusPromptInput(inputRef.current), 0);
   }
 
+  const selectedCuaEntityIds = useMemo(() => new Set(selectedCuaEntities.map((entity) => entity.id)), [selectedCuaEntities]);
+
   const highlightedCuaEntity = useMemo(() => {
-    const id = selectedCuaEntityId ?? hoveredCuaEntityId;
-    return id ? cuaEntities.find((entity) => entity.id === id && entity.bbox) : undefined;
-  }, [cuaEntities, hoveredCuaEntityId, selectedCuaEntityId]);
+    const id = hoveredCuaEntityId ?? selectedCuaEntities[0]?.id;
+    const pool = [...selectedCuaEntities, ...cuaEntities];
+    return id ? pool.find((entity) => entity.id === id && entity.bbox) : undefined;
+  }, [cuaEntities, hoveredCuaEntityId, selectedCuaEntities]);
 
   const selectedEntity = useMemo(() => {
-    return selectedCuaEntity ?? (selectedCuaEntityId ? cuaEntities.find((entity) => entity.id === selectedCuaEntityId) : undefined);
-  }, [cuaEntities, selectedCuaEntity, selectedCuaEntityId]);
+    return selectedCuaEntities[0];
+  }, [selectedCuaEntities]);
 
-  const cuaHighlightRegion = useMemo(() => contextRegionAroundCursor(cursor), [cursor]);
+  const cuaCandidateCursor = liveCuaPreview ? cursor : cuaPickerAnchor;
+  const cuaHighlightRegion = useMemo(() => contextRegionAroundCursor(cuaCandidateCursor), [cuaCandidateCursor]);
   const visibleCuaCandidates = useMemo(
     () =>
       cuaEntities
@@ -1098,11 +1288,101 @@ export function App() {
         .sort((a, b) => {
           const aRect = highlightRectForEntity(a)!;
           const bRect = highlightRectForEntity(b)!;
+          const distanceDelta =
+            distanceToLocalRectSquared(cuaCandidateCursor.localX, cuaCandidateCursor.localY, aRect) -
+            distanceToLocalRectSquared(cuaCandidateCursor.localX, cuaCandidateCursor.localY, bRect);
+          if (distanceDelta !== 0) return distanceDelta;
           return aRect.width * aRect.height - bRect.width * bRect.height;
         })
         .slice(0, MAX_CUA_HIGHLIGHTS),
-    [cuaEntities, cuaHighlightRegion]
+    [cuaCandidateCursor.localX, cuaCandidateCursor.localY, cuaEntities, cuaHighlightRegion]
   );
+
+  const cuaPickerCandidates = useMemo(() => {
+    if (visibleCuaCandidates.length > 0) return visibleCuaCandidates.slice(0, MAX_CUA_PICKER_ITEMS);
+    return cuaEntities.filter((entity) => entity.groundingRef?.provider === 'cua').slice(0, MAX_CUA_PICKER_ITEMS);
+  }, [cuaEntities, visibleCuaCandidates]);
+
+  const highlightedCuaCandidates = useMemo(() => {
+    const byId = new Map<string, PointerEntity>();
+    for (const entity of visibleCuaCandidates) {
+      if (hasPreciseCuaRect(entity)) byId.set(entity.id, entity);
+    }
+    for (const entity of cuaPickerCandidates) {
+      if (hasPreciseCuaRect(entity)) byId.set(entity.id, entity);
+    }
+    for (const entity of selectedCuaEntities) {
+      if (hasPreciseCuaRect(entity)) byId.set(entity.id, entity);
+    }
+    return [...byId.values()];
+  }, [cuaPickerCandidates, selectedCuaEntities, visibleCuaCandidates]);
+
+  const showCuaPicker =
+    active &&
+    state === 'composing' &&
+    settings?.cuaMode !== 'off' &&
+    !detached &&
+    !selecting &&
+    !selectionDrag &&
+    !settingsOpen &&
+    !historyOpen &&
+    !menuOpen &&
+    !selection &&
+    cuaPickerCandidates.length > 0;
+
+  function computeCuaPickerLayout() {
+    const viewportW = window.innerWidth;
+    const viewportH = window.innerHeight;
+    const maxWidth = Math.max(CUA_PICKER_MIN_WIDTH, viewportW - 24);
+    const maxHeight = Math.max(CUA_PICKER_MIN_HEIGHT, viewportH - 24);
+    const width = clampNumber(cuaPickerSize.width, CUA_PICKER_MIN_WIDTH, maxWidth, DEFAULT_CUA_PICKER_SIZE.width);
+    const height = clampNumber(cuaPickerSize.height, CUA_PICKER_MIN_HEIGHT, maxHeight, DEFAULT_CUA_PICKER_SIZE.height);
+
+    if (cuaPickerPosition) {
+      return {
+        left: clampNumber(cuaPickerPosition.left, 12, Math.max(12, viewportW - width - 12), 12),
+        top: clampNumber(cuaPickerPosition.top, 12, Math.max(12, viewportH - height - 12), 12),
+        width,
+        height
+      };
+    }
+
+    const left = clampNumber(cuaPickerAnchor.localX + 18, 12, Math.max(12, viewportW - width - 12), 12);
+    const below = cuaPickerAnchor.localY + 28;
+    const above = cuaPickerAnchor.localY - height - 18;
+    const top = below + height <= viewportH - 12 ? below : clampNumber(above, 12, Math.max(12, viewportH - height - 12), 12);
+    return { left, top, width, height };
+  }
+
+  const cuaPickerLayout = computeCuaPickerLayout();
+  const cuaPickerStyle: CSSProperties = {
+    left: cuaPickerLayout.left,
+    top: cuaPickerLayout.top,
+    width: cuaPickerLayout.width,
+    height: cuaPickerLayout.height,
+    maxHeight: cuaPickerLayout.height
+  };
+
+  useEffect(() => {
+    if (!showCuaPicker || !liveCuaPreview || cuaPickerLocked) return;
+    function onMouseDown(event: MouseEvent) {
+      if (event.button !== 0) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('.cua-picker-resize-handle')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setCuaPickerAnchor(cursorRef.current);
+      setCuaPickerLocked(true);
+      setCuaPickerPosition({
+        left: typeof cuaPickerStyle.left === 'number' ? cuaPickerStyle.left : Number(cuaPickerStyle.left) || 12,
+        top: typeof cuaPickerStyle.top === 'number' ? cuaPickerStyle.top : Number(cuaPickerStyle.top) || 12
+      });
+      setHoveredCuaEntityId(null);
+      window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+    }
+    window.addEventListener('mousedown', onMouseDown, { capture: true });
+    return () => window.removeEventListener('mousedown', onMouseDown, { capture: true });
+  }, [cuaPickerLocked, cuaPickerStyle.left, cuaPickerStyle.top, liveCuaPreview, showCuaPicker]);
 
   // Pointer tint state, by actual timing/priority:
   //   'both'    teal   – submit-time screenshot taken with a selected CUA element
@@ -1129,8 +1409,10 @@ export function App() {
     selecting ||
     Boolean(selection) ||
     Boolean(selectionDrag) ||
+    Boolean(cuaPickerResizeDrag) ||
     Boolean(highlightedCuaEntity) ||
-    visibleCuaCandidates.length > 0;
+    highlightedCuaCandidates.length > 0 ||
+    showCuaPicker;
   const menuStyle = useMemo<CSSProperties>(() => {
     const width = 220;
     const estimatedHeight = 232;
@@ -1185,10 +1467,10 @@ export function App() {
             </defs>
           </svg>
 
-          {visibleCuaCandidates.map((entity) => {
+          {highlightedCuaCandidates.map((entity) => {
             const rect = highlightRectForEntity(entity);
             if (!rect) return null;
-            const isSelected = selectedCuaEntityId === entity.id;
+            const isSelected = selectedCuaEntityIds.has(entity.id);
             const isHovered = hoveredCuaEntityId === entity.id;
             return (
               <div
@@ -1202,13 +1484,14 @@ export function App() {
                 }}
                 title={entity.text ?? entity.name ?? entity.role ?? 'CUA element'}
                 onMouseEnter={() => setHoveredCuaEntityId(entity.id)}
-                onMouseLeave={() => setHoveredCuaEntityId(selectedCuaEntityId)}
+                onMouseLeave={() => setHoveredCuaEntityId(null)}
                 onMouseDown={(event) => selectCuaEntity(entity, event)}
+                onClick={(event) => selectCuaEntity(entity, event)}
               />
             );
           })}
 
-          {selectedEntity && !visibleCuaCandidates.some((entity) => entity.id === selectedEntity.id) && highlightRectForEntity(selectedEntity) && (
+          {selectedEntity && !highlightedCuaCandidates.some((entity) => entity.id === selectedEntity.id) && highlightRectForEntity(selectedEntity) && (
             <div
               className="cua-element-highlight cua-element-candidate is-selected"
               style={{
@@ -1219,7 +1502,49 @@ export function App() {
               }}
               title={selectedEntity.text ?? selectedEntity.name ?? selectedEntity.role ?? 'CUA element'}
               onMouseDown={(event) => selectCuaEntity(selectedEntity, event)}
+              onClick={(event) => selectCuaEntity(selectedEntity, event)}
             />
+          )}
+
+          {showCuaPicker && (
+            <div className="cua-picker-panel" style={cuaPickerStyle}>
+              <div className="cua-picker-header">
+                <span>CUA</span>
+                <span>
+                  {selectedCuaEntities.length > 0 ? `${selectedCuaEntities.length} selected / ` : ''}
+                  {cuaEntities.length} elements
+                </span>
+              </div>
+              <div className="cua-picker-list">
+                {cuaPickerCandidates.map((entity) => {
+                  const isSelected = selectedCuaEntityIds.has(entity.id);
+                  const isHovered = hoveredCuaEntityId === entity.id;
+                  const hasRect = hasPreciseCuaRect(entity);
+                  return (
+                    <button
+                      key={entity.id}
+                      type="button"
+                      className={`cua-picker-row${isSelected ? ' is-selected' : ''}${isHovered ? ' is-hovered' : ''}`}
+                      onMouseEnter={() => setHoveredCuaEntityId(entity.id)}
+                      onMouseLeave={() => setHoveredCuaEntityId(null)}
+                      onMouseDown={(event) => selectCuaEntity(entity, event)}
+                      onClick={(event) => selectCuaEntity(entity, event)}
+                      title={entity.text ?? entity.name ?? entity.role ?? entity.kind}
+                    >
+                      <span className="cua-picker-main">
+                        <span className="cua-picker-label">{entityLabel(entity)}</span>
+                        <span className="cua-picker-meta">
+                          {entity.role || entity.kind}
+                          {hasRect ? ' - rect' : ' - ax'}
+                        </span>
+                      </span>
+                      <span className="cua-picker-kind">{entity.kind}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="cua-picker-resize-handle" onMouseDown={onCuaPickerResizeMouseDown} />
+            </div>
           )}
 
           {/* Selection rectangle overlay */}
@@ -1526,7 +1851,7 @@ export function App() {
                   onMouseDown={onPillMouseDown}
                 >
                   {/* Context Attachments Indicators */}
-                  {showFullContext && (selection || selectedEntity) && (
+                  {showFullContext && (selection || selectedCuaEntities.length > 0) && (
                     <div className="flex items-center gap-1.5 shrink-0 select-none">
                       {selection && (
                         <div
@@ -1559,7 +1884,7 @@ export function App() {
                         </div>
                       )}
 
-                      {selectedEntity && (
+                      {selectedCuaEntities.length > 0 && selectedEntity && (
                         <div
                           className="group relative flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-[rgba(229,56,59,0.95)] transition-all duration-150 cursor-pointer animate-elastic-pop font-bold"
                           style={{
@@ -1568,13 +1893,12 @@ export function App() {
                           }}
                           onClick={(e) => {
                             e.stopPropagation();
-                            setSelectedCuaEntityId(null);
-                            setSelectedCuaEntity(null);
+                            setSelectedCuaEntities([]);
                             setHoveredAttachment(null);
                           }}
                           onMouseEnter={() => setHoveredAttachment('entity')}
                           onMouseLeave={() => setHoveredAttachment(null)}
-                          title={`Attached: ${selectedEntity.kind} - ${selectedEntity.name || selectedEntity.text || 'UI Element'} (Click to remove)`}
+                          title={`Attached: ${selectedCuaEntities.length} CUA element${selectedCuaEntities.length === 1 ? '' : 's'} (Click to remove)`}
                         >
                           <span
                             className="group-hover:hidden flex items-center justify-center text-white/90"

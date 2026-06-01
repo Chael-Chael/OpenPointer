@@ -3,7 +3,6 @@ import type { PointerEntity } from '@openmagicpointer/core';
 import {
   displayForRect,
   distanceToRectSquared,
-  isInteractiveEntity,
   isNoiseEntity,
   kindFromControlType,
   normalizeRect,
@@ -115,26 +114,6 @@ describe('isNoiseEntity', () => {
   it('drops empty layout containers and unknowns', () => {
     expect(isNoiseEntity({ ...base, kind: 'container' })).toBe(true);
     expect(isNoiseEntity({ ...base, kind: 'unknown' })).toBe(true);
-  });
-});
-
-describe('isInteractiveEntity', () => {
-  const base = { confidence: 0.9, origin: 'accessibility' as const };
-
-  it('keeps entities with CUA actions', () => {
-    expect(isInteractiveEntity({ ...base, kind: 'unknown', groundingRef: { provider: 'cua', pid: 1, windowId: '2', actions: ['invoke'] } })).toBe(true);
-  });
-
-  it('keeps common interactive control kinds', () => {
-    expect(isInteractiveEntity({ ...base, kind: 'button' })).toBe(true);
-    expect(isInteractiveEntity({ ...base, kind: 'input' })).toBe(true);
-    expect(isInteractiveEntity({ ...base, kind: 'link' })).toBe(true);
-    expect(isInteractiveEntity({ ...base, kind: 'checkbox' })).toBe(true);
-  });
-
-  it('drops static text and containers without actions', () => {
-    expect(isInteractiveEntity({ ...base, kind: 'text' })).toBe(false);
-    expect(isInteractiveEntity({ ...base, kind: 'container' })).toBe(false);
   });
 });
 

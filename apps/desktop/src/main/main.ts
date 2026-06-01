@@ -59,6 +59,7 @@ const hold = {
   active: false,
   completed: false,
   start: null as CursorPayload | null,
+  startedWhileActive: false,
   startedAt: 0,
   timer: null as NodeJS.Timeout | null,
   progressTimer: null as NodeJS.Timeout | null
@@ -317,6 +318,7 @@ function startGlobalLongPress(): void {
       hold.active = true;
       hold.completed = false;
       hold.start = cursor;
+      hold.startedWhileActive = active;
       hold.startedAt = Date.now();
       hold.timer = setTimeout(() => completeHold(), HOLD_MS);
       hold.progressTimer = setInterval(() => {
@@ -324,7 +326,7 @@ function startGlobalLongPress(): void {
         const elapsed = Date.now() - hold.startedAt;
         if (elapsed < HOLD_RING_DELAY_MS) return;
         const progress = Math.min(1, (elapsed - HOLD_RING_DELAY_MS) / (HOLD_MS - HOLD_RING_DELAY_MS));
-        broadcastHold({ cursor: hold.start, progress, state: 'holding' });
+        broadcastHold({ cursor: hold.start, progress, state: 'holding', startedWhileActive: hold.startedWhileActive });
       }, 32);
     });
 
@@ -349,17 +351,19 @@ function completeHold(): void {
   if (!hold.active || !hold.start) return;
   hold.completed = true;
   clearHoldTimers();
-  broadcastHold({ cursor: hold.start, progress: 1, state: 'completed' });
+  broadcastHold({ cursor: hold.start, progress: 1, state: 'completed', startedWhileActive: hold.startedWhileActive });
   activate(hold.start);
   hold.active = false;
+  hold.startedWhileActive = false;
 }
 
 function cancelHold(): void {
   if (!hold.active || !hold.start) return;
-  broadcastHold({ cursor: hold.start, progress: 0, state: 'canceled' });
+  broadcastHold({ cursor: hold.start, progress: 0, state: 'canceled', startedWhileActive: hold.startedWhileActive });
   hold.active = false;
   hold.completed = false;
   hold.start = null;
+  hold.startedWhileActive = false;
   clearHoldTimers();
 }
 
