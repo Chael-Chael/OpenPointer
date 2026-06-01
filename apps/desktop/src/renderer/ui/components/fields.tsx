@@ -16,14 +16,37 @@ export function HoldRing({ cursor, progress }: { cursor: CursorPayload; progress
 }
 
 export function ToolRows({ events }: { events: Array<Extract<AgentEvent, { type: 'tool.started' | 'tool.completed' }>> }) {
+  if (!events || events.length === 0) return null;
   return (
-    <div className="tool-rows">
-      {events.map((event, index) => (
-        <div key={`${event.type}-${index}`}>
-          <span>{event.type === 'tool.started' ? 'Using' : 'Finished'}</span>
-          <strong>{event.name}</strong>
-        </div>
-      ))}
+    <div className="flex flex-col gap-1.5 mt-2 w-full select-none">
+      {events.map((event, index) => {
+        const isRunning = event.type === 'tool.started';
+        return (
+          <div
+            key={`${event.type}-${index}`}
+            className="flex items-center gap-2 rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] transition-all duration-150 animate-fade-in"
+          >
+            {/* 状态图示 */}
+            <span className="relative inline-flex h-3 w-3 shrink-0 items-center justify-center">
+              {isRunning ? (
+                <span className="h-2.5 w-2.5 animate-spin rounded-full border-[1.2px] border-white/60 border-t-transparent" />
+              ) : (
+                <svg viewBox="0 0 12 12" className="h-2.5 w-2.5 text-emerald-400" fill="none">
+                  <path d="M2.5 6.5l2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </span>
+            {/* 工具名称 */}
+            <span className="font-semibold text-white/95 truncate">
+              {event.name}
+            </span>
+            {/* 状态右文本 */}
+            <span className="text-[9px] text-white/55 font-bold ml-auto uppercase tracking-wider">
+              {isRunning ? 'Running' : 'Done'}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

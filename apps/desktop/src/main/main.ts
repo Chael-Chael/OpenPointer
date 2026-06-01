@@ -2,6 +2,7 @@ import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen } 
 import { activeWindow } from 'get-windows';
 import { uIOhook } from 'uiohook-napi';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import {
@@ -26,6 +27,13 @@ import { ChatHistoryManager } from './history.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '../../../..');
 loadLocalEnv(repoRoot);
+
+if (!app.isPackaged) {
+  const devCachePath = join(tmpdir(), 'openmagicpointer', 'chromium-cache', String(process.pid));
+  mkdirSync(devCachePath, { recursive: true });
+  app.setPath('sessionData', devCachePath);
+  app.commandLine.appendSwitch('disk-cache-dir', devCachePath);
+}
 
 const windows = new Map<number, BrowserWindow>();
 const overlayInteractive = new Map<number, boolean>();
@@ -575,9 +583,17 @@ async function streamBridgeEvents(
   let sawTerminal = false;
   let fullAnswer = '';
 
+  const startTime = Date.now();
+  const toolEvents: Array<Extract<AgentEvent, { type: 'tool.started' | 'tool.completed' }>> = [];
+  const events: AgentEvent[] = [];
+
   const forward = (agentEvent: AgentEvent) => {
     sender.send(OMP_CHANNELS.AgentEvent, agentEvent);
     if (agentEvent.type === 'run.completed' || agentEvent.type === 'run.failed') sawTerminal = true;
+    if (agentEvent.type === 'tool.started' || agentEvent.type === 'tool.completed') {
+      toolEvents.push(agentEvent);
+    }
+    events.push(agentEvent);
   };
 
   for await (const agentEvent of bridge.run(envelope, { signal: controller.signal, sessionKey: sessionKeyForContext(envelope.pointerContext) })) {
@@ -601,12 +617,17 @@ async function streamBridgeEvents(
   // closed without a terminal (run.completed / run.failed) event.
   if (!sawTerminal) forward({ type: 'run.completed', text: fullAnswer || undefined });
 
+  const thinkingTime = Math.round((Date.now() - startTime) / 1000);
+
   if (envelope.conversationId && fullAnswer) {
     await chatHistory.appendTurn(envelope.conversationId, {
       id: `turn-${Date.now()}-assistant`,
       role: 'assistant',
       text: fullAnswer,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      thinkingTime: thinkingTime > 0 ? thinkingTime : undefined,
+      toolEvents: toolEvents.length > 0 ? toolEvents : undefined,
+      events: events.length > 0 ? events : undefined
     });
   }
 }

@@ -164,6 +164,9 @@ export type ChatTurn = {
   text: string;
   pointerContext?: PointerContext;
   timestamp: number;
+  thinkingTime?: number;
+  toolEvents?: Array<Extract<AgentEvent, { type: 'tool.started' | 'tool.completed' }>>;
+  events?: AgentEvent[];
 };
 
 export type Conversation = {

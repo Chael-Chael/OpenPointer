@@ -217,6 +217,217 @@ function PointerContextPreview({ context }: { context: PointerContext }) {
   );
 }
 
+function HistoryThinkingBlock({ thinkingTime, toolEvents }: { thinkingTime?: number; toolEvents?: any[] }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!thinkingTime || thinkingTime <= 0) return null;
+
+  return (
+    <div className="my-2 flex flex-col items-start w-full select-none">
+      <div
+        className={`inline-flex items-center gap-1.5 cursor-pointer text-[11px] font-semibold text-white/55 py-1 px-2 rounded-[var(--radius-pill)] bg-white/5 hover:bg-white/10 hover:text-white transition-all duration-150${expanded ? ' [&>.arrow]:rotate-90 text-white/80' : ''}`}
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 shrink-0 opacity-60" />
+        <span>思考过程 · {thinkingTime}s</span>
+        {toolEvents && toolEvents.length > 0 && (
+          <span className="text-[10px] text-white/40 ml-1">({toolEvents.length} 个工具)</span>
+        )}
+        <span className="arrow inline-block text-[7px] rotate-0 transition-transform duration-150 leading-none">▶</span>
+      </div>
+      {expanded && toolEvents && toolEvents.length > 0 && (
+        <div className="mt-1.5 pl-3 border-l border-white/10 w-full animate-fade-in">
+          <ToolRows events={toolEvents} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+export type DialogueBlock =
+  | { type: 'text'; text: string }
+  | { type: 'reasoning'; text: string; isRunning: boolean }
+  | { type: 'tool'; name: string; startedEvent: Extract<AgentEvent, { type: 'tool.started' }>; completedEvent?: Extract<AgentEvent, { type: 'tool.completed' }> }
+  | { type: 'discovery'; message: string };
+
+export function parseTextToBlocks(fullText: string): DialogueBlock[] {
+  const blocks: DialogueBlock[] = [];
+  let tempText = fullText;
+
+  while (tempText.length > 0) {
+    const thinkStartIdx = tempText.indexOf('<think>');
+    if (thinkStartIdx === -1) {
+      blocks.push({ type: 'text', text: tempText });
+      break;
+    }
+
+    if (thinkStartIdx > 0) {
+      blocks.push({ type: 'text', text: tempText.slice(0, thinkStartIdx) });
+    }
+
+    const thinkEndIdx = tempText.indexOf('</think>', thinkStartIdx + 7);
+    if (thinkEndIdx === -1) {
+      // Thinking tag is open (still streaming)
+      blocks.push({ type: 'reasoning', text: tempText.slice(thinkStartIdx + 7), isRunning: true });
+      break;
+    }
+
+    blocks.push({ type: 'reasoning', text: tempText.slice(thinkStartIdx + 7, thinkEndIdx), isRunning: false });
+    tempText = tempText.slice(thinkEndIdx + 8);
+  }
+
+  return blocks;
+}
+
+export function groupEventsToBlocks(events: AgentEvent[]): DialogueBlock[] {
+  const blocks: DialogueBlock[] = [];
+  const activeToolBlocks = new Map<string, number>();
+  let accumulatedText = '';
+
+  const flushText = () => {
+    if (accumulatedText.length > 0) {
+      blocks.push(...parseTextToBlocks(accumulatedText));
+      accumulatedText = '';
+    }
+  };
+
+  for (const event of events) {
+    if (event.type === 'assistant.delta') {
+      accumulatedText += event.text;
+    } else {
+      flushText(); // Ensure text before a tool call is fully parsed
+
+      if (event.type === 'tool.started') {
+        const blockIndex = blocks.length;
+        blocks.push({
+          type: 'tool',
+          name: event.name,
+          startedEvent: event
+        });
+        activeToolBlocks.set(event.name, blockIndex);
+      } else if (event.type === 'tool.completed') {
+        const blockIndex = activeToolBlocks.get(event.name);
+        if (blockIndex !== undefined) {
+          const block = blocks[blockIndex];
+          if (block && block.type === 'tool') {
+            block.completedEvent = event;
+          }
+          activeToolBlocks.delete(event.name);
+        } else {
+          // Fallback
+          for (let i = blocks.length - 1; i >= 0; i--) {
+            const block = blocks[i];
+            if (block && block.type === 'tool' && block.name === event.name && !block.completedEvent) {
+              block.completedEvent = event;
+              break;
+            }
+          }
+        }
+      } else if (event.type === 'tool.discovery') {
+        blocks.push({
+          type: 'discovery',
+          message: event.message
+        });
+      }
+    }
+  }
+
+  flushText(); // Flush leftover text
+
+  return blocks;
+}
+
+function DialogueReasoningBlock({ text, isRunning }: { text: string; isRunning: boolean }) {
+  const [expanded, setExpanded] = useState(true);
+
+  return (
+    <div className="flex flex-col w-full rounded-[var(--radius-pill)] border border-white/10 bg-white/5 overflow-hidden animate-fade-in select-none my-1">
+      {/* Header Bar */}
+      <div
+        className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/5 transition-all duration-150"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <span className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-md bg-cyan-500/20 text-cyan-400">
+          {isRunning ? (
+            <span className="h-2.5 w-2.5 animate-spin rounded-full border-[1.2px] border-cyan-400 border-t-transparent" />
+          ) : (
+            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1 0-3.12 3 3 0 0 1 0-4.88 2.5 2.5 0 0 1 0-3.12A2.5 2.5 0 0 1 9.5 2Z" />
+              <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 0-3.12 3 3 0 0 0 0-4.88 2.5 2.5 0 0 0 0-3.12A2.5 2.5 0 0 0 14.5 2Z" />
+            </svg>
+          )}
+        </span>
+        <span className="text-[11.5px] font-semibold text-white/80">思考过程</span>
+        {isRunning && (
+          <span className="text-[9px] font-bold text-cyan-400 animate-pulse ml-auto uppercase tracking-wider">Thinking</span>
+        )}
+        <span className={`arrow text-[8px] text-white/40 transition-transform duration-150 leading-none ml-auto ${expanded ? 'rotate-90' : 'rotate-0'}`}>▶</span>
+      </div>
+
+      {/* Content Area */}
+      {expanded && (
+        <div className="px-3 pb-3 pt-1 border-t border-white/5 max-h-[220px] overflow-y-auto pr-1 scrollbar-thin text-xs text-white/55 leading-relaxed break-words font-sans select-text selection:bg-white/10">
+          <MarkdownRenderer value={text} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DialogueBlocksRenderer({ blocks }: { blocks: DialogueBlock[] }) {
+  if (!blocks || blocks.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-3 w-full">
+      {blocks.map((block, idx) => {
+        if (block.type === 'text') {
+          return (
+            <article key={idx} className="agent-text text-sm markdown-body w-full animate-fade-in">
+              <MarkdownRenderer value={block.text} />
+            </article>
+          );
+        } else if (block.type === 'reasoning') {
+          return (
+            <DialogueReasoningBlock key={idx} text={block.text} isRunning={block.isRunning} />
+          );
+        } else if (block.type === 'tool') {
+          const isRunning = !block.completedEvent;
+          return (
+            <div
+              key={idx}
+              className="flex items-center gap-2 rounded-[var(--radius-pill)] border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] transition-all duration-150 animate-fade-in select-none w-full"
+            >
+              {/* 状态图示 */}
+              <span className="relative inline-flex h-3 w-3 shrink-0 items-center justify-center">
+                {isRunning ? (
+                  <span className="h-2.5 w-2.5 animate-spin rounded-full border-[1.2px] border-white/60 border-t-transparent" />
+                ) : (
+                  <svg viewBox="0 0 12 12" className="h-2.5 w-2.5 text-emerald-400" fill="none">
+                    <path d="M2.5 6.5l2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </span>
+              {/* 工具名称 */}
+              <span className="font-semibold text-white/95 truncate">
+                {block.name}
+              </span>
+              {/* 状态右文本 */}
+              <span className="text-[9px] text-white/55 font-bold ml-auto uppercase tracking-wider">
+                {isRunning ? 'Running' : 'Done'}
+              </span>
+            </div>
+          );
+        } else if (block.type === 'discovery') {
+          return (
+            <p key={idx} className="tool-discovery text-white/60 text-[13px] leading-relaxed animate-fade-in">
+              {block.message}
+            </p>
+          );
+        }
+        return null;
+      })}
+    </div>
+  );
+}
+
 export function App() {
   const [cursor, setCursor] = useState<CursorPayload>(initialCursor);
   const [hold, setHold] = useState<HoldProgressPayload | null>(null);
@@ -275,6 +486,9 @@ export function App() {
   const thinkingStartRef = useRef<number>(0);
   const streamPanelRef = useRef<HTMLDivElement | null>(null);
   const streamPanelStickToBottomRef = useRef(true);
+  // During assistant streaming, keep the top of the new answer stable instead
+  // of continuously pushing it out of view as more tokens arrive.
+  const streamPanelStreamingResponseRef = useRef(false);
   const groundingRequestSeqRef = useRef(0);
   const windowRequestSeqRef = useRef(0);
   const lastCuaSelectEventRef = useRef<{ id: string; at: number; type: string } | null>(null);
@@ -284,6 +498,12 @@ export function App() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [conversationsList, setConversationsList] = useState<import('@openmagicpointer/core').Conversation[]>([]);
   const [pillDrag, setPillDrag] = useState<{ startX: number; startY: number; initialPos: { x: number; y: number } } | null>(null);
+  const [pillWidthDrag, setPillWidthDrag] = useState<{
+    side: 'left' | 'right';
+    startX: number;
+    startWidth: number;
+    startXPos: number;
+  } | null>(null);
   const [windowPreview, setWindowPreview] = useState<WindowPreviewResponse | null>(null);
   const [settledApprovalIds, setSettledApprovalIds] = useState<Set<string>>(() => new Set());
 
@@ -446,6 +666,14 @@ export function App() {
       }
     });
     const offEvent = window.openMagicPointer.onAgentEvent((event) => {
+      if (event.type === 'run.started') {
+        streamPanelStreamingResponseRef.current = false;
+        streamPanelStickToBottomRef.current = true;
+      }
+      if (event.type === 'assistant.delta') {
+        streamPanelStreamingResponseRef.current = true;
+        streamPanelStickToBottomRef.current = false;
+      }
       setEvents((prev) => [...prev, event].slice(-80));
       if (event.type === 'run.started' || event.type === 'assistant.delta' || event.type === 'tool.started' || event.type === 'tool.completed')
         setState('streaming');
@@ -722,6 +950,48 @@ export function App() {
     };
   }, [pillDrag, pillWidth, pillHeight, showFullContext, panelHeight]);
 
+  useEffect(() => {
+    if (!pillWidthDrag) return;
+    const activeDrag = pillWidthDrag;
+    function onMouseMove(event: MouseEvent) {
+      const dx = event.clientX - activeDrag.startX;
+      if (activeDrag.side === 'right') {
+        const nextWidth = clampNumber(activeDrag.startWidth + dx, 280, 900, 520);
+        updateSettings({ pillWidth: nextWidth });
+      } else {
+        const rawWidth = activeDrag.startWidth - dx;
+        const nextWidth = clampNumber(rawWidth, 280, 900, 520);
+        const actualDx = activeDrag.startWidth - nextWidth;
+        const nextX = activeDrag.startXPos + actualDx;
+
+        setDetachedPos((prev) =>
+          prev
+            ? {
+                ...prev,
+                x: Math.min(Math.max(12, nextX), Math.max(12, window.innerWidth - nextWidth - 12))
+              }
+            : prev
+        );
+        updateSettings({ pillWidth: nextWidth });
+      }
+    }
+    function onMouseUp() {
+      setPillWidthDrag(null);
+      if (settings) {
+        void window.openMagicPointer.saveSettings({
+          ...settings,
+          pillWidth
+        });
+      }
+    }
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [pillWidthDrag, settings, pillWidth]);
+
   // Keep the detached pill pulled up if the conversation panel is open,
   // preventing it from extending off the bottom of the screen.
   useEffect(() => {
@@ -942,6 +1212,7 @@ export function App() {
         .join(''),
     [events]
   );
+  const activeBlocks = useMemo(() => groupEventsToBlocks(events), [events]);
   const readiness = useMemo(() => backendReadiness(settings, backend), [backend, settings]);
   const draftAwareSettings = useMemo(
     () =>
@@ -973,13 +1244,17 @@ export function App() {
 
   useEffect(() => {
     const panel = streamPanelRef.current;
-    if (!panel || !streamPanelStickToBottomRef.current) return;
+    if (!panel || streamPanelStreamingResponseRef.current || !streamPanelStickToBottomRef.current) return;
     panel.scrollTop = panel.scrollHeight;
   }, [transcript, events.length, historyTurns.length, state, showTools]);
 
   function onStreamPanelScroll(event: ReactUIEvent<HTMLDivElement>) {
     const panel = event.currentTarget;
     const distanceFromBottom = panel.scrollHeight - panel.scrollTop - panel.clientHeight;
+    if (streamPanelStreamingResponseRef.current) {
+      streamPanelStickToBottomRef.current = false;
+      return;
+    }
     streamPanelStickToBottomRef.current = distanceFromBottom < 24;
   }
 
@@ -988,7 +1263,8 @@ export function App() {
     const activeDrag = panelResizeDrag;
     function onMouseMove(event: MouseEvent) {
       const dy = event.clientY - activeDrag.startY;
-      const nextHeight = Math.max(120, Math.min(800, activeDrag.startHeight + dy));
+      const maxH = availablePanelHeight(effectiveShellPos.y, pillHeight);
+      const nextHeight = Math.max(120, Math.min(maxH, activeDrag.startHeight + dy));
       setPanelHeight(nextHeight);
     }
     function onMouseUp() {
@@ -1000,7 +1276,7 @@ export function App() {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
-  }, [panelResizeDrag]);
+  }, [panelResizeDrag, effectiveShellPos.y, pillHeight]);
 
   useEffect(() => {
     if (!cuaPickerResizeDrag) return;
@@ -1082,6 +1358,8 @@ export function App() {
       setState('failed');
       return;
     }
+    streamPanelStreamingResponseRef.current = false;
+    streamPanelStickToBottomRef.current = true;
     setEvents([]);
     setState('submitting');
     setMenuOpen(false);
@@ -1251,6 +1529,18 @@ export function App() {
     });
   }
 
+  function onPillWidthResizeMouseDown(event: ReactMouseEvent<HTMLDivElement>, side: 'left' | 'right') {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!detachedPos) return;
+    setPillWidthDrag({
+      side,
+      startX: event.clientX,
+      startWidth: pillWidth,
+      startXPos: detachedPos.x
+    });
+  }
+
   function startNewConversation() {
     conversationRestoreEpochRef.current += 1;
     newConversationRequestedRef.current = true;
@@ -1266,6 +1556,8 @@ export function App() {
     setConversationId(null);
     setHistoryTurns([]);
     setEvents([]);
+    streamPanelStreamingResponseRef.current = false;
+    streamPanelStickToBottomRef.current = true;
     setPrompt('');
     setState('composing');
     setSelection(null);
@@ -1694,6 +1986,35 @@ export function App() {
                 } as CSSProperties
               }
             >
+              {detached && (
+                <>
+                  <div
+                    className="absolute top-0 z-50 cursor-ew-resize select-none flex items-center justify-center group"
+                    style={{
+                      height: `${pillHeight}px`,
+                      width: '14px',
+                      left: '-7px'
+                    }}
+                    onMouseDown={(e) => onPillWidthResizeMouseDown(e, 'left')}
+                    title="拖动调整宽度"
+                  >
+                    <div className="w-1 h-1/2 bg-white/0 group-hover:bg-white/40 rounded-full transition-colors duration-150" />
+                  </div>
+                  <div
+                    className="absolute top-0 right-0 z-50 cursor-ew-resize select-none flex items-center justify-center group"
+                    style={{
+                      height: `${pillHeight}px`,
+                      width: '14px',
+                      right: '-7px'
+                    }}
+                    onMouseDown={(e) => onPillWidthResizeMouseDown(e, 'right')}
+                    title="拖动调整宽度"
+                  >
+                    <div className="w-1 h-1/2 bg-white/0 group-hover:bg-white/40 rounded-full transition-colors duration-150" />
+                  </div>
+                </>
+              )}
+
               {/* Context attachment preview card */}
               {hoveredAttachment === 'window' && windowPreview?.window && (
                 <div
@@ -2138,9 +2459,17 @@ export function App() {
                               </div>
                             );
                           } else {
+                            if (turn.events && turn.events.length > 0) {
+                              return (
+                                <div key={turn.id} className="flex flex-col w-full items-start">
+                                  <DialogueBlocksRenderer blocks={groupEventsToBlocks(turn.events)} />
+                                </div>
+                              );
+                            }
                             return (
                               <div key={turn.id} className="flex flex-col w-full items-start">
-                                <article className="agent-text text-sm markdown-body">
+                                <HistoryThinkingBlock thinkingTime={turn.thinkingTime} toolEvents={turn.toolEvents} />
+                                <article className="agent-text text-sm markdown-body w-full">
                                   <MarkdownRenderer value={turn.text} />
                                 </article>
                               </div>
@@ -2151,57 +2480,55 @@ export function App() {
                         {/* Active turn streaming/thinking */}
                         {((historyTurns.length === 0 && (state === 'submitting' || state === 'streaming' || state === 'approval')) ||
                           (historyTurns.length > 0 && historyTurns[historyTurns.length - 1]?.role === 'user')) && (
-                          <div className="flex flex-col w-full items-start">
-                            {/* Thinking Block */}
-                            {thinkingTime > 0 && (
-                              <div className="my-2.5 flex flex-col items-start w-full">
-                                <div
-                                  className={`inline-flex items-center gap-1.5 cursor-pointer select-none text-xs font-semibold text-white/60 py-1 px-2 rounded-[var(--radius-pill)] bg-white/5 hover:bg-white/10 hover:text-white transition-all duration-150${showTools ? ' [&>.arrow]:rotate-90' : ''}`}
-                                  onClick={() => setShowTools(!showTools)}
-                                >
-                                  <span>已思考 {thinkingTime}s</span>
-                                  <span className="arrow inline-block text-[8px] rotate-0 transition-transform duration-150 leading-none">▶</span>
-                                </div>
-                                {showTools && (
-                                  <div className="mt-1.5 pl-3 border-l-2 border-white/10 w-full">
-                                    {discovery && <p className="tool-discovery mt-2.5 text-white/60 text-[13px] leading-relaxed">{discovery.message}</p>}
-                                    {toolEvents.length > 0 && <ToolRows events={toolEvents} />}
-                                  </div>
-                                )}
+                          <div className="flex flex-col w-full items-start gap-3">
+                            {/* Typing Dots when submitting and no events are present yet */}
+                            {state === 'submitting' && activeBlocks.length === 0 && (
+                              <div className="flex items-center gap-1 py-2 pl-1 select-none animate-fade-in">
+                                <span className="block h-1.5 w-1.5 rounded-full bg-white/40 animate-pulse-scale" style={{ animationDelay: '0ms' }} />
+                                <span className="block h-1.5 w-1.5 rounded-full bg-white/40 animate-pulse-scale" style={{ animationDelay: '150ms' }} />
+                                <span className="block h-1.5 w-1.5 rounded-full bg-white/40 animate-pulse-scale" style={{ animationDelay: '300ms' }} />
                               </div>
                             )}
 
-                            {/* Streaming Markdown Response */}
-                            {transcript && (
-                              <article className="agent-text text-sm markdown-body">
-                                <MarkdownRenderer value={transcript} />
-                              </article>
-                            )}
+                            {/* Render interspersed blocks directly in conversation flow! */}
+                            <DialogueBlocksRenderer blocks={activeBlocks} />
 
                             {/* Other active states */}
                             {activeApproval && (
-                              <div className="approval-box mt-3 border border-[rgba(255,255,255,0.15)] rounded-[var(--radius-pill)] bg-white/5 p-3">
-                                <strong className="text-white text-[13px]">{activeApproval.tool ?? 'Agent'} requests approval</strong>
-                                <p className="mt-2.5 text-[13px] leading-relaxed text-white/80">{activeApproval.reason}</p>
-                                <div className="flex gap-2 mt-2.5">
-                                  <button
-                                    className="approval-button bg-white/15 text-white hover:bg-white/25 rounded-[var(--radius-pill)] px-3 py-1 text-xs font-semibold"
-                                    onClick={() => void decideApproval(activeApproval.id, 'approve')}
-                                  >
-                                    Allow
-                                  </button>
-                                  <button
-                                    className="approval-button bg-white/15 text-white hover:bg-white/25 rounded-[var(--radius-pill)] px-3 py-1 text-xs font-semibold"
-                                    onClick={() => void decideApproval(activeApproval.id, 'deny')}
-                                  >
-                                    Deny
-                                  </button>
-                                  <button
-                                    className="approval-button bg-white/15 text-white hover:bg-white/25 rounded-[var(--radius-pill)] px-3 py-1 text-xs font-semibold"
-                                    onClick={() => void decideApproval(activeApproval.id, 'always_allow')}
-                                  >
-                                    Always Allow
-                                  </button>
+                              <div className="approval-box mt-3 w-full border border-yellow-500/30 bg-yellow-500/10 rounded-[14px] p-3 flex items-start gap-2.5 shadow-[0_8px_16px_rgba(0,0,0,0.12)] animate-fade-in">
+                                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-yellow-500/20 text-yellow-400 mt-0.5">
+                                  <svg viewBox="0 0 14 14" className="h-3.5 w-3.5" fill="none">
+                                    <path d="M7 1.5c-3 0-5.5 2.5-5.5 5.5S4 12.5 7 12.5s5.5-2.5 5.5-5.5c0-1.4-.5-2.7-1.4-3.7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                                    <path d="M7 5v3M7 10v.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                  </svg>
+                                </span>
+                                <div className="flex-1 min-w-0">
+                                  <strong className="text-white text-[12.5px] font-semibold block leading-snug">
+                                    {activeApproval.tool ?? 'Agent'} <span className="text-white/60 font-normal">请求权限</span>
+                                  </strong>
+                                  <p className="mt-1.5 text-[11.5px] leading-relaxed text-white/70 font-medium line-clamp-3" title={activeApproval.reason}>
+                                    {activeApproval.reason}
+                                  </p>
+                                  <div className="flex items-center gap-1.5 mt-2.5">
+                                    <button
+                                      className="px-2.5 py-1 text-[11px] font-bold rounded-full border border-emerald-400/40 bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25 active:scale-95 transition-all duration-100 cursor-pointer"
+                                      onClick={() => void decideApproval(activeApproval.id, 'approve')}
+                                    >
+                                      允许
+                                    </button>
+                                    <button
+                                      className="px-2.5 py-1 text-[11px] font-bold rounded-full border border-rose-400/40 bg-rose-500/15 text-rose-300 hover:bg-rose-500/25 active:scale-95 transition-all duration-100 cursor-pointer"
+                                      onClick={() => void decideApproval(activeApproval.id, 'deny')}
+                                    >
+                                      拒绝
+                                    </button>
+                                    <button
+                                      className="px-2.5 py-1 text-[11px] font-bold rounded-full border border-white/12 bg-white/8 text-white/80 hover:bg-white/15 active:scale-95 transition-all duration-100 cursor-pointer"
+                                      onClick={() => void decideApproval(activeApproval.id, 'always_allow')}
+                                    >
+                                      总是允许
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             )}
