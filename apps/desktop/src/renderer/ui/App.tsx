@@ -579,6 +579,14 @@ export function App() {
     !cuaPickerLocked &&
     selectedCuaEntities.length === 0;
 
+  const releaseOverlayPointerCapture = useCallback(() => {
+    cuaPickerInteractiveRef.current = false;
+    if (lastInteractiveRef.current) {
+      lastInteractiveRef.current = false;
+      window.openMagicPointer.setInteractive(false);
+    }
+  }, []);
+
   useEffect(() => {
     void window.openMagicPointer.getSettings().then((value) => {
       setSettings(value);
@@ -743,14 +751,16 @@ export function App() {
   }, [conversationId, state]);
   // Dynamic interactive region logic
   useEffect(() => {
-    // We want to force interactive mode if dragging/selecting/detached etc.
+    // Only force full-window capture for modal or drag states. A detached
+    // composer should still pass background clicks through to the screen.
     const forceInteractive =
       active &&
-      (detached ||
-        menuOpen ||
+      (menuOpen ||
         backendDropdownOpen ||
         settingsOpen ||
         historyOpen ||
+        Boolean(pillDrag) ||
+        Boolean(pillWidthDrag) ||
         Boolean(selection) ||
         selecting ||
         Boolean(selectionDrag) ||
@@ -803,11 +813,12 @@ export function App() {
     };
   }, [
     active,
-    detached,
     menuOpen,
     backendDropdownOpen,
     settingsOpen,
     historyOpen,
+    pillDrag,
+    pillWidthDrag,
     selection,
     selecting,
     selectionDrag,
@@ -872,6 +883,7 @@ export function App() {
       toggleEditDialog(payload);
     });
     const offGlobalMouseDown = window.openMagicPointer.onGlobalMouseDown((payload) => {
+      if (!isCursorOnThisOverlay(payload)) return;
       setDetached((d) => {
         if (!d) {
           setCursor(payload);
@@ -880,6 +892,7 @@ export function App() {
           window.setTimeout(() => focusPromptInput(inputRef.current), 0);
           return true;
         }
+        window.setTimeout(() => releaseOverlayPointerCapture(), 0);
         return d;
       });
     });
@@ -891,7 +904,7 @@ export function App() {
       window.removeEventListener('keydown', onKeyDown, { capture: true });
       window.removeEventListener('contextmenu', onContextMenu, { capture: true });
     };
-  }, [isCursorOnThisOverlay, menuOpen, selecting, selectionDrag, detached, pillWidth, pillHeight]);
+  }, [isCursorOnThisOverlay, menuOpen, selecting, selectionDrag, detached, pillWidth, pillHeight, releaseOverlayPointerCapture]);
 
   // Live-update selection rectangle while selecting (cursor comes via IPC)
   useEffect(() => {
@@ -1681,7 +1694,10 @@ export function App() {
     setCuaPickerPosition(null);
     setCuaPickerResizeDrag(null);
     setHoveredCuaEntityId(null);
-    window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+    window.setTimeout(() => {
+      focusPromptInput(inputRef.current);
+      releaseOverlayPointerCapture();
+    }, 0);
   }
 
   function exitCuaSelection(event: ReactMouseEvent<HTMLButtonElement>) {
@@ -1694,7 +1710,10 @@ export function App() {
     setCuaPickerPosition(null);
     setCuaPickerResizeDrag(null);
     setHoveredCuaEntityId(null);
-    window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+    window.setTimeout(() => {
+      focusPromptInput(inputRef.current);
+      releaseOverlayPointerCapture();
+    }, 0);
   }
 
   const draftCuaEntityIds = useMemo(() => new Set(draftCuaEntities.map((entity) => entity.id)), [draftCuaEntities]);
@@ -1851,11 +1870,12 @@ export function App() {
     }
 
     const otherCaptureActive =
-      detached ||
       menuOpen ||
       backendDropdownOpen ||
       settingsOpen ||
       historyOpen ||
+      Boolean(pillDrag) ||
+      Boolean(pillWidthDrag) ||
       Boolean(selection) ||
       selecting ||
       Boolean(selectionDrag) ||
@@ -1883,10 +1903,11 @@ export function App() {
     backendDropdownOpen,
     cuaPickerResizeDrag,
     cursorInsideCuaPicker,
-    detached,
     historyOpen,
     menuOpen,
     panelResizeDrag,
+    pillDrag,
+    pillWidthDrag,
     selecting,
     selection,
     selectionDrag,
@@ -1912,11 +1933,14 @@ export function App() {
   const modalOpen = settingsOpen || historyOpen;
   const shellHiddenForContextCapture = selecting || Boolean(selectionDrag) || captureActivity.active;
   const overlayNeedsPointerEvents =
-    detached ||
     menuOpen ||
+    backendDropdownOpen ||
     modalOpen ||
+    Boolean(pillDrag) ||
+    Boolean(pillWidthDrag) ||
     selecting ||
     Boolean(selection) ||
+    Boolean(panelResizeDrag) ||
     Boolean(selectionDrag) ||
     Boolean(cuaPickerResizeDrag);
   const menuStyle = useMemo<CSSProperties>(() => {
