@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -24,6 +24,7 @@ function tempPermissionStorePath(): string {
 }
 
 afterEach(() => {
+  delete process.env.OMP_CUA_DRIVER_PATH;
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -161,5 +162,67 @@ describe('ClaudeAgentBridge', () => {
       decisionClassification: 'user_permanent'
     });
     await secondIterator.return?.();
+  });
+
+  it('injects the local CUA MCP server when the envelope carries CUA context', async () => {
+    const driverDir = mkdtempSync(join(tmpdir(), 'omp-cua-driver-'));
+    tempDirs.push(driverDir);
+    const driverPath = join(driverDir, process.platform === 'win32' ? 'cua-driver.exe' : 'cua-driver');
+    writeFileSync(driverPath, '');
+    process.env.OMP_CUA_DRIVER_PATH = driverPath;
+
+    let capturedOptions: Record<string, unknown> | undefined;
+    const bridge = new ClaudeAgentBridge({
+      enabled: true,
+      sdk: {
+        async *query(args: unknown) {
+          capturedOptions = (args as { options?: Record<string, unknown> }).options;
+          yield { type: 'result', result: 'done' };
+        }
+      }
+    });
+    const envelope = buildAgentContextEnvelope({ instruction: 'click this button', mode: 'text', context, backend: 'claude-agent' });
+    const events: unknown[] = [];
+    for await (const event of bridge.run(envelope)) events.push(event);
+
+    expect(events.at(-1)).toMatchObject({ type: 'run.completed' });
+    expect(capturedOptions?.allowedTools).toBeUndefined();
+    expect(capturedOptions?.mcpServers).toMatchObject({
+      cua: {
+        type: 'stdio',
+        command: driverPath,
+        args: ['mcp'],
+        alwaysLoad: true
+      }
+    });
+  });
+
+  it('resolves Windows npm Claude wrappers to the real JS CLI for SDK spawning', async () => {
+    const wrapperDir = mkdtempSync(join(tmpdir(), 'omp-claude-wrapper-'));
+    tempDirs.push(wrapperDir);
+    const wrapperPath = join(wrapperDir, process.platform === 'win32' ? 'claude.cmd' : 'claude');
+    const cliPath = join(wrapperDir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+    mkdirSync(join(wrapperDir, 'node_modules', '@anthropic-ai', 'claude-code'), { recursive: true });
+    writeFileSync(wrapperPath, '');
+    writeFileSync(cliPath, '', { flag: 'wx' });
+
+    let capturedOptions: Record<string, unknown> | undefined;
+    const bridge = new ClaudeAgentBridge({
+      enabled: true,
+      executable: wrapperPath,
+      sdk: {
+        async *query(args: unknown) {
+          capturedOptions = (args as { options?: Record<string, unknown> }).options;
+          yield { type: 'result', result: 'done' };
+        }
+      }
+    });
+    const events: unknown[] = [];
+    for await (const event of bridge.run(buildAgentContextEnvelope({ instruction: 'summarize this paper', mode: 'text', context, backend: 'claude-agent' }))) {
+      events.push(event);
+    }
+
+    expect(events.at(-1)).toMatchObject({ type: 'run.completed' });
+    expect(capturedOptions?.pathToClaudeCodeExecutable).toBe(cliPath);
   });
 });

@@ -568,7 +568,6 @@ export function App() {
     active &&
     state === 'composing' &&
     settings?.cuaMode !== 'off' &&
-    !detached &&
     !selecting &&
     !selectionDrag &&
     !selection &&
@@ -639,11 +638,10 @@ export function App() {
       setCuaPickerPosition(null);
       setActive(true);
 
-      // Auto-detach on wake-up and freeze at initial position
-      const width = clampNumber(settings?.pillWidth, 280, 900, 520);
-      const height = clampNumber(settings?.pillHeight, 24, 96, 24);
-      setDetached(true);
-      setDetachedPos(computeShellPosition(payload.localX, payload.localY, width, height, false));
+      // Wake-up is a transparent preview/discovery state. Right-click is the
+      // explicit transition into the focused chat box that captures the screen.
+      setDetached(false);
+      setDetachedPos(null);
 
       // Always start a new conversation on wake-up
       setConversationId(null);
@@ -654,7 +652,6 @@ export function App() {
       });
 
       setState('composing');
-      window.setTimeout(() => focusPromptInput(inputRef.current), 0);
     });
     const offDeactivate = window.openMagicPointer.onDeactivate(() => {
       lastInteractiveRef.current = false;
@@ -751,11 +748,13 @@ export function App() {
   }, [conversationId, state]);
   // Dynamic interactive region logic
   useEffect(() => {
-    // Only force full-window capture for modal or drag states. A detached
-    // composer should still pass background clicks through to the screen.
+    // Only explicit chat/modal/drag states force full-window capture. The
+    // initial long-press preview remains transparent so background UI keeps
+    // receiving normal left/right clicks until the user right-clicks into chat.
     const forceInteractive =
       active &&
-      (menuOpen ||
+      (detached ||
+        menuOpen ||
         backendDropdownOpen ||
         settingsOpen ||
         historyOpen ||
@@ -771,6 +770,7 @@ export function App() {
       if (forceInteractive) return true;
       if (!target) return false;
       const el = target as Element;
+      if (!detached) return Boolean(el.closest('.cua-picker-panel'));
       // If the mouse is over the main container or body, pass clicks through
       if (el.tagName === 'HTML' || el.tagName === 'BODY' || el.classList.contains('app-container')) {
         return false;
@@ -814,6 +814,7 @@ export function App() {
   }, [
     active,
     menuOpen,
+    detached,
     backendDropdownOpen,
     settingsOpen,
     historyOpen,
@@ -852,10 +853,12 @@ export function App() {
           // Reattach shell position (exit edit).
           setDetachedPos(null);
           setSelection(null);
+          window.setTimeout(() => releaseOverlayPointerCapture(), 0);
           return false;
         }
         // Detach shell position (enter edit).
         setDetachedPos(computeShellPosition(contextCursor.localX, contextCursor.localY, pillWidth, pillHeight, true));
+        window.setTimeout(() => focusPromptInput(inputRef.current), 0);
         return true;
       });
     }
@@ -884,17 +887,9 @@ export function App() {
     });
     const offGlobalMouseDown = window.openMagicPointer.onGlobalMouseDown((payload) => {
       if (!isCursorOnThisOverlay(payload)) return;
-      setDetached((d) => {
-        if (!d) {
-          setCursor(payload);
-          setCuaPickerAnchor(payload);
-          setDetachedPos(computeShellPosition(payload.localX, payload.localY, pillWidth, pillHeight, false));
-          window.setTimeout(() => focusPromptInput(inputRef.current), 0);
-          return true;
-        }
-        window.setTimeout(() => releaseOverlayPointerCapture(), 0);
-        return d;
-      });
+      setCursor(payload);
+      setCuaPickerAnchor(payload);
+      window.setTimeout(() => releaseOverlayPointerCapture(), 0);
     });
     window.addEventListener('keydown', onKeyDown, { capture: true });
     window.addEventListener('contextmenu', onContextMenu, { capture: true });
@@ -1054,7 +1049,6 @@ export function App() {
       !active ||
       state !== 'composing' ||
       settings?.cuaMode === 'off' ||
-      detached ||
       selecting ||
       Boolean(selectionDrag) ||
       Boolean(selection) ||
@@ -1132,7 +1126,6 @@ export function App() {
   }, [
     active,
     captureActivity.active,
-    detached,
     historyOpen,
     liveCuaPreview,
     menuOpen,
@@ -1786,7 +1779,6 @@ export function App() {
     active &&
     state === 'composing' &&
     settings?.cuaMode !== 'off' &&
-    !detached &&
     !selecting &&
     !selectionDrag &&
     !settingsOpen &&
@@ -1933,6 +1925,7 @@ export function App() {
   const modalOpen = settingsOpen || historyOpen;
   const shellHiddenForContextCapture = selecting || Boolean(selectionDrag) || captureActivity.active;
   const overlayNeedsPointerEvents =
+    detached ||
     menuOpen ||
     backendDropdownOpen ||
     modalOpen ||

@@ -284,13 +284,11 @@ function activate(cursor = cursorPayload()): void {
     if (win.isDestroyed()) continue;
     win.setAlwaysOnTop(true, 'screen-saver');
     win.moveTop();
-    setOverlayInteractive(displayId, displayId === activeDisplayId);
+    setOverlayInteractive(displayId, false);
     if (displayId !== activeDisplayId) win.webContents.send(OMP_CHANNELS.Deactivate);
   }
   if (activeWin && !activeWin.isDestroyed()) {
-    activeWin.show();
-    activeWin.focus();
-    activeWin.webContents.focus();
+    activeWin.showInactive();
     activeWin.webContents.send(OMP_CHANNELS.Activate, cursor);
   }
 }
@@ -304,13 +302,11 @@ function focusActiveOverlayWithoutActivate(cursor: CursorPayload): void {
     if (win.isDestroyed()) continue;
     win.setAlwaysOnTop(true, 'screen-saver');
     win.moveTop();
-    setOverlayInteractive(displayId, displayId === cursor.displayId);
+    setOverlayInteractive(displayId, false);
     if (displayId !== cursor.displayId) win.webContents.send(OMP_CHANNELS.Deactivate);
   }
   if (activeWin && !activeWin.isDestroyed()) {
-    activeWin.show();
-    activeWin.focus();
-    activeWin.webContents.focus();
+    activeWin.showInactive();
   }
 }
 
@@ -449,8 +445,6 @@ function handleGlobalPrimaryMouseDown(): void {
   const win = windows.get(cursor.displayId);
   if (!win || win.isDestroyed()) return;
   if (overlayInteractive.get(cursor.displayId)) return;
-
-  setOverlayInteractive(cursor.displayId, true);
   win.webContents.send(OMP_CHANNELS.GlobalMouseDown, cursor);
 }
 
@@ -465,6 +459,8 @@ function handleGlobalContextMouseDown(): void {
   // `contextmenu` events never fire. Wake this display just long enough for
   // the renderer to run the same edit-mode toggle path.
   setOverlayInteractive(cursor.displayId, true);
+  win.focus();
+  win.webContents.focus();
   win.webContents.send(OMP_CHANNELS.GlobalContextMenu, cursor);
 }
 
