@@ -5,7 +5,7 @@ export type AgentRunOptions = {
   sessionKey?: string;
 };
 
-export type ApprovalDecision = 'approve' | 'deny';
+export type ApprovalDecision = 'approve' | 'deny' | 'always_allow';
 
 export interface AgentBridge {
   id: AgentBackendId;

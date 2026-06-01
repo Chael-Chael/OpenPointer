@@ -1,6 +1,7 @@
 import { app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, screen } from 'electron';
 import { activeWindow } from 'get-windows';
 import { uIOhook } from 'uiohook-napi';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import {
@@ -8,7 +9,8 @@ import {
   resolveBackendForEnvelope,
   buildAgentContextEnvelope,
   type AgentBridge,
-  type AgentBridgeRegistryConfig
+  type AgentBridgeRegistryConfig,
+  type ApprovalDecision
 } from '@openmagicpointer/agent-bridge';
 import type { AgentContextEnvelope, AgentEvent, Point, PointerContext, PointerEntity, Rect } from '@openmagicpointer/core';
 import { buildPointerContext } from '@openmagicpointer/grounding';
@@ -467,9 +469,26 @@ function registerIpc(): void {
     // makes the composer blink whenever background grounding refreshes.
     return cuaGrounding.preview(req.cursor, await activeWindowInfo());
   });
-  ipcMain.handle(OMP_CHANNELS.ApproveAgentRequest, async (_event, id: string, decision: 'approve' | 'deny') => {
+  ipcMain.handle(OMP_CHANNELS.RequestWindowContext, async (_event, req: { cursor: CursorPayload }) => {
+    const settings = getSettings();
+    const activeInfo = await activeWindowInfo();
+    if (settings.cuaMode !== 'off') {
+      const cuaWindow = await cuaGrounding.previewWindow(req.cursor, activeInfo);
+      if (cuaWindow.status === 'matched') return cuaWindow;
+    }
+    if (activeInfo) {
+      return {
+        status: 'matched',
+        source: 'active-window',
+        window: activeInfo,
+        windowId: activeInfo.windowId
+      };
+    }
+    return { status: 'fallback', source: 'active-window', error: 'No active window information available.' };
+  });
+  ipcMain.handle(OMP_CHANNELS.ApproveAgentRequest, async (_event, id: string, decision: ApprovalDecision) => {
     if (cuaBroker.hasPendingApproval(id)) {
-      cuaBroker.approve(id, decision);
+      cuaBroker.approve(id, decision === 'deny' ? 'deny' : 'approve');
       return;
     }
     await activeBridge?.approve?.(id, decision);
@@ -482,8 +501,15 @@ function registerIpc(): void {
     const includeCua = Boolean(req.includeCua) && settings.cuaMode !== 'off';
     const providedCuaEntities = includeCua ? (req.cuaEntities ?? []) : [];
     const context = req.includeScreenshot
-      ? await capturePointerContext(cursor, req.targetPath, req.selectedEntity, includeCua && providedCuaEntities.length === 0, providedCuaEntities)
-      : await buildLightPointerContext(cursor, req.selectedEntity, providedCuaEntities, includeCua);
+      ? await capturePointerContext(
+          cursor,
+          req.targetPath,
+          req.selectedEntity,
+          includeCua && providedCuaEntities.length === 0,
+          providedCuaEntities,
+          req.windowContext
+        )
+      : await buildLightPointerContext(cursor, req.selectedEntity, providedCuaEntities, includeCua, req.windowContext);
 
     const conversationId = req.conversationId || `conv-${Date.now()}`;
     await chatHistory.appendTurn(conversationId, {
@@ -623,7 +649,8 @@ async function capturePointerContext(
   targetPath?: Point[],
   selectedEntity?: PointerEntity,
   useCua = true,
-  seedCuaEntities: PointerEntity[] = []
+  seedCuaEntities: PointerEntity[] = [],
+  preferredWindowInfo?: PointerContext['window']
 ): Promise<PointerContext> {
   // Signal the renderer that a submit-time screenshot is being taken so the
   // pointer can tint accordingly. `withCua` distinguishes a plain screenshot
@@ -635,7 +662,7 @@ async function capturePointerContext(
   let cuaPreview: Awaited<ReturnType<CuaGroundingProvider['preview']>> | undefined;
   try {
     const hiddenResult = await withOverlayHidden(cursor.displayId, async () => {
-      const currentWindow = await activeWindowInfo();
+      const currentWindow = preferredWindowInfo ?? (await activeWindowInfo());
       const [contextImage, groundingPreview] = await Promise.all([
         captureContextImage(cursor, targetPath),
         useCua ? cuaGrounding.preview(cursor, currentWindow) : Promise.resolve(undefined)
@@ -698,9 +725,10 @@ async function buildLightPointerContext(
   cursor: CursorPayload,
   selectedEntity: PointerEntity | undefined,
   cuaEntities: PointerEntity[],
-  includeCua: boolean
+  includeCua: boolean,
+  preferredWindowInfo?: PointerContext['window']
 ): Promise<PointerContext> {
-  const windowInfo = await activeWindowInfo();
+  const windowInfo = preferredWindowInfo ?? (await activeWindowInfo());
   let groundingPreview: Awaited<ReturnType<CuaGroundingProvider['preview']>> | undefined;
   let groundedEntities = includeCua ? cuaEntities.filter((entity) => entity.groundingRef?.provider === 'cua') : [];
   if (includeCua && groundedEntities.length === 0) {
@@ -882,7 +910,58 @@ function sessionKeyForContext(context: PointerContext): string {
   return [context.source, context.window?.app, context.window?.windowId].filter(Boolean).join(':') || 'desktop';
 }
 
+function ensureClaudePermissionHookRegistered(): void {
+  const home = app.getPath('home');
+  const settingsPath = join(home, '.claude', 'settings.json');
+  const hookPath = join(repoRoot, 'apps', 'desktop', 'resources', 'omp-claude-hook.cjs');
+  if (!existsSync(hookPath)) return;
+  let settings: Record<string, unknown> = {};
+  try {
+    settings = existsSync(settingsPath) ? (JSON.parse(readFileSync(settingsPath, 'utf8')) as Record<string, unknown>) : {};
+  } catch {
+    return;
+  }
+  const hooks = isRecord(settings.hooks) ? settings.hooks : {};
+  settings.hooks = hooks;
+  let changed = false;
+  for (const eventName of ['PermissionRequest', 'PreToolUse']) {
+    const entries = Array.isArray(hooks[eventName]) ? (hooks[eventName] as unknown[]) : [];
+    const command = hookCommand(hookPath, eventName);
+    const alreadyFirst = hookEntryContainsCommand(entries[0], hookPath);
+    const filtered = entries.filter((entry) => !hookEntryContainsCommand(entry, hookPath));
+    const nextEntry = {
+      matcher: '',
+      hooks: [{ type: 'command', command }]
+    };
+    hooks[eventName] = [nextEntry, ...filtered];
+    changed = changed || !alreadyFirst || filtered.length !== entries.length - (alreadyFirst ? 1 : 0);
+  }
+  if (!changed) return;
+  mkdirSync(dirname(settingsPath), { recursive: true });
+  writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+}
+
+function hookCommand(hookPath: string, eventName: string): string {
+  const escaped = hookPath.replace(/\\/g, '/');
+  return `"node" "${escaped}" ${eventName}`;
+}
+
+function hookEntryContainsCommand(entry: unknown, hookPath: string): boolean {
+  const marker = hookPath.replace(/\\/g, '/');
+  if (!isRecord(entry)) return false;
+  if (typeof entry.command === 'string' && entry.command.replace(/\\/g, '/').includes(marker)) return true;
+  if (Array.isArray(entry.hooks)) {
+    return entry.hooks.some((hook) => isRecord(hook) && typeof hook.command === 'string' && hook.command.replace(/\\/g, '/').includes(marker));
+  }
+  return false;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 app.whenReady().then(async () => {
+  ensureClaudePermissionHookRegistered();
   registerIpc();
   for (const display of screen.getAllDisplays()) {
     await createOverlay(display);

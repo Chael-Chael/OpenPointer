@@ -5,8 +5,9 @@ const CURSOR_OFFSET_X = 36;
 // Height the panel tries to keep available below the pill before lifting the
 // shell up. The hard upper bound (and the absolute clip guard) is PANEL_MAX.
 const PANEL_COMFORT_HEIGHT = 360;
-const PANEL_MAX_HEIGHT = 520;
+const PANEL_MAX_HEIGHT = 800;
 const PANEL_MIN_HEIGHT = 160;
+export const DEFAULT_STREAM_PANEL_HEIGHT = PANEL_COMFORT_HEIGHT;
 
 export function computeShellPosition(cursorX: number, cursorY: number, shellWidth = 520, pillHeight = 24, hasPanel = false) {
   const viewportW = window.innerWidth;
@@ -42,6 +43,11 @@ export function computeShellPosition(cursorX: number, cursorY: number, shellWidt
 export function availablePanelHeight(shellY: number, pillHeight = 24): number {
   const available = window.innerHeight - shellY - pillHeight - SHELL_MARGIN;
   return Math.max(PANEL_MIN_HEIGHT, Math.min(PANEL_MAX_HEIGHT, available));
+}
+
+export function resolvedPanelHeight(shellY: number, pillHeight = 24, preferredHeight: number | null = null): number {
+  const maxHeight = availablePanelHeight(shellY, pillHeight);
+  return Math.min(preferredHeight ?? DEFAULT_STREAM_PANEL_HEIGHT, maxHeight);
 }
 
 export function normalizeSelection(rect: SelectionRect): SelectionRect {

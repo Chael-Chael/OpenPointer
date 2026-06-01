@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from 'react';
 import { clampNumber, type AgentBackendId, type AgentEvent, type PointerContext, type PointerEntity } from '@openmagicpointer/core';
+import type { ApprovalDecision } from '@openmagicpointer/agent-bridge';
 import type { AppSettings } from '@openmagicpointer/storage';
 import { parseVoiceCommand } from '@openmagicpointer/voice';
-import type { CursorPayload, HoldProgressPayload } from '../../shared/types';
+import type { CursorPayload, HoldProgressPayload, WindowPreviewResponse } from '../../shared/types';
 import { CursorTrail } from './CursorTrail';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import {
@@ -17,7 +18,7 @@ import {
   type UiState
 } from './state';
 import { backendLabel, backendReadiness, isToolEvent, latestEvent, placeholderForState, secretConfigured, statusLabel } from './lib/backend-status';
-import { availablePanelHeight, computeShellPosition, focusPromptInput, normalizeSelection, selectionFromDrag } from './lib/geometry';
+import { DEFAULT_STREAM_PANEL_HEIGHT, availablePanelHeight, computeShellPosition, focusPromptInput, normalizeSelection, resolvedPanelHeight, selectionFromDrag } from './lib/geometry';
 import { HoldRing, ToolRows } from './components/fields';
 import { SettingsPanel } from './components/SettingsPanel';
 import { HistoryPanel } from './components/HistoryPanel';
@@ -45,6 +46,17 @@ function ChevronIcon({ size = 8, isOpen = false }: { size?: number; isOpen?: boo
   );
 }
 
+function WindowGlyph({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="2.5" y="3.5" width="11" height="9" rx="1.8" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M3.5 6H12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="5" cy="4.75" r="0.55" fill="currentColor" />
+      <circle cx="6.8" cy="4.75" r="0.55" fill="currentColor" />
+    </svg>
+  );
+}
+
 const initialCursor: CursorPayload = { x: 300, y: 300, localX: 300, localY: 300, displayId: 0, dpr: 1 };
 
 function imageSrcForContext(context: PointerContext): string | undefined {
@@ -59,6 +71,12 @@ function entityLabel(entity: Pick<PointerEntity, 'text' | 'name' | 'role' | 'kin
 function formatRect(rect: { x: number; y: number; width: number; height: number } | undefined): string | undefined {
   if (!rect) return undefined;
   return `${Math.round(rect.width)}x${Math.round(rect.height)} @ ${Math.round(rect.x)},${Math.round(rect.y)}`;
+}
+
+function windowPreviewLabel(preview: WindowPreviewResponse | null): string | undefined {
+  const info = preview?.window;
+  if (!info) return undefined;
+  return info.title || info.app || info.process || (info.windowId ? `Window ${info.windowId}` : undefined);
 }
 
 type LocalRect = { x: number; y: number; width: number; height: number };
@@ -116,10 +134,11 @@ function hasPreciseCuaRect(entity: PointerEntity): boolean {
   return Boolean(highlightRectForEntity(entity));
 }
 
-function defaultContextInstruction(hasSelectionContext: boolean, hasCuaContext: boolean): string {
+function defaultContextInstruction(hasSelectionContext: boolean, hasCuaContext: boolean, hasWindowContext: boolean): string {
   if (hasSelectionContext && hasCuaContext) return 'Analyze the current screenshot selection and CUA-recognized UI context.';
   if (hasSelectionContext) return 'Analyze the current screenshot selection.';
   if (hasCuaContext) return 'Analyze the current CUA-recognized UI context.';
+  if (hasWindowContext) return 'Analyze the current window context.';
   return 'Analyze the current pointer context.';
 }
 
@@ -255,7 +274,9 @@ export function App() {
   const thinkingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const thinkingStartRef = useRef<number>(0);
   const streamPanelRef = useRef<HTMLDivElement | null>(null);
+  const streamPanelStickToBottomRef = useRef(true);
   const groundingRequestSeqRef = useRef(0);
+  const windowRequestSeqRef = useRef(0);
   const lastCuaSelectEventRef = useRef<{ id: string; at: number; type: string } | null>(null);
   // Submit-time screenshot signal from the main process (see CaptureActivity IPC).
   const [captureActivity, setCaptureActivity] = useState<{ active: boolean; withCua: boolean }>({ active: false, withCua: false });
@@ -263,11 +284,15 @@ export function App() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [conversationsList, setConversationsList] = useState<import('@openmagicpointer/core').Conversation[]>([]);
   const [pillDrag, setPillDrag] = useState<{ startX: number; startY: number; initialPos: { x: number; y: number } } | null>(null);
+  const [windowPreview, setWindowPreview] = useState<WindowPreviewResponse | null>(null);
+  const [settledApprovalIds, setSettledApprovalIds] = useState<Set<string>>(() => new Set());
 
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [fetchModelsError, setFetchModelsError] = useState<string | null>(null);
-  const [hoveredAttachment, setHoveredAttachment] = useState<'selection' | 'entity' | 'cua' | null>(null);
+  const [hoveredAttachment, setHoveredAttachment] = useState<'window' | 'selection' | 'entity' | 'cua' | null>(null);
+
+  const showFullContext = detached && (historyTurns.length > 0 || state !== 'composing');
 
   async function fetchModels() {
     if (!settings?.localVlmBaseUrl) return;
@@ -356,6 +381,7 @@ export function App() {
     const offActivate = window.openMagicPointer.onActivate((payload) => {
       setCursor(payload);
       setCuaPickerAnchor(payload);
+      setWindowPreview(null);
       setCuaPickerLocked(false);
       setCuaPickerPosition(null);
       setActive(true);
@@ -399,6 +425,7 @@ export function App() {
       setDetached(false);
       setSelection(null);
       setCuaEntities([]);
+      setWindowPreview(null);
       setCuaPickerAnchor(initialCursor);
       setCuaPickerLocked(false);
       setCuaPickerPosition(null);
@@ -411,6 +438,7 @@ export function App() {
       setSelectionDrag(null);
       setPanelHeight(null);
       setThinkingTime(0);
+      setSettledApprovalIds(new Set());
       setShowTools(false);
       if (thinkingTimerRef.current) {
         clearInterval(thinkingTimerRef.current);
@@ -674,9 +702,13 @@ export function App() {
       const dy = event.clientY - activeDrag.startY;
       const nextX = activeDrag.initialPos.x + dx;
       const nextY = activeDrag.initialPos.y + dy;
+
+      const maxPanelH = showFullContext ? Math.max(160, panelHeight ?? 0) : 0;
+      const maxY = window.innerHeight - pillHeight - maxPanelH - 12;
+
       setDetachedPos({
         x: Math.min(Math.max(12, nextX), Math.max(12, window.innerWidth - pillWidth - 12)),
-        y: Math.min(Math.max(12, nextY), Math.max(12, window.innerHeight - pillHeight - 12))
+        y: Math.min(Math.max(12, nextY), Math.max(12, maxY))
       });
     }
     function onMouseUp() {
@@ -688,7 +720,22 @@ export function App() {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
-  }, [pillDrag, pillWidth, pillHeight]);
+  }, [pillDrag, pillWidth, pillHeight, showFullContext, panelHeight]);
+
+  // Keep the detached pill pulled up if the conversation panel is open,
+  // preventing it from extending off the bottom of the screen.
+  useEffect(() => {
+    if (showFullContext && detachedPos) {
+      const maxPanelH = Math.max(160, panelHeight ?? 0);
+      const maxY = window.innerHeight - pillHeight - maxPanelH - 12;
+      if (detachedPos.y > maxY) {
+        setDetachedPos({
+          ...detachedPos,
+          y: Math.max(12, maxY)
+        });
+      }
+    }
+  }, [showFullContext, panelHeight, pillHeight, detachedPos]);
 
   useEffect(() => {
     if (state === 'composing' && active && !selecting && !selectionDrag && !settingsOpen && !captureActivity.active) {
@@ -796,6 +843,56 @@ export function App() {
     state
   ]);
 
+  useEffect(() => {
+    if (!active || state !== 'composing' || captureActivity.active) {
+      setWindowPreview(null);
+      windowRequestSeqRef.current += 1;
+      return;
+    }
+
+    let cancelled = false;
+    let inFlight = false;
+    let lastRequestedCursor: CursorPayload | null = null;
+    const requestSeq = ++windowRequestSeqRef.current;
+    const minCursorDeltaSquared = CUA_GROUNDING_MIN_CURSOR_DELTA * CUA_GROUNDING_MIN_CURSOR_DELTA;
+
+    const shouldRequestWindow = (force = false) => {
+      if (force || !lastRequestedCursor) return true;
+      return cursorDistanceSquared(cursorRef.current, lastRequestedCursor) >= minCursorDeltaSquared;
+    };
+
+    const refreshWindow = (force = false) => {
+      if (cancelled || inFlight || !shouldRequestWindow(force)) return;
+      const requestCursor = cursorRef.current;
+      lastRequestedCursor = requestCursor;
+      inFlight = true;
+      void window.openMagicPointer
+        .requestWindowContext({ cursor: requestCursor })
+        .then((preview) => {
+          if (cancelled || windowRequestSeqRef.current !== requestSeq) return;
+          setWindowPreview(preview.status === 'matched' && preview.window ? preview : null);
+        })
+        .catch(() => {
+          if (cancelled || windowRequestSeqRef.current !== requestSeq) return;
+          setWindowPreview(null);
+        })
+        .finally(() => {
+          inFlight = false;
+          if (!cancelled && cursorDistanceSquared(cursorRef.current, requestCursor) >= minCursorDeltaSquared) {
+            refreshWindow();
+          }
+        });
+    };
+
+    refreshWindow(true);
+    const interval = window.setInterval(() => refreshWindow(false), 900);
+    return () => {
+      cancelled = true;
+      windowRequestSeqRef.current += 1;
+      window.clearInterval(interval);
+    };
+  }, [active, captureActivity.active, state]);
+
   // Track submit-time screenshot capture so the pointer can tint while it runs.
   useEffect(() => {
     const off = window.openMagicPointer.onCaptureActivity((payload) => {
@@ -830,7 +927,6 @@ export function App() {
     return () => window.removeEventListener('click', onClick, { capture: true });
   }, [backendDropdownOpen]);
 
-  const showFullContext = detached && (historyTurns.length > 0 || state !== 'composing');
   const hasPanel = showFullContext;
   const shellPosition = useMemo(
     () => computeShellPosition(cursor.localX, cursor.localY, pillWidth, pillHeight, hasPanel),
@@ -863,6 +959,7 @@ export function App() {
   );
   const discovery = latestEvent(events, 'tool.discovery');
   const approval = latestEvent(events, 'approval.requested');
+  const activeApproval = approval && !settledApprovalIds.has(approval.id) ? approval : undefined;
   const latestFailure = latestEvent(events, 'run.failed');
   const toolEvents = useMemo(() => events.filter(isToolEvent), [events]);
   useEffect(() => {
@@ -875,10 +972,16 @@ export function App() {
   }, [state]);
 
   useEffect(() => {
-    if (streamPanelRef.current) {
-      streamPanelRef.current.scrollTop = streamPanelRef.current.scrollHeight;
-    }
+    const panel = streamPanelRef.current;
+    if (!panel || !streamPanelStickToBottomRef.current) return;
+    panel.scrollTop = panel.scrollHeight;
   }, [transcript, events.length, historyTurns.length, state, showTools]);
+
+  function onStreamPanelScroll(event: ReactUIEvent<HTMLDivElement>) {
+    const panel = event.currentTarget;
+    const distanceFromBottom = panel.scrollHeight - panel.scrollTop - panel.clientHeight;
+    streamPanelStickToBottomRef.current = distanceFromBottom < 24;
+  }
 
   useEffect(() => {
     if (!panelResizeDrag) return;
@@ -926,13 +1029,11 @@ export function App() {
     // Cap the panel to the space actually left below the pill so it scrolls
     // internally instead of being clipped by the screen's bottom edge.
     const maxHeight = availablePanelHeight(effectiveShellPos.y, pillHeight);
-    if (panelHeight !== null) {
-      return {
-        height: `${Math.min(panelHeight, maxHeight)}px`,
-        maxHeight: `${maxHeight}px`
-      };
-    }
-    return { maxHeight: `${maxHeight}px` };
+    const height = resolvedPanelHeight(effectiveShellPos.y, pillHeight, panelHeight);
+    return {
+      height: `${height}px`,
+      maxHeight: `${maxHeight}px`
+    };
   }, [panelHeight, effectiveShellPos.y, pillHeight]);
   function onResizeMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -959,6 +1060,12 @@ export function App() {
     });
   }
 
+  async function decideApproval(id: string, decision: ApprovalDecision) {
+    setSettledApprovalIds((prev) => new Set(prev).add(id));
+    setState('streaming');
+    await window.openMagicPointer.approveAgentRequest(id, decision);
+  }
+
   async function submit(mode: 'text' | 'voice' = 'text', overrideText = prompt) {
     const text = overrideText.trim();
     const submittedCuaEntities = selectedCuaEntities;
@@ -966,8 +1073,10 @@ export function App() {
     const hasSelectionContext = Boolean(selection);
     const cuaEnabled = settings?.cuaMode !== 'off';
     const hasCuaContext = submittedCuaEntities.length > 0;
-    const instructionText = text || defaultContextInstruction(hasSelectionContext, hasCuaContext);
-    if ((!text && !hasSelectionContext && !hasCuaContext) || state === 'submitting') return;
+    const submittedWindowContext = windowPreview?.window;
+    const hasWindowContext = Boolean(submittedWindowContext);
+    const instructionText = text || defaultContextInstruction(hasSelectionContext, hasCuaContext, hasWindowContext);
+    if ((!text && !hasSelectionContext && !hasCuaContext && !hasWindowContext) || state === 'submitting') return;
     if (!readiness.configured) {
       setEvents([{ type: 'run.failed', error: readiness.detail, recoverable: true }]);
       setState('failed');
@@ -978,6 +1087,7 @@ export function App() {
     setMenuOpen(false);
 
     setThinkingTime(0);
+    setSettledApprovalIds(new Set());
     setShowTools(false);
     if (thinkingTimerRef.current) clearInterval(thinkingTimerRef.current);
     thinkingStartRef.current = Date.now();
@@ -1011,6 +1121,7 @@ export function App() {
         cursor,
         targetPath: selectedEntity ? undefined : targetPath,
         selectedEntity,
+        windowContext: submittedWindowContext,
         includeScreenshot: hasSelectionContext,
         includeCua: cuaEnabled && hasCuaContext,
         cuaEntities: submittedCuaEntities,
@@ -1584,6 +1695,55 @@ export function App() {
               }
             >
               {/* Context attachment preview card */}
+              {hoveredAttachment === 'window' && windowPreview?.window && (
+                <div
+                  className="absolute left-0 z-10 w-[300px] p-3 text-white bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] border border-glass-border rounded-[var(--radius-pill)] flex flex-col gap-1.5 pointer-events-none animate-elastic-pop origin-bottom-left"
+                  style={{ bottom: `calc(100% + ${previewCardBottom}px)` }}
+                >
+                  <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/12 text-white/90">
+                        <WindowGlyph size={15} />
+                      </span>
+                      <div className="flex min-w-0 flex-col">
+                        <span className="truncate text-[12px] font-bold text-white/95 leading-tight">{windowPreviewLabel(windowPreview)}</span>
+                        <span className="truncate text-[9px] text-white/60 leading-none">{windowPreview.window.app || windowPreview.window.process || 'Current window'}</span>
+                      </div>
+                    </div>
+                    <span className="rounded-full bg-white/12 px-2 py-0.5 text-[10px] font-bold uppercase text-white/80">{windowPreview.source}</span>
+                  </div>
+                  <div className="h-px bg-white/12 my-0.5" />
+                  <div className="grid gap-1 text-[11px] text-white/[0.84]">
+                    {windowPreview.window.title && (
+                      <div className="grid grid-cols-[54px_1fr] gap-2">
+                        <span className="text-white/50">Title</span>
+                        <span className="min-w-0 truncate">{windowPreview.window.title}</span>
+                      </div>
+                    )}
+                    {(windowPreview.window.app || windowPreview.window.process) && (
+                      <div className="grid grid-cols-[54px_1fr] gap-2">
+                        <span className="text-white/50">App</span>
+                        <span className="min-w-0 truncate">{windowPreview.window.app || windowPreview.window.process}</span>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-[54px_1fr] gap-2">
+                      <span className="text-white/50">Window</span>
+                      <span className="min-w-0 truncate">
+                        {windowPreview.windowId || windowPreview.window.windowId || 'unknown'}
+                        {windowPreview.pid ? ` / pid ${windowPreview.pid}` : ''}
+                      </span>
+                    </div>
+                    {windowPreview.bounds && (
+                      <div className="font-mono text-[9px] text-white/55">
+                        Bounds: {Math.round(windowPreview.bounds.width)}x{Math.round(windowPreview.bounds.height)} @ {Math.round(windowPreview.bounds.x)},{' '}
+                        {Math.round(windowPreview.bounds.y)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {hoveredAttachment === 'selection' && selection && (
                 <div
                   className="absolute left-0 z-10 w-[240px] p-3 text-white bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_8px_6px_0px_rgba(0,0,0,0.05)] border border-glass-border rounded-[var(--radius-pill)] flex flex-col gap-1.5 pointer-events-none animate-elastic-pop origin-bottom-left"
@@ -1831,8 +1991,23 @@ export function App() {
                   onMouseDown={onPillMouseDown}
                 >
                   {/* Context Attachments Indicators */}
-                  {showFullContext && (selection || selectedCuaEntities.length > 0) && (
+                  {(windowPreview?.window || selection || selectedCuaEntities.length > 0) && (
                     <div className="flex items-center gap-1.5 shrink-0 select-none">
+                      {windowPreview?.window && (
+                        <div
+                          className="group relative flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all duration-150 cursor-default animate-elastic-pop"
+                          style={{
+                            width: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
+                            height: `${Math.max(20, Math.min(28, pillHeight - 8))}px`
+                          }}
+                          onMouseEnter={() => setHoveredAttachment('window')}
+                          onMouseLeave={() => setHoveredAttachment(null)}
+                          title={`Window: ${windowPreviewLabel(windowPreview) ?? 'Current window'}`}
+                        >
+                          <WindowGlyph size={Math.max(12, Math.min(15, pillHeight - 12))} />
+                        </div>
+                      )}
+
                       {selection && (
                         <div
                           className="group relative flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-[rgba(229,56,59,0.95)] transition-all duration-150 cursor-pointer animate-elastic-pop font-bold"
@@ -1946,7 +2121,7 @@ export function App() {
                 {showFullContext && (
                   <>
                     <div className="mx-4 h-px bg-white/12" />
-                    <div className="capsule-stream-panel scrollbar-capsule px-4 pb-5 pt-3" style={streamPanelStyle} ref={streamPanelRef}>
+                    <div className="capsule-stream-panel scrollbar-capsule px-4 pb-5 pt-3" style={streamPanelStyle} ref={streamPanelRef} onScroll={onStreamPanelScroll}>
                       <div className="flex justify-between gap-2.5 text-white/50 text-[11px] font-semibold uppercase tracking-[0.02em]">
                         <span>{backendLabel(backend)}</span>
                         <span>{statusLabel(state)}</span>
@@ -2004,22 +2179,28 @@ export function App() {
                             )}
 
                             {/* Other active states */}
-                            {approval && (
+                            {activeApproval && (
                               <div className="approval-box mt-3 border border-[rgba(255,255,255,0.15)] rounded-[var(--radius-pill)] bg-white/5 p-3">
-                                <strong className="text-white text-[13px]">{approval.tool ?? 'Agent'} requests approval</strong>
-                                <p className="mt-2.5 text-[13px] leading-relaxed text-white/80">{approval.reason}</p>
+                                <strong className="text-white text-[13px]">{activeApproval.tool ?? 'Agent'} requests approval</strong>
+                                <p className="mt-2.5 text-[13px] leading-relaxed text-white/80">{activeApproval.reason}</p>
                                 <div className="flex gap-2 mt-2.5">
                                   <button
                                     className="approval-button bg-white/15 text-white hover:bg-white/25 rounded-[var(--radius-pill)] px-3 py-1 text-xs font-semibold"
-                                    onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'approve')}
+                                    onClick={() => void decideApproval(activeApproval.id, 'approve')}
                                   >
                                     Allow
                                   </button>
                                   <button
                                     className="approval-button bg-white/15 text-white hover:bg-white/25 rounded-[var(--radius-pill)] px-3 py-1 text-xs font-semibold"
-                                    onClick={() => void window.openMagicPointer.approveAgentRequest(approval.id, 'deny')}
+                                    onClick={() => void decideApproval(activeApproval.id, 'deny')}
                                   >
                                     Deny
+                                  </button>
+                                  <button
+                                    className="approval-button bg-white/15 text-white hover:bg-white/25 rounded-[var(--radius-pill)] px-3 py-1 text-xs font-semibold"
+                                    onClick={() => void decideApproval(activeApproval.id, 'always_allow')}
+                                  >
+                                    Always Allow
                                   </button>
                                 </div>
                               </div>

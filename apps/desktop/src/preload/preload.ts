@@ -10,7 +10,8 @@ import type {
   HoldProgressPayload,
   SaveSettingsPatch,
   SubmitInstructionRequest,
-  SubmitInstructionResponse
+  SubmitInstructionResponse,
+  WindowPreviewResponse
 } from '../shared/types.js';
 
 function on<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -31,6 +32,7 @@ const api: DesktopApi = {
   deactivate: () => ipcRenderer.send(OMP_CHANNELS.RequestDeactivate),
   ready: () => ipcRenderer.send(OMP_CHANNELS.RendererReady),
   setInteractive: (value) => ipcRenderer.send(OMP_CHANNELS.SetInteractive, value),
+  requestWindowContext: (req) => ipcRenderer.invoke(OMP_CHANNELS.RequestWindowContext, req) as Promise<WindowPreviewResponse>,
   requestGrounding: (req) => ipcRenderer.invoke(OMP_CHANNELS.RequestGrounding, req) as Promise<GroundingPreviewResponse>,
   submitInstruction: (req: SubmitInstructionRequest) => ipcRenderer.invoke(OMP_CHANNELS.SubmitInstruction, req) as Promise<SubmitInstructionResponse>,
   approveAgentRequest: (id, decision) => ipcRenderer.invoke(OMP_CHANNELS.ApproveAgentRequest, id, decision) as Promise<void>,

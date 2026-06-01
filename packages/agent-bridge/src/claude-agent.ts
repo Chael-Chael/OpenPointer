@@ -1,11 +1,63 @@
+import { randomUUID } from 'node:crypto';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import type { AgentContextEnvelope, AgentEvent } from '@openmagicpointer/core';
 import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { buildAgentInput, buildAgentInstructions, buildToolDiscoveryEvent } from './prompt.js';
-import type { AgentBridge, AgentRunOptions, ClaudeAgentBridgeConfig } from './types.js';
+import type { AgentBridge, AgentRunOptions, ApprovalDecision, ClaudeAgentBridgeConfig } from './types.js';
 
 let cachedClaudePath: string | undefined;
+
+type PendingToolApproval = {
+  resolve(decision: ApprovalDecision): void;
+  timeout: NodeJS.Timeout;
+};
+
+class EventQueue<T> {
+  private readonly items: T[] = [];
+  private readonly waiters: Array<(result: IteratorResult<T>) => void> = [];
+  private closed = false;
+
+  push(item: T): void {
+    if (this.closed) return;
+    const waiter = this.waiters.shift();
+    if (waiter) waiter({ done: false, value: item });
+    else this.items.push(item);
+  }
+
+  next(): Promise<IteratorResult<T>> {
+    if (this.items.length > 0) return Promise.resolve({ done: false, value: this.items.shift() as T });
+    if (this.closed) return Promise.resolve({ done: true, value: undefined });
+    return new Promise((resolve) => this.waiters.push(resolve));
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    for (const waiter of this.waiters.splice(0)) {
+      waiter({ done: true, value: undefined });
+    }
+  }
+}
+
+type CachedPermissionRule = {
+  toolName: string;
+  ruleContent?: string;
+};
+
+type PermissionResult =
+  | { behavior: 'allow'; toolUseID?: string; updatedPermissions?: unknown[]; decisionClassification?: 'user_temporary' | 'user_permanent' }
+  | { behavior: 'deny'; message: string; interrupt?: boolean; toolUseID?: string; decisionClassification?: 'user_reject' };
+
+type PermissionRequestOptions = {
+  toolUseID?: string;
+  suggestions?: unknown[];
+  title?: string;
+  displayName?: string;
+  description?: string;
+};
 
 // Hardcoded default paths per platform (npm global install locations)
 const DEFAULT_PATHS: Record<string, string[]> = {
@@ -29,6 +81,14 @@ const DEFAULT_PATHS: Record<string, string[]> = {
 
 export class ClaudeAgentBridge implements AgentBridge {
   id = 'claude-agent' as const;
+  private pendingToolApprovals = new Map<string, PendingToolApproval>();
+  private alwaysAllowedRules: CachedPermissionRule[] = [];
+  private resolvedPermissionResults = new Map<string, PermissionResult>();
+  private inFlightPermissionResults = new Map<string, Promise<PermissionResult>>();
+  private approvalEvents: EventQueue<AgentEvent> | null = null;
+  private permissionServer: Server | null = null;
+  private permissionEndpoint: string | null = null;
+  private permissionToken = randomUUID();
 
   constructor(private readonly config: ClaudeAgentBridgeConfig | undefined) {}
 
@@ -48,34 +108,328 @@ export class ClaudeAgentBridge implements AgentBridge {
     const runId = `claude-agent-${Date.now()}`;
     yield { type: 'run.started', runId, backend: this.id };
 
-    // The SDK expects an AbortController (with .signal), not a raw AbortSignal.
     const controller = new AbortController();
     if (options.signal) {
       if (options.signal.aborted) controller.abort(options.signal.reason);
       else options.signal.addEventListener('abort', () => controller.abort(options.signal!.reason), { once: true });
     }
+    const approvalEvents = new EventQueue<AgentEvent>();
+    this.approvalEvents = approvalEvents;
+    this.resolvedPermissionResults.clear();
+    this.inFlightPermissionResults.clear();
+    const permissionEnv = await this.ensurePermissionServer();
 
     try {
-      for await (const raw of sdk.query({
+      const sdkMessages = sdk.query({
         prompt: `${buildAgentInstructions(envelope)}\n\n${buildAgentInput(envelope)}`,
         options: {
           allowedTools: allowedToolsForEnvelope(envelope),
+          canUseTool: (toolName: string, input: Record<string, unknown>, permissionOptions: Record<string, unknown>) =>
+            this.requestToolApproval(toolName, input, permissionOptions, approvalEvents),
           includePartialMessages: true,
           maxTurns: 12,
           abortController: controller,
-          env: buildSdkEnv(this.config),
+          env: { ...buildSdkEnv(this.config), ...permissionEnv },
           pathToClaudeCodeExecutable: claudePath,
           ...(this.config?.model ? { model: this.config.model } : {}),
           ...(this.config?.effort ? { effort: this.config.effort } : {})
         }
-      })) {
+      });
+
+      for await (const raw of mergeSdkMessagesWithEvents(sdkMessages, approvalEvents)) {
         yield mapClaudeMessage(raw);
       }
       yield { type: 'run.completed' };
     } catch (error) {
       yield { type: 'run.failed', error: error instanceof Error ? error.message : String(error), recoverable: true };
+    } finally {
+      approvalEvents.close();
+      this.approvalEvents = null;
+      this.denyPendingToolApprovals();
     }
   }
+
+  async approve(approvalId: string, decision: ApprovalDecision): Promise<void> {
+    const pending = this.pendingToolApprovals.get(approvalId);
+    if (!pending) return;
+    clearTimeout(pending.timeout);
+    this.pendingToolApprovals.delete(approvalId);
+    pending.resolve(decision);
+  }
+
+  private async requestToolApproval(
+    toolName: string,
+    input: Record<string, unknown>,
+    permissionOptions: PermissionRequestOptions | Record<string, unknown>,
+    approvalEvents: EventQueue<AgentEvent>
+  ): Promise<PermissionResult> {
+    const toolUseID = typeof permissionOptions.toolUseID === 'string' ? permissionOptions.toolUseID : undefined;
+    const permissionKey = toolUseID || `${toolName}:${JSON.stringify(input)}`;
+    const updatedPermissions = Array.isArray(permissionOptions.suggestions) ? permissionOptions.suggestions : undefined;
+    if (this.resolvedPermissionResults.has(permissionKey)) {
+      return this.resolvedPermissionResults.get(permissionKey) as PermissionResult;
+    }
+    if (this.inFlightPermissionResults.has(permissionKey)) {
+      return this.inFlightPermissionResults.get(permissionKey) as Promise<PermissionResult>;
+    }
+    if (this.isAlwaysAllowed(toolName, input)) {
+      return { behavior: 'allow', toolUseID, decisionClassification: 'user_permanent' };
+    }
+    const id = toolUseID || `claude-approval-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const title = typeof permissionOptions.title === 'string' ? permissionOptions.title : '';
+    const description = typeof permissionOptions.description === 'string' ? permissionOptions.description : '';
+    const reason = [title || `Claude wants to use ${formatToolName(toolName)}.`, description].filter(Boolean).join('\n');
+
+    approvalEvents.push({
+      type: 'approval.requested',
+      id,
+      reason,
+      tool: typeof permissionOptions.displayName === 'string' ? permissionOptions.displayName : toolName
+    });
+
+    const resultPromise = new Promise<PermissionResult>((resolve) => {
+      const timeout = setTimeout(() => {
+        if (!this.pendingToolApprovals.has(id)) return;
+        this.pendingToolApprovals.delete(id);
+        resolve({
+          behavior: 'deny',
+          message: `Timed out waiting for permission for ${formatToolName(toolName)}.`,
+          interrupt: true,
+          toolUseID,
+          decisionClassification: 'user_reject'
+        });
+      }, 120000);
+      this.pendingToolApprovals.set(id, {
+        resolve: (decision) => {
+          if (decision === 'always_allow') {
+            this.rememberAlwaysAllowed(toolName, input, updatedPermissions);
+            resolve({ behavior: 'allow', toolUseID, updatedPermissions, decisionClassification: 'user_permanent' });
+            return;
+          }
+          if (decision === 'approve') {
+            resolve({ behavior: 'allow', toolUseID, decisionClassification: 'user_temporary' });
+            return;
+          }
+          resolve({
+            behavior: 'deny',
+            message: `User denied permission for ${formatToolName(toolName)}.`,
+            interrupt: true,
+            toolUseID,
+            decisionClassification: 'user_reject'
+          });
+        },
+        timeout
+      });
+    });
+    this.inFlightPermissionResults.set(permissionKey, resultPromise);
+    const result = await resultPromise;
+    this.inFlightPermissionResults.delete(permissionKey);
+    this.resolvedPermissionResults.set(permissionKey, result);
+    return result;
+  }
+
+  private denyPendingToolApprovals(): void {
+    for (const [id, pending] of this.pendingToolApprovals) {
+      clearTimeout(pending.timeout);
+      this.pendingToolApprovals.delete(id);
+      pending.resolve('deny');
+    }
+  }
+
+  private isAlwaysAllowed(toolName: string, input: Record<string, unknown>): boolean {
+    return this.alwaysAllowedRules.some((rule) => permissionRuleMatches(rule, toolName, input));
+  }
+
+  private rememberAlwaysAllowed(toolName: string, input: Record<string, unknown>, updates: unknown[] | undefined): void {
+    const rules = permissionRulesFromUpdates(updates);
+    if (rules.length === 0) {
+      rules.push({ toolName, ruleContent: typeof input.command === 'string' ? input.command : undefined });
+    }
+    for (const rule of rules) {
+      if (!this.alwaysAllowedRules.some((existing) => existing.toolName === rule.toolName && existing.ruleContent === rule.ruleContent)) {
+        this.alwaysAllowedRules.push(rule);
+      }
+    }
+  }
+
+  private async ensurePermissionServer(): Promise<Record<string, string>> {
+    if (!this.permissionServer || !this.permissionEndpoint) {
+      this.permissionToken = randomUUID();
+      this.permissionServer = createServer((req, res) => {
+        void this.handlePermissionRequest(req, res);
+      });
+      await new Promise<void>((resolve, reject) => {
+        this.permissionServer?.once('error', reject);
+        this.permissionServer?.listen(0, '127.0.0.1', () => resolve());
+      });
+      const address = this.permissionServer.address() as AddressInfo;
+      this.permissionEndpoint = `http://127.0.0.1:${address.port}/permission`;
+    }
+    return {
+      OPENMAGICPOINTER_SESSION: '1',
+      OPENMAGICPOINTER_PERMISSION_URL: this.permissionEndpoint,
+      OPENMAGICPOINTER_PERMISSION_TOKEN: this.permissionToken
+    };
+  }
+
+  private async handlePermissionRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    try {
+      if (req.method !== 'POST' || req.url !== '/permission') {
+        sendJson(res, 404, { error: 'Not found.' });
+        return;
+      }
+      if (req.headers.authorization !== `Bearer ${this.permissionToken}`) {
+        sendJson(res, 401, { error: 'Unauthorized.' });
+        return;
+      }
+      const body = await readJson(req);
+      const event = typeof body.event === 'string' ? body.event : '';
+      const toolName = typeof body.tool_name === 'string' ? body.tool_name : '';
+      const input = isRecord(body.tool_input) ? body.tool_input : {};
+      if (!toolName) {
+        sendJson(res, 400, { error: 'Missing tool_name.' });
+        return;
+      }
+      const approvalEvents = this.approvalEvents;
+      if (!approvalEvents) {
+        sendJson(res, 204, {});
+        return;
+      }
+      const result = await this.requestToolApproval(
+        toolName,
+        input,
+        {
+          toolUseID: typeof body.tool_use_id === 'string' ? body.tool_use_id : undefined,
+          suggestions: Array.isArray(body.permission_suggestions) ? body.permission_suggestions : undefined,
+          title: typeof body.title === 'string' ? body.title : undefined,
+          displayName: typeof body.display_name === 'string' ? body.display_name : undefined,
+          description: typeof body.description === 'string' ? body.description : undefined
+        },
+        approvalEvents
+      );
+      sendJson(res, 200, hookOutputForPermissionResult(event, result));
+    } catch (error) {
+      sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+}
+
+async function* mergeSdkMessagesWithEvents(sdkMessages: AsyncIterable<unknown>, eventQueue: EventQueue<AgentEvent>): AsyncIterable<unknown> {
+  const sdkIterator = sdkMessages[Symbol.asyncIterator]();
+  let sdkNext = sdkIterator.next();
+  let eventNext = eventQueue.next();
+
+  while (true) {
+    const result = await Promise.race([
+      sdkNext.then((value) => ({ source: 'sdk' as const, value })),
+      eventNext.then((value) => ({ source: 'event' as const, value }))
+    ]);
+
+    if (result.source === 'event') {
+      eventNext = eventQueue.next();
+      if (!result.value.done) yield result.value.value;
+      continue;
+    }
+
+    if (result.value.done) {
+      eventQueue.close();
+      return;
+    }
+    sdkNext = sdkIterator.next();
+    yield result.value.value;
+  }
+}
+
+function formatToolName(toolName: string): string {
+  return toolName.replace(/^mcp__/, '').replace(/__/g, ' / ');
+}
+
+function hookOutputForPermissionResult(event: string, result: PermissionResult): unknown {
+  if (event === 'PreToolUse') {
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: result.behavior === 'allow' ? 'allow' : 'deny',
+        ...(result.behavior === 'deny' ? { permissionDecisionReason: result.message } : {})
+      }
+    };
+  }
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PermissionRequest',
+      decision:
+        result.behavior === 'allow'
+          ? {
+              behavior: 'allow',
+              ...(result.updatedPermissions ? { updatedPermissions: result.updatedPermissions } : {})
+            }
+          : {
+              behavior: 'deny',
+              message: result.message,
+              ...(result.interrupt !== undefined ? { interrupt: result.interrupt } : {})
+            }
+    }
+  };
+}
+
+async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  const text = Buffer.concat(chunks).toString('utf8');
+  if (!text.trim()) return {};
+  const parsed = JSON.parse(text);
+  return isRecord(parsed) ? parsed : {};
+}
+
+function sendJson(res: ServerResponse, status: number, body: unknown): void {
+  if (status === 204) {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+  const payload = JSON.stringify(body);
+  res.writeHead(status, {
+    'content-type': 'application/json',
+    'content-length': Buffer.byteLength(payload)
+  });
+  res.end(payload);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function permissionRulesFromUpdates(updates: unknown[] | undefined): CachedPermissionRule[] {
+  const rules: CachedPermissionRule[] = [];
+  if (!updates) return rules;
+  for (const update of updates) {
+    if (!update || typeof update !== 'object') continue;
+    const record = update as Record<string, unknown>;
+    if (record.behavior !== 'allow' || !Array.isArray(record.rules)) continue;
+    for (const rule of record.rules) {
+      if (!rule || typeof rule !== 'object') continue;
+      const ruleRecord = rule as Record<string, unknown>;
+      if (typeof ruleRecord.toolName !== 'string') continue;
+      rules.push({
+        toolName: ruleRecord.toolName,
+        ruleContent: typeof ruleRecord.ruleContent === 'string' ? ruleRecord.ruleContent : undefined
+      });
+    }
+  }
+  return rules;
+}
+
+function permissionRuleMatches(rule: CachedPermissionRule, toolName: string, input: Record<string, unknown>): boolean {
+  if (rule.toolName !== toolName) return false;
+  if (!rule.ruleContent) return true;
+  if (typeof input.command === 'string') return input.command === rule.ruleContent;
+  return Object.values(input).some((value) => value === rule.ruleContent);
+}
+
+function isAgentEventType(type: string): type is AgentEvent['type'] {
+  return ['run.started', 'assistant.delta', 'tool.discovery', 'tool.started', 'tool.completed', 'approval.requested', 'run.completed', 'run.failed'].includes(type);
 }
 
 function getRealBinaryPath(inputPath: string): string | undefined {
@@ -206,6 +560,7 @@ function mapClaudeMessage(raw: unknown): AgentEvent {
   if (!raw || typeof raw !== 'object') return { type: 'assistant.delta', text: String(raw) };
   const msg = raw as Record<string, unknown>;
   const type = String(msg.type ?? '');
+  if (isAgentEventType(type)) return raw as AgentEvent;
 
   // Handle user messages that contain tool results
   if (type === 'user' && msg.message && typeof msg.message === 'object') {
@@ -217,7 +572,6 @@ function mapClaudeMessage(raw: unknown): AgentEvent {
           if (blockRecord.type === 'tool_result') {
             // Extract the tool result content
             const toolResult = blockRecord;
-            const toolUseId = String(toolResult.tool_use_id ?? '');
             const content = toolResult.content;
             let resultText = '';
 

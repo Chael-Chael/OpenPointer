@@ -643,6 +643,7 @@
   backdrop-filter: blur(6.8px);
   -webkit-backdrop-filter: blur(6.8px);
   box-shadow: 0 8px 6px rgba(0, 0, 0, 0.05);
+  overflow: hidden;
 }
 
 .command-bubble[data-pill-theme="white"] {
@@ -1995,23 +1996,26 @@
   position: relative;
   z-index: 3;
   color: rgba(255, 255, 255, 0.9);
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  overscroll-behavior: contain;
 }
 
 @utility scrollbar-capsule {
   &::-webkit-scrollbar {
-    width: 5px;
-    height: 5px;
+    width: 6px;
+    height: 6px;
   }
   &::-webkit-scrollbar-track {
     background: transparent;
   }
   &::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.22);
+    background: rgba(255, 255, 255, 0.32);
     border-radius: 99px;
   }
   &::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.38);
+    background: rgba(255, 255, 255, 0.54);
   }
 }
 
@@ -2067,6 +2071,20 @@
 
 .capsule-stream-panel .agent-text {
   color: rgba(255, 255, 255, 0.95);
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.capsule-stream-panel .markdown-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.capsule-stream-panel .markdown-body pre,
+.capsule-stream-panel .markdown-body table,
+.capsule-stream-panel .markdown-body .mermaid-diagram {
+  max-width: 100%;
 }
 
 .pointer-context-card {

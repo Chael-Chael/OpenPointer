@@ -8,6 +8,7 @@ export const OMP_CHANNELS = {
   GlobalMouseDown: 'omp:global-mouse-down',
   HoldProgress: 'omp:hold:progress',
   SetInteractive: 'omp:overlay:set-interactive',
+  RequestWindowContext: 'omp:window-context:request',
   RequestGrounding: 'omp:grounding:request',
   CaptureActivity: 'omp:capture:activity',
   SubmitInstruction: 'omp:agent:submit',

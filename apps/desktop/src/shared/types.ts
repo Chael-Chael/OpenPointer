@@ -1,4 +1,5 @@
-import type { AgentBackendId, AgentEvent, AgentInputMode, Point, PointerEntity } from '@openmagicpointer/core';
+import type { ApprovalDecision } from '@openmagicpointer/agent-bridge';
+import type { AgentBackendId, AgentEvent, AgentInputMode, Point, PointerContext, PointerEntity, Rect } from '@openmagicpointer/core';
 import type { AppSettings } from '@openmagicpointer/storage';
 
 export type CursorPayload = {
@@ -24,6 +25,7 @@ export type SubmitInstructionRequest = {
   cursor?: CursorPayload;
   targetPath?: Point[];
   selectedEntity?: PointerEntity;
+  windowContext?: PointerContext['window'];
   includeScreenshot?: boolean;
   includeCua?: boolean;
   cuaEntities?: PointerEntity[];
@@ -51,6 +53,20 @@ export type SaveSettingsPatch = Partial<AppSettings> & {
 
 export type GroundingPreviewRequest = {
   cursor: CursorPayload;
+};
+
+export type WindowPreviewRequest = {
+  cursor: CursorPayload;
+};
+
+export type WindowPreviewResponse = {
+  status: 'matched' | 'unavailable' | 'fallback';
+  source: 'cua' | 'active-window';
+  window?: PointerContext['window'];
+  pid?: number;
+  windowId?: string;
+  bounds?: Rect;
+  error?: string;
 };
 
 // Emitted by the main process around the submit-time screenshot capture so the
@@ -82,9 +98,10 @@ export type DesktopApi = {
   deactivate(): void;
   ready(): void;
   setInteractive(value: boolean): void;
+  requestWindowContext(req: WindowPreviewRequest): Promise<WindowPreviewResponse>;
   requestGrounding(req: GroundingPreviewRequest): Promise<GroundingPreviewResponse>;
   submitInstruction(req: SubmitInstructionRequest): Promise<SubmitInstructionResponse>;
-  approveAgentRequest(id: string, decision: 'approve' | 'deny'): Promise<void>;
+  approveAgentRequest(id: string, decision: ApprovalDecision): Promise<void>;
   cancelRun(): void;
   getSettings(): Promise<AppSettings>;
   saveSettings(patch: SaveSettingsPatch): Promise<AppSettings>;

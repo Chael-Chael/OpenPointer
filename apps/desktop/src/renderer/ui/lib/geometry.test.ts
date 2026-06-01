@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { availablePanelHeight, computeShellPosition } from './geometry';
+import { DEFAULT_STREAM_PANEL_HEIGHT, availablePanelHeight, computeShellPosition, resolvedPanelHeight } from './geometry';
 
 const MARGIN = 12;
 
@@ -69,6 +69,19 @@ describe('availablePanelHeight', () => {
 
   it('never exceeds the maximum height', () => {
     setViewport(1920, 4000);
-    expect(availablePanelHeight(0, 44)).toBeLessThanOrEqual(520);
+    expect(availablePanelHeight(0, 44)).toBeLessThanOrEqual(800);
+  });
+});
+
+describe('resolvedPanelHeight', () => {
+  it('uses the default stream panel height when no user height is set', () => {
+    setViewport(1920, 1080);
+    expect(resolvedPanelHeight(100, 44, null)).toBe(DEFAULT_STREAM_PANEL_HEIGHT);
+  });
+
+  it('caps a preferred height to the available panel height', () => {
+    setViewport(1920, 600);
+    const maxHeight = availablePanelHeight(300, 44);
+    expect(resolvedPanelHeight(300, 44, 800)).toBe(maxHeight);
   });
 });

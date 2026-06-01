@@ -1,6 +1,6 @@
 import { screen } from 'electron';
 import type { PointerContext, PointerEntity, Rect } from '@openmagicpointer/core';
-import type { CursorPayload, GroundingPreviewResponse } from '../shared/types.js';
+import type { CursorPayload, GroundingPreviewResponse, WindowPreviewResponse } from '../shared/types.js';
 import { CuaSidecarManager, type CuaToolResult } from './cua-sidecar.js';
 import {
   type DisplayBounds,
@@ -47,6 +47,35 @@ export type CuaGroundingSnapshot = GroundingPreviewResponse & {
 
 export class CuaGroundingProvider {
   constructor(private readonly sidecar: CuaSidecarManager) {}
+
+  async previewWindow(cursor: CursorPayload, windowInfo?: PointerContext['window']): Promise<WindowPreviewResponse> {
+    try {
+      const windows = await this.listWindows();
+      const matched = matchWindow(windows, cursor, windowInfo);
+      if (!matched || typeof matched.pid !== 'number' || typeof matched.window_id !== 'number') {
+        return { status: 'fallback', source: 'cua', error: 'No confident CUA window match.' };
+      }
+      return {
+        status: 'matched',
+        source: 'cua',
+        window: {
+          title: matched.title,
+          app: matched.app_name,
+          process: matched.app_name,
+          windowId: String(matched.window_id)
+        },
+        pid: matched.pid,
+        windowId: String(matched.window_id),
+        bounds: matched.bounds
+      };
+    } catch (error) {
+      return {
+        status: 'unavailable',
+        source: 'cua',
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
 
   async preview(cursor: CursorPayload, windowInfo?: PointerContext['window']): Promise<CuaGroundingSnapshot> {
     try {
