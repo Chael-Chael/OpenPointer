@@ -313,6 +313,9 @@ function startGlobalLongPress(): void {
         handleGlobalContextMouseDown();
         return;
       }
+      if (isPrimaryMouseButton(event.button)) {
+        handleGlobalPrimaryMouseDown();
+      }
       if (!getSettings().longPressEnabled || !isPrimaryMouseButton(event.button)) return;
       const cursor = cursorPayload();
       hold.active = true;
@@ -384,6 +387,17 @@ function isPrimaryMouseButton(button: unknown): boolean {
 
 function isSecondaryMouseButton(button: unknown): boolean {
   return button === 2 || button === 'right';
+}
+
+function handleGlobalPrimaryMouseDown(): void {
+  if (!active) return;
+  const cursor = cursorPayload();
+  const win = windows.get(cursor.displayId);
+  if (!win || win.isDestroyed()) return;
+  if (overlayInteractive.get(cursor.displayId)) return;
+
+  setOverlayInteractive(cursor.displayId, true);
+  win.webContents.send(OMP_CHANNELS.GlobalMouseDown, cursor);
 }
 
 function handleGlobalContextMouseDown(): void {

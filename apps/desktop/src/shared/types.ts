@@ -75,6 +75,7 @@ export type DesktopApi = {
   onDeactivate(cb: () => void): () => void;
   onCursor(cb: (cursor: CursorPayload) => void): () => void;
   onGlobalContextMenu(cb: (cursor: CursorPayload) => void): () => void;
+  onGlobalMouseDown(cb: (cursor: CursorPayload) => void): () => void;
   onHoldProgress(cb: (payload: HoldProgressPayload) => void): () => void;
   onAgentEvent(cb: (event: AgentEvent) => void): () => void;
   onCaptureActivity(cb: (payload: CaptureActivityPayload) => void): () => void;

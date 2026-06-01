@@ -24,6 +24,7 @@ const api: DesktopApi = {
   onDeactivate: (cb) => on<void>(OMP_CHANNELS.Deactivate, () => cb()),
   onCursor: (cb) => on<CursorPayload>(OMP_CHANNELS.Cursor, cb),
   onGlobalContextMenu: (cb) => on<CursorPayload>(OMP_CHANNELS.GlobalContextMenu, cb),
+  onGlobalMouseDown: (cb) => on<CursorPayload>(OMP_CHANNELS.GlobalMouseDown, cb),
   onHoldProgress: (cb) => on<HoldProgressPayload>(OMP_CHANNELS.HoldProgress, cb),
   onAgentEvent: (cb) => on<AgentEvent>(OMP_CHANNELS.AgentEvent, cb),
   onCaptureActivity: (cb) => on<CaptureActivityPayload>(OMP_CHANNELS.CaptureActivity, cb),

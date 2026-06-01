@@ -359,61 +359,19 @@ export function App() {
       setCuaPickerLocked(false);
       setCuaPickerPosition(null);
       setActive(true);
-      const restoreEpoch = conversationRestoreEpochRef.current;
+
+      // Auto-detach on wake-up and freeze at initial position
+      const width = clampNumber(settings?.pillWidth, 280, 900, 520);
+      const height = clampNumber(settings?.pillHeight, 24, 96, 24);
+      setDetached(true);
+      setDetachedPos(computeShellPosition(payload.localX, payload.localY, width, height, false));
+
+      // Always start a new conversation on wake-up
+      setConversationId(null);
+      setHistoryTurns([]);
+
       window.openMagicPointer.getSettings().then(async (currentSettings) => {
         setSettings(currentSettings);
-        if (newConversationRequestedRef.current || restoreEpoch !== conversationRestoreEpochRef.current) {
-          setConversationId(null);
-          setHistoryTurns([]);
-          return;
-        }
-
-        const behavior = currentSettings?.newDialogBehavior ?? 'continue';
-        const interval = currentSettings?.newDialogInterval ?? 300;
-
-        let restoreId = lastConversationIdRef.current;
-        let lastDeactivatedAt = lastDeactivatedAtRef.current;
-
-        if (!restoreId) {
-          const list = await window.openMagicPointer.getConversations();
-          if (list.length > 0) {
-            const sorted = [...list].sort((a, b) => b.updatedAt - a.updatedAt);
-            const first = sorted[0];
-            if (first) {
-              restoreId = first.id;
-              lastDeactivatedAt = first.updatedAt;
-            }
-          }
-        }
-
-        let shouldRestore = false;
-        if (restoreId) {
-          if (behavior === 'continue') {
-            shouldRestore = true;
-          } else if (behavior === 'interval') {
-            const elapsedSeconds = (Date.now() - lastDeactivatedAt) / 1000;
-            if (elapsedSeconds <= interval) {
-              shouldRestore = true;
-            }
-          }
-        }
-
-        if (newConversationRequestedRef.current || restoreEpoch !== conversationRestoreEpochRef.current) return;
-
-        if (shouldRestore && restoreId) {
-          conversationIdRef.current = restoreId;
-          lastConversationIdRef.current = restoreId;
-          lastDeactivatedAtRef.current = lastDeactivatedAt;
-          setConversationId(restoreId);
-          const conv = await window.openMagicPointer.getConversation(restoreId);
-          if (!newConversationRequestedRef.current && restoreEpoch === conversationRestoreEpochRef.current && conversationIdRef.current === restoreId && conv) {
-            setHistoryTurns(conv.turns);
-          }
-        } else {
-          conversationIdRef.current = null;
-          setConversationId(null);
-          setHistoryTurns([]);
-        }
       });
 
       setState('composing');
@@ -598,7 +556,9 @@ export function App() {
         setSelecting(false);
         setSelectionOrigin(null);
         setSelectionDrag(null);
-        setDetachedPos(null);
+        if (!detached) {
+          setDetachedPos(null);
+        }
         window.setTimeout(() => focusPromptInput(inputRef.current), 0);
         return;
       }
@@ -610,12 +570,8 @@ export function App() {
           setSelection(null);
           return false;
         }
-        // If there is no input, do not expand the pill.
-        if (!promptRef.current.trim()) {
-          return d;
-        }
         // Detach shell position (enter edit).
-        setDetachedPos(computeShellPosition(contextCursor.localX, contextCursor.localY));
+        setDetachedPos(computeShellPosition(contextCursor.localX, contextCursor.localY, pillWidth, pillHeight, true));
         return true;
       });
     }
@@ -641,14 +597,27 @@ export function App() {
       setCuaPickerAnchor(payload);
       toggleEditDialog(payload);
     });
+    const offGlobalMouseDown = window.openMagicPointer.onGlobalMouseDown((payload) => {
+      setDetached((d) => {
+        if (!d) {
+          setCursor(payload);
+          setCuaPickerAnchor(payload);
+          setDetachedPos(computeShellPosition(payload.localX, payload.localY, pillWidth, pillHeight, false));
+          window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+          return true;
+        }
+        return d;
+      });
+    });
     window.addEventListener('keydown', onKeyDown, { capture: true });
     window.addEventListener('contextmenu', onContextMenu, { capture: true });
     return () => {
       offGlobalContextMenu();
+      offGlobalMouseDown();
       window.removeEventListener('keydown', onKeyDown, { capture: true });
       window.removeEventListener('contextmenu', onContextMenu, { capture: true });
     };
-  }, [menuOpen, selecting, selectionDrag]);
+  }, [menuOpen, selecting, selectionDrag, detached, pillWidth, pillHeight]);
 
   // Live-update selection rectangle while selecting (cursor comes via IPC)
   useEffect(() => {
@@ -669,13 +638,15 @@ export function App() {
     function onMouseUp() {
       setSelecting(false);
       setSelectionOrigin(null);
-      setDetachedPos(null); // Unfreeze shell, resume following
+      if (!detached) {
+        setDetachedPos(null); // Unfreeze shell, resume following
+      }
       // selection rect stays visible until submit or dismissed
       window.setTimeout(() => focusPromptInput(inputRef.current), 0);
     }
     window.addEventListener('mouseup', onMouseUp);
     return () => window.removeEventListener('mouseup', onMouseUp);
-  }, [selecting]);
+  }, [selecting, detached]);
 
   useEffect(() => {
     if (!selectionDrag) return;
@@ -859,7 +830,7 @@ export function App() {
     return () => window.removeEventListener('click', onClick, { capture: true });
   }, [backendDropdownOpen]);
 
-  const showFullContext = detached || state !== 'composing';
+  const showFullContext = detached && (historyTurns.length > 0 || state !== 'composing');
   const hasPanel = showFullContext;
   const shellPosition = useMemo(
     () => computeShellPosition(cursor.localX, cursor.localY, pillWidth, pillHeight, hasPanel),
@@ -1146,7 +1117,16 @@ export function App() {
   }
 
   function onPillMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
-    if (!detached || !detachedPos) return;
+    if (!detached) {
+      if (event.button !== 0) return; // Only handle left clicks
+      event.preventDefault();
+      event.stopPropagation();
+      setDetached(true);
+      setDetachedPos(computeShellPosition(cursor.localX, cursor.localY, pillWidth, pillHeight, true));
+      window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+      return;
+    }
+    if (!detachedPos) return;
     const target = event.target as HTMLElement;
     if (target.closest('button') || target.closest('textarea') || target.closest('select')) {
       return;
