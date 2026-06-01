@@ -45,11 +45,20 @@ export function backendReadiness(settings: AppSettings | null, backend: AgentBac
     };
   }
   if (backend === 'codex') {
+    if (settings.codexAppServerTransport === 'stdio') {
+      if (!settings.codexExecutablePath.trim()) return { configured: false, label: 'Missing config', detail: 'Add a Codex executable path.', tone: 'missing' };
+      return {
+        configured: true,
+        label: 'Ready',
+        detail: settings.hasCodexApiKey ? 'Codex executable and token are configured.' : 'Codex executable configured; token optional.',
+        tone: 'ready'
+      };
+    }
     if (!settings.codexAppServerUrl.trim()) return { configured: false, label: 'Missing config', detail: 'Add a Codex app-server URL.', tone: 'missing' };
     return {
       configured: true,
       label: 'Ready',
-      detail: settings.hasCodexApiKey ? 'Server URL and token are configured.' : 'Server URL configured; token optional.',
+      detail: settings.hasCodexApiKey ? 'App-server URL and token are configured.' : 'App-server URL configured; token optional.',
       tone: 'ready'
     };
   }

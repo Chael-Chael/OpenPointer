@@ -16,9 +16,13 @@ function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
     claudeAgentEnabled: false,
     claudeAgentBaseUrl: '',
     claudeAgentExecutable: '',
+    claudeAgentModel: '',
+    claudeAgentEffort: 'high',
     hasClaudeAgentApiKey: false,
     hasCodexApiKey: false,
     codexAppServerUrl: '',
+    codexExecutablePath: '',
+    codexAppServerTransport: 'http-adapter',
     cuaMode: 'off',
     requireApprovalBeforeCua: false,
     activationHotkey: '',
@@ -60,6 +64,13 @@ describe('backendReadiness', () => {
     expect(backendReadiness(makeSettings(), 'claude-agent').configured).toBe(false);
     expect(backendReadiness(makeSettings({ claudeAgentEnabled: true }), 'claude-agent').configured).toBe(true);
     expect(backendReadiness(makeSettings({ claudeAgentEnabled: true, hasClaudeAgentApiKey: true }), 'claude-agent').configured).toBe(true);
+  });
+
+  it('codex supports URL and stdio executable readiness', () => {
+    expect(backendReadiness(makeSettings(), 'codex').configured).toBe(false);
+    expect(backendReadiness(makeSettings({ codexAppServerUrl: 'http://127.0.0.1:5050/v1' }), 'codex').configured).toBe(true);
+    expect(backendReadiness(makeSettings({ codexAppServerTransport: 'stdio' }), 'codex').configured).toBe(false);
+    expect(backendReadiness(makeSettings({ codexAppServerTransport: 'stdio', codexExecutablePath: 'C:\\codex\\codex.exe' }), 'codex').configured).toBe(true);
   });
 });
 

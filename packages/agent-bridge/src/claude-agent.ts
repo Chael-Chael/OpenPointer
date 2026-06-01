@@ -64,7 +64,9 @@ export class ClaudeAgentBridge implements AgentBridge {
           maxTurns: 12,
           abortController: controller,
           env: buildSdkEnv(this.config),
-          pathToClaudeCodeExecutable: claudePath
+          pathToClaudeCodeExecutable: claudePath,
+          ...(this.config?.model ? { model: this.config.model } : {}),
+          ...(this.config?.effort ? { effort: this.config.effort } : {})
         }
       })) {
         yield mapClaudeMessage(raw);

@@ -1,5 +1,5 @@
 import { app, safeStorage } from 'electron';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { clampNumber } from '@openmagicpointer/core';
 import type { AppSettings } from '@openmagicpointer/storage';
@@ -38,9 +38,13 @@ const DEFAULTS: AppSettings = {
   claudeAgentEnabled: false,
   claudeAgentBaseUrl: '',
   claudeAgentExecutable: '',
+  claudeAgentModel: '',
+  claudeAgentEffort: 'high',
   hasClaudeAgentApiKey: false,
   hasCodexApiKey: false,
   codexAppServerUrl: '',
+  codexExecutablePath: '',
+  codexAppServerTransport: 'http-adapter',
   cuaMode: 'prefer',
   requireApprovalBeforeCua: true,
   activationHotkey: 'CommandOrControl+Shift+Space',
@@ -89,6 +93,15 @@ export function getSettings(): AppSettings {
     claudeAgentBaseUrl: envOverride(['OMP_CLAUDE_AGENT_BASE_URL', 'OP_CLAUDE_AGENT_BASE_URL']) || loaded.claudeAgentBaseUrl || DEFAULTS.claudeAgentBaseUrl,
     claudeAgentExecutable: envOverride(['OMP_CLAUDE_EXECUTABLE', 'OP_CLAUDE_EXECUTABLE']) || loaded.claudeAgentExecutable || DEFAULTS.claudeAgentExecutable,
     codexAppServerUrl: envOverride(['OMP_CODEX_APP_SERVER_URL', 'OP_CODEX_APP_SERVER_URL']) || loaded.codexAppServerUrl || '',
+    codexExecutablePath:
+      envOverride(['OMP_CODEX_EXECUTABLE', 'OMP_CODEX_CLI_PATH', 'OP_CODEX_EXECUTABLE', 'OP_CODEX_CLI_PATH']) ||
+      loaded.codexExecutablePath ||
+      detectDefaultCodexExecutable(),
+    codexAppServerTransport: normalizeCodexTransport(
+      envOverride(['OMP_CODEX_APP_SERVER_TRANSPORT', 'OMP_CODEX_TRANSPORT', 'OP_CODEX_APP_SERVER_TRANSPORT', 'OP_CODEX_TRANSPORT']) ||
+        loaded.codexAppServerTransport ||
+        DEFAULTS.codexAppServerTransport
+    ),
     cuaMode: normalizeCuaMode(envOverride(['OMP_CUA_MODE', 'OP_CUA_MODE']) || loaded.cuaMode || DEFAULTS.cuaMode),
     pillWidth: clampNumber(loaded.pillWidth, 280, 900, DEFAULTS.pillWidth),
     pillHeight: clampNumber(loaded.pillHeight, 24, 96, DEFAULTS.pillHeight),
@@ -264,6 +277,10 @@ function normalizeBackend(value: string): AppSettings['agentBackend'] {
   return ['auto', 'local-vlm', 'hermes', 'opencode', 'claude-agent', 'codex'].includes(value) ? (value as AppSettings['agentBackend']) : 'auto';
 }
 
+function normalizeCodexTransport(value: string): AppSettings['codexAppServerTransport'] {
+  return ['http-adapter', 'websocket', 'stdio'].includes(value) ? (value as AppSettings['codexAppServerTransport']) : 'http-adapter';
+}
+
 function normalizeCuaMode(value: string): AppSettings['cuaMode'] {
   return ['off', 'prefer', 'require-on-explicit-command'].includes(value) ? (value as AppSettings['cuaMode']) : 'prefer';
 }
@@ -274,4 +291,63 @@ function normalizeNewDialogBehavior(value: string): AppSettings['newDialogBehavi
 
 function normalizeModalTheme(value: string): AppSettings['modalTheme'] {
   return ['blue', 'white', 'black'].includes(value) ? (value as AppSettings['modalTheme']) : 'blue';
+}
+
+function detectDefaultCodexExecutable(): string {
+  const candidates = codexExecutableCandidates();
+  return candidates.find((candidate) => existsSync(candidate)) || '';
+}
+
+function codexExecutableCandidates(): string[] {
+  const home = app.getPath('home');
+  const appData = process.env.APPDATA || join(home, 'AppData', 'Roaming');
+  const localAppData = process.env.LOCALAPPDATA || join(home, 'AppData', 'Local');
+  const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
+  const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+  const pathCandidates = (process.env.PATH || '')
+    .split(process.platform === 'win32' ? ';' : ':')
+    .filter(Boolean)
+    .flatMap((entry) => (process.platform === 'win32' ? [join(entry, 'codex.cmd'), join(entry, 'codex.exe')] : [join(entry, 'codex')]));
+
+  if (process.platform === 'win32') {
+    return uniqueStrings([
+      join(appData, 'npm', 'codex.cmd'),
+      join(appData, 'npm', 'codex.exe'),
+      join(programFiles, 'nodejs', 'node_global', 'codex.cmd'),
+      join(programFiles, 'nodejs', 'node_global', 'codex.exe'),
+      join(programFilesX86, 'nodejs', 'node_global', 'codex.cmd'),
+      join(programFilesX86, 'nodejs', 'node_global', 'codex.exe'),
+      join(localAppData, 'Programs', 'Codex', 'codex.exe'),
+      join(localAppData, 'OpenAI', 'Codex', 'codex.exe'),
+      ...windowsAppPackageCodexCandidates(programFiles),
+      ...pathCandidates
+    ]);
+  }
+
+  if (process.platform === 'darwin') {
+    return uniqueStrings([
+      '/opt/homebrew/bin/codex',
+      '/usr/local/bin/codex',
+      join(home, '.local', 'bin', 'codex'),
+      '/Applications/Codex.app/Contents/MacOS/codex',
+      ...pathCandidates
+    ]);
+  }
+
+  return uniqueStrings(['/usr/local/bin/codex', '/usr/bin/codex', join(home, '.local', 'bin', 'codex'), ...pathCandidates]);
+}
+
+function windowsAppPackageCodexCandidates(programFiles: string): string[] {
+  const windowsApps = join(programFiles, 'WindowsApps');
+  try {
+    return readdirSync(windowsApps)
+      .filter((name: string) => /^OpenAI\.Codex_/i.test(name))
+      .map((name: string) => join(windowsApps, name, 'app', 'resources', 'codex.exe'));
+  } catch {
+    return [];
+  }
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
 }

@@ -584,9 +584,19 @@ function bridgeConfig(settings = getSettings()): AgentBridgeRegistryConfig {
       enabled: settings.claudeAgentEnabled,
       apiKey: getClaudeAgentApiKey(),
       baseUrl: settings.claudeAgentBaseUrl || undefined,
-      executable: settings.claudeAgentExecutable || undefined
+      executable: settings.claudeAgentExecutable || undefined,
+      model: settings.claudeAgentModel || undefined,
+      effort: settings.claudeAgentEffort || 'high'
     },
-    codex: settings.codexAppServerUrl ? { baseUrl: settings.codexAppServerUrl, apiKey: getCodexApiKey() } : undefined
+    codex:
+      settings.codexAppServerUrl || settings.codexExecutablePath
+        ? {
+            baseUrl: settings.codexAppServerUrl,
+            apiKey: getCodexApiKey(),
+            transport: settings.codexAppServerTransport,
+            executablePath: settings.codexExecutablePath || undefined
+          }
+        : undefined
   };
 }
 

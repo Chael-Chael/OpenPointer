@@ -233,14 +233,50 @@ export function SettingsPanel(props: SettingsPanelProps) {
                   onChange={(value) => updateSecret('claudeAgentApiKey', value)}
                   onClear={() => clearSecret('claudeAgentApiKey')}
                 />
+                <TextField
+                  label="Model (optional)"
+                  value={settings.claudeAgentModel}
+                  onChange={(value) => updateSettings({ claudeAgentModel: value })}
+                  placeholder="e.g., sonnet, opus, haiku or full ID"
+                />
+                <label className="field">
+                  <span>Reasoning Effort</span>
+                  <select
+                    value={settings.claudeAgentEffort}
+                    onChange={(event) => updateSettings({ claudeAgentEffort: event.target.value as AppSettings['claudeAgentEffort'] })}
+                  >
+                    <option value="low">Low - Minimal thinking, fastest</option>
+                    <option value="medium">Medium - Moderate thinking</option>
+                    <option value="high">High - Deep reasoning (default)</option>
+                    <option value="xhigh">XHigh - Deeper than high</option>
+                    <option value="max">Max - Maximum effort</option>
+                  </select>
+                </label>
               </BackendCard>
 
               <BackendCard title="Codex" status={backendReadiness(draftAwareSettings, 'codex')}>
+                <label className="field">
+                  <span>Connection</span>
+                  <select
+                    value={settings.codexAppServerTransport}
+                    onChange={(event) => updateSettings({ codexAppServerTransport: event.target.value as AppSettings['codexAppServerTransport'] })}
+                  >
+                    <option value="http-adapter">HTTP adapter</option>
+                    <option value="websocket">Official app-server WebSocket</option>
+                    <option value="stdio">Official app-server stdio</option>
+                  </select>
+                </label>
                 <TextField
                   label="App server URL"
                   value={settings.codexAppServerUrl}
                   onChange={(value) => updateSettings({ codexAppServerUrl: value })}
-                  placeholder="http://127.0.0.1:5050/v1"
+                  placeholder={settings.codexAppServerTransport === 'websocket' ? 'ws://127.0.0.1:17321' : 'http://127.0.0.1:5050/v1'}
+                />
+                <TextField
+                  label="Codex executable"
+                  value={settings.codexExecutablePath}
+                  onChange={(value) => updateSettings({ codexExecutablePath: value })}
+                  placeholder="Auto-detect if empty"
                 />
                 <SecretField
                   label="API token"

@@ -27,6 +27,8 @@ export type LocalVlmBridgeConfig = {
 export type HttpAgentBridgeConfig = {
   baseUrl: string;
   apiKey?: string;
+  transport?: 'http-adapter' | 'websocket' | 'stdio';
+  executablePath?: string;
   timeoutMs?: number;
   fetch?: FetchLike;
 };
@@ -36,6 +38,8 @@ export type ClaudeAgentBridgeConfig = {
   apiKey?: string;
   baseUrl?: string;
   executable?: string;
+  model?: string;
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   sdk?: {
     query(args: unknown): AsyncIterable<unknown>;
   };

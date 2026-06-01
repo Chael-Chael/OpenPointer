@@ -200,6 +200,7 @@ export function App() {
   const [backend, setBackend] = useState<AgentBackendId>('auto');
   const [menuOpen, setMenuOpen] = useState(false);
   const [backendDropdownOpen, setBackendDropdownOpen] = useState(false);
+  const [claudeSubmenuOpen, setClaudeSubmenuOpen] = useState(false);
   const [detached, setDetached] = useState(false);
   const [selection, setSelection] = useState<SelectionRect | null>(null);
   const [detachedPos, setDetachedPos] = useState<{ x: number; y: number } | null>(null);
@@ -264,6 +265,8 @@ export function App() {
   cursorRef.current = cursor;
   const activeRef = useRef(false);
   activeRef.current = active;
+  const promptRef = useRef(prompt);
+  promptRef.current = prompt;
   const lastInteractiveRef = useRef(false);
   const lastGlobalContextMenuAtRef = useRef(0);
 
@@ -526,6 +529,10 @@ export function App() {
           setDetachedPos(null);
           setSelection(null);
           return false;
+        }
+        // If there is no input, do not expand the pill.
+        if (!promptRef.current.trim()) {
+          return d;
         }
         // Detach shell position (enter edit).
         setDetachedPos(computeShellPosition(contextCursor.localX, contextCursor.localY));
@@ -1401,32 +1408,90 @@ export function App() {
               {/* Custom glassmorphic backend selector dropdown list, hovering above the small pill */}
               {backendDropdownOpen && (
                 <div
-                  className="backend-dropdown absolute left-0 z-10 min-w-[140px] p-1 border border-glass-border rounded-[var(--radius-pill)] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] animate-dropdown-appear flex flex-col gap-0.5"
+                  className="backend-dropdown absolute left-0 z-10 min-w-[180px] p-1 border border-glass-border rounded-[var(--radius-pill)] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] animate-dropdown-appear flex flex-col gap-0.5"
                   style={{ bottom: `calc(100% + ${previewCardBottom}px)` }}
                 >
-                  {/* Inner Shadow Layer covering the ENTIRE dropdown, inheriting border-radius */}
+                  {/* Inner Shadow Layer */}
                   <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
                   {selectableBackends.map((item) => {
                     const isSelected = backend === item;
+                    const isClaude = item === 'claude-agent';
+                    const showSubmenu = isClaude && claudeSubmenuOpen;
                     return (
-                      <button
-                        key={item}
-                        type="button"
-                        className={`flex items-center justify-between w-full py-1.5 px-3 border-0 rounded-[var(--radius-pill)] bg-transparent text-left cursor-pointer transition-colors duration-140 font-semibold text-[11px] relative z-1 ${
-                          isSelected ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]' : 'text-white/80 hover:bg-white/10 hover:text-white'
-                        }`}
-                        onClick={() => {
-                          setBackend(item);
-                          setBackendDropdownOpen(false);
-                          window.setTimeout(() => focusPromptInput(inputRef.current), 0);
-                        }}
-                      >
-                        <span className="flex items-center gap-1.5">
-                          {getBackendIcon(item, 11)}
-                          <span>{backendLabel(item)}</span>
-                        </span>
-                        {isSelected && <span className="text-[9px] font-bold">✓</span>}
-                      </button>
+                      <div key={item} className="relative">
+                        <button
+                          type="button"
+                          className={`flex items-center justify-between w-full py-1.5 px-3 border-0 rounded-[var(--radius-pill)] bg-transparent text-left cursor-pointer transition-colors duration-140 font-semibold text-[11px] relative z-1 ${
+                            isSelected ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]' : 'text-white/80 hover:bg-white/10 hover:text-white'
+                          }`}
+                          onClick={() => {
+                            if (isClaude) {
+                              setClaudeSubmenuOpen(!claudeSubmenuOpen);
+                            } else {
+                              setBackend(item);
+                              setBackendDropdownOpen(false);
+                              window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+                            }
+                          }}
+                        >
+                          <span className="flex items-center gap-1.5">
+                            {getBackendIcon(item, 11)}
+                            <span>{backendLabel(item)}</span>
+                          </span>
+                          <span className="flex items-center gap-1">
+                            {isSelected && <span className="text-[9px] font-bold">✓</span>}
+                            {isClaude && <ChevronIcon size={6} isOpen={showSubmenu} />}
+                          </span>
+                        </button>
+
+                        {/* Claude submenu - Model and Effort */}
+                        {showSubmenu && (
+                          <div className="ml-2 mt-0.5 mb-1 p-1.5 bg-white/10 rounded-[10px] flex flex-col gap-1">
+                            {/* Model selector */}
+                            <div className="text-[9px] text-white/50 uppercase tracking-wider px-1">Model</div>
+                            {['', 'sonnet', 'opus', 'haiku'].map((model) => (
+                              <button
+                                key={model || 'default'}
+                                type="button"
+                                className={`w-full text-left px-2 py-1 rounded-[6px] text-[10px] border-0 cursor-pointer transition-colors ${
+                                  (settings?.claudeAgentModel || '') === model
+                                    ? 'bg-white text-[#0D6FFF] font-bold'
+                                    : 'bg-transparent text-white/70 hover:bg-white/15'
+                                }`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void window.openMagicPointer.saveSettings({ ...settings!, claudeAgentModel: model });
+                                }}
+                              >
+                                {model || 'Default'}
+                              </button>
+                            ))}
+
+                            {/* Divider */}
+                            <div className="h-px bg-white/15 my-0.5" />
+
+                            {/* Effort selector */}
+                            <div className="text-[9px] text-white/50 uppercase tracking-wider px-1">Effort</div>
+                            {(['low', 'medium', 'high', 'max'] as const).map((effort) => (
+                              <button
+                                key={effort}
+                                type="button"
+                                className={`w-full text-left px-2 py-1 rounded-[6px] text-[10px] border-0 cursor-pointer transition-colors ${
+                                  (settings?.claudeAgentEffort || 'high') === effort
+                                    ? 'bg-white text-[#0D6FFF] font-bold'
+                                    : 'bg-transparent text-white/70 hover:bg-white/15'
+                                }`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void window.openMagicPointer.saveSettings({ ...settings!, claudeAgentEffort: effort });
+                                }}
+                              >
+                                {effort.charAt(0).toUpperCase() + effort.slice(1)}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>

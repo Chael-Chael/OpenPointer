@@ -13,9 +13,13 @@ export type AppSettings = {
   claudeAgentEnabled: boolean;
   claudeAgentBaseUrl: string;
   claudeAgentExecutable: string;
+  claudeAgentModel: string;
+  claudeAgentEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   hasClaudeAgentApiKey: boolean;
   hasCodexApiKey: boolean;
   codexAppServerUrl: string;
+  codexExecutablePath: string;
+  codexAppServerTransport: 'http-adapter' | 'websocket' | 'stdio';
   cuaMode: 'off' | 'prefer' | 'require-on-explicit-command';
   requireApprovalBeforeCua: boolean;
   activationHotkey: string;
