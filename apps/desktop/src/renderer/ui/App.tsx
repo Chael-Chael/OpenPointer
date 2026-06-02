@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from 'react';
-import { clampNumber, type AgentBackendId, type AgentEvent, type PointerContext, type PointerEntity } from '@openpointer/core';
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from 'react';
+import { clampNumber, type AgentBackendId, type AgentEvent, type PointerEntity } from '@openpointer/core';
 import type { ApprovalDecision } from '@openpointer/agent-bridge';
 import type { AppSettings } from '@openpointer/storage';
 import { parseVoiceCommand } from '@openpointer/voice';
@@ -20,487 +20,44 @@ import {
 import { backendLabel, backendReadiness, latestEvent, placeholderForState, secretConfigured, statusLabel } from './lib/backend-status';
 import { availablePanelHeight, computeShellPosition, focusPromptInput, normalizeSelection, resolvedPanelHeight, selectionFromDrag } from './lib/geometry';
 import { selectedCuaAttachmentTitle, selectedListItemsForContext } from './lib/cua-selection';
-import { HoldRing, ToolRows } from './components/fields';
+import {
+  CUA_GROUNDING_INITIAL_DELAY_MS,
+  CUA_GROUNDING_MIN_CURSOR_DELTA,
+  CUA_GROUNDING_REFRESH_MS,
+  CUA_GROUNDING_STALE_MS,
+  CUA_PICKER_HOVER_LOCK_MS,
+  CUA_PICKER_HOVER_LOCK_TOLERANCE,
+  CUA_PICKER_MIN_HEIGHT,
+  CUA_PICKER_MIN_WIDTH,
+  DEFAULT_CUA_PICKER_SIZE,
+  MAX_CUA_HIGHLIGHTS,
+  type LocalRect
+} from './lib/cua-constants';
+import {
+  contextRegionAroundCursor,
+  cursorDistanceSquared,
+  defaultContextInstruction,
+  distanceToLocalRectSquared,
+  hasPreciseCuaRect,
+  highlightRectForEntity,
+  pointInLocalRect,
+  rectsIntersect
+} from './lib/cua-geometry';
+import { entityDebugDetails, entityKindTitle, entityLabel, windowPreviewLabel } from './lib/entity-helpers';
+import { groupEventsToBlocks, type DialogueBlock, type HistoryToolEvent } from './lib/dialogue-parser';
+import { HoldRing } from './components/fields';
 import { SettingsPanel } from './components/SettingsPanel';
 import { HistoryPanel } from './components/HistoryPanel';
 import { getBackendIcon } from './components/icons';
+import { ChevronIcon, EntityKindGlyph, WindowGlyph } from './components/glyphs';
+import { PointerContextPreview } from './components/PointerContextPreview';
+import { HistoryThinkingBlock } from './components/HistoryThinkingBlock';
+import { DialogueBlocksRenderer } from './components/DialogueBlocks';
+import { CuaTaskPanel, useCuaTasks } from './components/CuaTaskPanel';
 
-function ChevronIcon({ size = 8, isOpen = false }: { size?: number; isOpen?: boolean }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={3}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{
-        transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-        transition: 'transform 180ms ease'
-      }}
-      aria-hidden="true"
-    >
-      <polyline points="6 9 12 15 18 9" />
-    </svg>
-  );
-}
-
-function WindowGlyph({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="2.5" y="3.5" width="11" height="9" rx="1.8" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M3.5 6H12.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <circle cx="5" cy="4.75" r="0.55" fill="currentColor" />
-      <circle cx="6.8" cy="4.75" r="0.55" fill="currentColor" />
-    </svg>
-  );
-}
-
-function EntityKindGlyph({ kind, size = 14 }: { kind: PointerEntity['kind']; size?: number }) {
-  if (kind === 'listitem') {
-    return (
-      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <path d="M6 4h7M6 8h7M6 12h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-        <circle cx="3" cy="4" r="0.8" fill="currentColor" />
-        <circle cx="3" cy="8" r="0.8" fill="currentColor" />
-        <circle cx="3" cy="12" r="0.8" fill="currentColor" />
-      </svg>
-    );
-  }
-  if (kind === 'text' || kind === 'input') {
-    return (
-      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <path d="M4 3h8M8 3v10M5.5 13h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      </svg>
-    );
-  }
-  if (kind === 'image') {
-    return (
-      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-        <rect x="2.5" y="3" width="11" height="10" rx="1.8" stroke="currentColor" strokeWidth="1.5" />
-        <path d="M3.5 11l3-3 2 2 1.5-1.5 2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="10.8" cy="5.8" r="0.8" fill="currentColor" />
-      </svg>
-    );
-  }
-  if (kind === 'container') return <WindowGlyph size={size} />;
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path d="M8 2.5v3M8 10.5v3M2.5 8h3M10.5 8h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-      <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
-  );
-}
-
-function entityKindTitle(entity: PointerEntity): string {
-  if (entity.kind === 'listitem') return 'Attached list item';
-  if (entity.kind === 'text' || entity.kind === 'input') return 'Attached text';
-  if (entity.kind === 'image') return 'Attached image';
-  if (entity.kind === 'container') return 'Attached window';
-  return 'Attached element';
-}
+export type { DialogueBlock, HistoryToolEvent };
 
 const initialCursor: CursorPayload = { x: 300, y: 300, localX: 300, localY: 300, displayId: 0, dpr: 1 };
-
-function imageSrcForContext(context: PointerContext): string | undefined {
-  if (context.visual?.imageBase64 && context.visual.mimeType) {
-    return `data:${context.visual.mimeType};base64,${context.visual.imageBase64}`;
-  }
-  if (context.windowSnapshot?.imageBase64 && context.windowSnapshot.mimeType) {
-    return `data:${context.windowSnapshot.mimeType};base64,${context.windowSnapshot.imageBase64}`;
-  }
-  return undefined;
-}
-
-function entityLabel(entity: Pick<PointerEntity, 'text' | 'name' | 'role' | 'kind'>): string {
-  return entity.text || entity.name || entity.role || entity.kind;
-}
-
-function formatRect(rect: { x: number; y: number; width: number; height: number } | undefined): string | undefined {
-  if (!rect) return undefined;
-  return `${Math.round(rect.width)}x${Math.round(rect.height)} @ ${Math.round(rect.x)},${Math.round(rect.y)}`;
-}
-
-function entityDebugDetails(entity: PointerEntity): string[] {
-  const ref = entity.groundingRef;
-  const lines = [
-    entityLabel(entity),
-    `id: ${entity.id}`,
-    `kind: ${entity.kind}`,
-    entity.role ? `role: ${entity.role}` : undefined,
-    entity.name ? `name: ${entity.name}` : undefined,
-    entity.text ? `text: ${entity.text}` : undefined,
-    `origin: ${entity.origin}`,
-    `confidence: ${Math.round(entity.confidence * 100)}%`,
-    entity.bbox ? `bbox: ${formatRect(entity.bbox)}` : undefined,
-    ref?.screenRect ? `screen: ${formatRect(ref.screenRect)}` : undefined,
-    ref?.pid ? `pid: ${ref.pid}` : undefined,
-    ref?.windowId ? `window: ${ref.windowId}` : undefined,
-    typeof ref?.elementIndex === 'number' ? `element: ${ref.elementIndex}` : undefined,
-    ref?.actions?.length ? `actions: ${ref.actions.join(', ')}` : undefined
-  ];
-  return lines.filter((line): line is string => Boolean(line));
-}
-
-function windowPreviewLabel(preview: WindowPreviewResponse | null): string | undefined {
-  const info = preview?.window;
-  if (!info) return undefined;
-  return info.title || info.app || info.process || (info.windowId ? `Window ${info.windowId}` : undefined);
-}
-
-type LocalRect = { x: number; y: number; width: number; height: number };
-
-const CUA_HIGHLIGHT_RADIUS_X = 560;
-const CUA_HIGHLIGHT_RADIUS_Y = 420;
-const MAX_CUA_HIGHLIGHTS = 40;
-const CUA_GROUNDING_INITIAL_DELAY_MS = 60;
-const CUA_GROUNDING_REFRESH_MS = 420;
-const CUA_GROUNDING_STALE_MS = 1600;
-const CUA_GROUNDING_MIN_CURSOR_DELTA = 36;
-const CUA_PICKER_HOVER_LOCK_MS = 850;
-const CUA_PICKER_HOVER_LOCK_TOLERANCE = 12;
-const DEFAULT_CUA_PICKER_SIZE = { width: 340, height: 360 };
-const CUA_PICKER_MIN_WIDTH = 280;
-const CUA_PICKER_MIN_HEIGHT = 160;
-
-function cursorDistanceSquared(a: CursorPayload, b: CursorPayload): number {
-  const dx = a.localX - b.localX;
-  const dy = a.localY - b.localY;
-  return dx * dx + dy * dy;
-}
-
-function rectsIntersect(a: LocalRect, b: LocalRect): boolean {
-  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
-}
-
-function pointInLocalRect(x: number, y: number, rect: LocalRect, margin = 0): boolean {
-  return x >= rect.x - margin && x <= rect.x + rect.width + margin && y >= rect.y - margin && y <= rect.y + rect.height + margin;
-}
-
-function distanceToLocalRectSquared(x: number, y: number, rect: LocalRect): number {
-  const dx = Math.max(rect.x - x, 0, x - (rect.x + rect.width));
-  const dy = Math.max(rect.y - y, 0, y - (rect.y + rect.height));
-  return dx * dx + dy * dy;
-}
-
-function contextRegionAroundCursor(cursor: CursorPayload): LocalRect {
-  const viewportW = window.innerWidth;
-  const viewportH = window.innerHeight;
-  const width = Math.min(viewportW, CUA_HIGHLIGHT_RADIUS_X * 2);
-  const height = Math.min(viewportH, CUA_HIGHLIGHT_RADIUS_Y * 2);
-  return {
-    x: Math.max(0, Math.min(viewportW - width, cursor.localX - width / 2)),
-    y: Math.max(0, Math.min(viewportH - height, cursor.localY - height / 2)),
-    width,
-    height
-  };
-}
-
-function highlightRectForEntity(entity: PointerEntity): LocalRect | undefined {
-  const rect = entity.bbox;
-  if (!rect || !entity.groundingRef?.screenRect) return undefined;
-  if (rect.width < 3 || rect.height < 3) return undefined;
-  if (rect.width > window.innerWidth * 0.95 && rect.height > window.innerHeight * 0.75) return undefined;
-  return rect;
-}
-
-function hasPreciseCuaRect(entity: PointerEntity): boolean {
-  return Boolean(highlightRectForEntity(entity));
-}
-
-function defaultContextInstruction(hasSelectionContext: boolean, hasCuaContext: boolean, hasWindowContext: boolean): string {
-  if (hasSelectionContext && hasCuaContext) return 'Analyze the current screenshot selection and CUA-recognized UI context.';
-  if (hasSelectionContext) return 'Analyze the current screenshot selection.';
-  if (hasCuaContext) return 'Analyze the current CUA-recognized UI context.';
-  if (hasWindowContext) return 'Analyze the current window context.';
-  return 'Analyze the current pointer context.';
-}
-
-function PointerContextPreview({ context }: { context: PointerContext }) {
-  const imageSrc = imageSrcForContext(context);
-  const cuaEntities = context.nearby.filter((entity) => entity.groundingRef?.provider === 'cua');
-  const target = context.target;
-  const cropLabel = formatRect(context.visual?.crop);
-  const windowSnapshotLabel = formatRect(context.windowSnapshot?.bounds);
-  const targetLabel = target ? entityLabel(target) : undefined;
-  const targetRect = formatRect(target?.bbox);
-  const windowLabel = context.window?.title || context.window?.app || context.window?.process;
-
-  if (!imageSrc && !context.grounding && !target && cuaEntities.length === 0 && !context.windowSnapshot) return null;
-
-  return (
-    <div className="pointer-context-card mt-2 max-w-[85%] self-end overflow-hidden rounded-[var(--radius-pill)] border border-white/12 bg-white/[0.08] text-white/[0.86] shadow-[0_6px_18px_rgba(0,0,0,0.08)]">
-      {imageSrc && <img className="pointer-context-image" src={imageSrc} alt="Captured pointer context" />}
-      <div className="grid gap-2 p-2.5 text-[11px] leading-[1.35]">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="context-chip">Text</span>
-          {context.visual && <span className="context-chip">Screenshot{cropLabel ? ` ${cropLabel}` : ''}</span>}
-          {context.windowSnapshot && <span className="context-chip">Window shot{windowSnapshotLabel ? ` ${windowSnapshotLabel}` : ''}</span>}
-          {context.grounding && (
-            <span className={`context-chip ${context.grounding.status === 'matched' ? 'context-chip-cua' : ''}`}>
-              CUA {context.grounding.status}
-              {typeof context.grounding.elementCount === 'number' ? ` (${context.grounding.elementCount})` : ''}
-            </span>
-          )}
-        </div>
-
-        {windowLabel && (
-          <div className="context-row">
-            <span className="context-row-label">Window</span>
-            <span className="min-w-0 truncate">
-              {windowLabel}
-              {context.window?.app && context.window.title ? ` - ${context.window.app}` : ''}
-            </span>
-          </div>
-        )}
-
-        {targetLabel && (
-          <div className="context-row">
-            <span className="context-row-label">Target</span>
-            <span className="min-w-0 truncate">
-              {targetLabel}
-              {targetRect ? ` - ${targetRect}` : ''}
-            </span>
-          </div>
-        )}
-
-        {context.grounding && (
-          <div className="context-row">
-            <span className="context-row-label">CUA</span>
-            <span className="min-w-0 truncate">
-              {context.grounding.status}
-              {context.grounding.pid ? ` pid ${context.grounding.pid}` : ''}
-              {context.grounding.windowId ? ` window ${context.grounding.windowId}` : ''}
-              {context.grounding.error ? ` - ${context.grounding.error}` : ''}
-            </span>
-          </div>
-        )}
-
-        {cuaEntities.length > 0 && (
-          <div className="grid gap-1">
-            <div className="text-white/[0.52] font-semibold uppercase tracking-[0.03em]">Recognized UI</div>
-            {cuaEntities.slice(0, 5).map((entity) => (
-              <div key={entity.id} className="context-entity-row">
-                <span className="truncate">{entityLabel(entity)}</span>
-                <span className="context-entity-meta">{entity.role || entity.kind}</span>
-              </div>
-            ))}
-            {cuaEntities.length > 5 && <div className="text-white/[0.48]">+{cuaEntities.length - 5} more CUA elements</div>}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-type HistoryToolEvent = Extract<AgentEvent, { type: 'tool.started' | 'tool.completed' }>;
-
-function HistoryThinkingBlock({ thinkingTime, toolEvents }: { thinkingTime?: number; toolEvents?: HistoryToolEvent[] }) {
-  const [expanded, setExpanded] = useState(false);
-  if (!thinkingTime || thinkingTime <= 0) return null;
-
-  return (
-    <div className="my-2 flex flex-col items-start w-full select-none">
-      <div
-        className={`inline-flex items-center gap-1.5 cursor-pointer text-[11px] font-semibold text-white/55 py-1 px-2 rounded-[var(--radius-pill)] bg-white/5 hover:bg-white/10 hover:text-white transition-all duration-150${expanded ? ' [&>.arrow]:rotate-90 text-white/80' : ''}`}
-        onClick={() => setExpanded(!expanded)}
-      >
-        <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 shrink-0 opacity-60" />
-        <span>思考过程 · {thinkingTime}s</span>
-        {toolEvents && toolEvents.length > 0 && <span className="text-[10px] text-white/40 ml-1">({toolEvents.length} 个工具)</span>}
-        <span className="arrow inline-block text-[7px] rotate-0 transition-transform duration-150 leading-none">▶</span>
-      </div>
-      {expanded && toolEvents && toolEvents.length > 0 && (
-        <div className="mt-1.5 pl-3 border-l border-white/10 w-full animate-fade-in">
-          <ToolRows events={toolEvents} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-export type DialogueBlock =
-  | { type: 'text'; text: string }
-  | { type: 'reasoning'; text: string; isRunning: boolean }
-  | {
-      type: 'tool';
-      name: string;
-      startedEvent: Extract<AgentEvent, { type: 'tool.started' }>;
-      completedEvent?: Extract<AgentEvent, { type: 'tool.completed' }>;
-    }
-  | { type: 'discovery'; message: string };
-
-export function parseTextToBlocks(fullText: string): DialogueBlock[] {
-  const blocks: DialogueBlock[] = [];
-  let tempText = fullText;
-
-  while (tempText.length > 0) {
-    const thinkStartIdx = tempText.indexOf('<think>');
-    if (thinkStartIdx === -1) {
-      blocks.push({ type: 'text', text: tempText });
-      break;
-    }
-
-    if (thinkStartIdx > 0) {
-      blocks.push({ type: 'text', text: tempText.slice(0, thinkStartIdx) });
-    }
-
-    const thinkEndIdx = tempText.indexOf('</think>', thinkStartIdx + 7);
-    if (thinkEndIdx === -1) {
-      // Thinking tag is open (still streaming)
-      blocks.push({ type: 'reasoning', text: tempText.slice(thinkStartIdx + 7), isRunning: true });
-      break;
-    }
-
-    blocks.push({ type: 'reasoning', text: tempText.slice(thinkStartIdx + 7, thinkEndIdx), isRunning: false });
-    tempText = tempText.slice(thinkEndIdx + 8);
-  }
-
-  return blocks;
-}
-
-export function groupEventsToBlocks(events: AgentEvent[]): DialogueBlock[] {
-  const blocks: DialogueBlock[] = [];
-  const activeToolBlocks = new Map<string, number>();
-  let accumulatedText = '';
-
-  const flushText = () => {
-    if (accumulatedText.length > 0) {
-      blocks.push(...parseTextToBlocks(accumulatedText));
-      accumulatedText = '';
-    }
-  };
-
-  for (const event of events) {
-    if (event.type === 'assistant.delta') {
-      accumulatedText += event.text;
-    } else {
-      flushText(); // Ensure text before a tool call is fully parsed
-
-      if (event.type === 'tool.started') {
-        const blockIndex = blocks.length;
-        blocks.push({
-          type: 'tool',
-          name: event.name,
-          startedEvent: event
-        });
-        activeToolBlocks.set(event.name, blockIndex);
-      } else if (event.type === 'tool.completed') {
-        const blockIndex = activeToolBlocks.get(event.name);
-        if (blockIndex !== undefined) {
-          const block = blocks[blockIndex];
-          if (block && block.type === 'tool') {
-            block.completedEvent = event;
-          }
-          activeToolBlocks.delete(event.name);
-        } else {
-          // Fallback
-          for (let i = blocks.length - 1; i >= 0; i--) {
-            const block = blocks[i];
-            if (block && block.type === 'tool' && block.name === event.name && !block.completedEvent) {
-              block.completedEvent = event;
-              break;
-            }
-          }
-        }
-      } else if (event.type === 'tool.discovery') {
-        blocks.push({
-          type: 'discovery',
-          message: event.message
-        });
-      }
-    }
-  }
-
-  flushText(); // Flush leftover text
-
-  return blocks;
-}
-
-function DialogueReasoningBlock({ text, isRunning }: { text: string; isRunning: boolean }) {
-  const [expanded, setExpanded] = useState(true);
-
-  return (
-    <div className="flex flex-col w-full rounded-[var(--radius-pill)] border border-white/10 bg-white/5 overflow-hidden animate-fade-in select-none my-1">
-      {/* Header Bar */}
-      <div className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/5 transition-all duration-150" onClick={() => setExpanded(!expanded)}>
-        <span className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-md bg-cyan-500/20 text-cyan-400">
-          {isRunning ? (
-            <span className="h-2.5 w-2.5 animate-spin rounded-full border-[1.2px] border-cyan-400 border-t-transparent" />
-          ) : (
-            <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96-.44 2.5 2.5 0 0 1 0-3.12 3 3 0 0 1 0-4.88 2.5 2.5 0 0 1 0-3.12A2.5 2.5 0 0 1 9.5 2Z" />
-              <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96-.44 2.5 2.5 0 0 0 0-3.12 3 3 0 0 0 0-4.88 2.5 2.5 0 0 0 0-3.12A2.5 2.5 0 0 0 14.5 2Z" />
-            </svg>
-          )}
-        </span>
-        <span className="text-[11.5px] font-semibold text-white/80">思考过程</span>
-        {isRunning && <span className="text-[9px] font-bold text-cyan-400 animate-pulse ml-auto uppercase tracking-wider">Thinking</span>}
-        <span className={`arrow text-[8px] text-white/40 transition-transform duration-150 leading-none ml-auto ${expanded ? 'rotate-90' : 'rotate-0'}`}>
-          ▶
-        </span>
-      </div>
-
-      {/* Content Area */}
-      {expanded && (
-        <div className="px-3 pb-3 pt-1 border-t border-white/5 max-h-[220px] overflow-y-auto pr-1 scrollbar-thin text-xs text-white/55 leading-relaxed break-words font-sans select-text selection:bg-white/10">
-          <MarkdownRenderer value={text} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function DialogueBlocksRenderer({ blocks }: { blocks: DialogueBlock[] }) {
-  if (!blocks || blocks.length === 0) return null;
-  return (
-    <div className="flex flex-col gap-3 w-full">
-      {blocks.map((block, idx) => {
-        if (block.type === 'text') {
-          return (
-            <article key={idx} className="agent-text text-sm markdown-body w-full animate-fade-in">
-              <MarkdownRenderer value={block.text} />
-            </article>
-          );
-        } else if (block.type === 'reasoning') {
-          return <DialogueReasoningBlock key={idx} text={block.text} isRunning={block.isRunning} />;
-        } else if (block.type === 'tool') {
-          const isRunning = !block.completedEvent;
-          return (
-            <div
-              key={idx}
-              className="flex items-center gap-2 rounded-[var(--radius-pill)] border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] transition-all duration-150 animate-fade-in select-none w-full"
-            >
-              {/* 状态图示 */}
-              <span className="relative inline-flex h-3 w-3 shrink-0 items-center justify-center">
-                {isRunning ? (
-                  <span className="h-2.5 w-2.5 animate-spin rounded-full border-[1.2px] border-white/60 border-t-transparent" />
-                ) : (
-                  <svg viewBox="0 0 12 12" className="h-2.5 w-2.5 text-emerald-400" fill="none">
-                    <path d="M2.5 6.5l2.5 2.5 4.5-5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                )}
-              </span>
-              {/* 工具名称 */}
-              <span className="font-semibold text-white/95 truncate">{block.name}</span>
-              {/* 状态右文本 */}
-              <span className="text-[9px] text-white/55 font-bold ml-auto uppercase tracking-wider">{isRunning ? 'Running' : 'Done'}</span>
-            </div>
-          );
-        } else if (block.type === 'discovery') {
-          return (
-            <p key={idx} className="tool-discovery text-white/60 text-[13px] leading-relaxed animate-fade-in">
-              {block.message}
-            </p>
-          );
-        }
-        return null;
-      })}
-    </div>
-  );
-}
 
 export function App() {
   const overlayDisplayId = useMemo(() => {
@@ -598,6 +155,7 @@ export function App() {
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [fetchModelsError, setFetchModelsError] = useState<string | null>(null);
   const [hoveredAttachment, setHoveredAttachment] = useState<'window' | 'selection' | 'entity' | 'cua' | null>(null);
+  const { tasks: cuaTasks, cancelTask: cancelCuaTask } = useCuaTasks();
 
   const showFullContext = detached && (historyTurns.length > 0 || state !== 'composing');
 
@@ -2069,6 +1627,8 @@ export function App() {
         } as CSSProperties
       }
     >
+      <CuaTaskPanel tasks={cuaTasks} onCancel={cancelCuaTask} />
+
       {hold?.state === 'holding' && <HoldRing cursor={hold.cursor} progress={hold.progress} />}
 
       {active && (
@@ -2924,3 +2484,4 @@ export function App() {
     </div>
   );
 }
+

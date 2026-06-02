@@ -39,7 +39,36 @@ export type SubmitInstructionResponse = {
   requestId: string;
   backend: AgentBackendId;
   conversationId: string;
+  taskId?: string;
 };
+
+export type CuaTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+
+export type CuaTaskSummary = {
+  id: string;
+  conversationId: string;
+  instruction: string;
+  windowTitle?: string;
+  status: CuaTaskStatus;
+  createdAt: number;
+  startedAt?: number;
+  endedAt?: number;
+  error?: string;
+  requestId: string;
+  backend: AgentBackendId;
+  eventCount: number;
+};
+
+export type CuaTaskEventPayload =
+  | {
+      type: 'task.updated';
+      task: CuaTaskSummary;
+    }
+  | {
+      type: 'agent-event';
+      task: CuaTaskSummary;
+      agentEvent: AgentEvent;
+    };
 
 export type SaveSettingsPatch = Partial<AppSettings> & {
   localVlmApiKey?: string;
@@ -127,6 +156,7 @@ export type DesktopApi = {
   onGlobalMouseDown(cb: (cursor: CursorPayload) => void): () => void;
   onHoldProgress(cb: (payload: HoldProgressPayload) => void): () => void;
   onAgentEvent(cb: (event: AgentEvent) => void): () => void;
+  onCuaTaskEvent(cb: (payload: CuaTaskEventPayload) => void): () => void;
   onCaptureActivity(cb: (payload: CaptureActivityPayload) => void): () => void;
   deactivate(): void;
   ready(): void;
@@ -136,6 +166,8 @@ export type DesktopApi = {
   readSelection(req?: ReadSelectionRequest): Promise<ReadSelectionResponse>;
   insertText(req: InsertTextRequest): Promise<InsertTextResponse>;
   submitInstruction(req: SubmitInstructionRequest): Promise<SubmitInstructionResponse>;
+  listCuaTasks(): Promise<CuaTaskSummary[]>;
+  cancelCuaTask(taskId: string): Promise<void>;
   approveAgentRequest(id: string, decision: ApprovalDecision): Promise<void>;
   cancelRun(): void;
   getSettings(): Promise<AppSettings>;

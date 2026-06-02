@@ -4,6 +4,8 @@ import type { AppSettings } from '@openpointer/storage';
 import { OP_CHANNELS } from '../shared/ipc.js';
 import type {
   CaptureActivityPayload,
+  CuaTaskEventPayload,
+  CuaTaskSummary,
   CursorPayload,
   DesktopApi,
   GroundingPreviewResponse,
@@ -32,6 +34,7 @@ const api: DesktopApi = {
   onGlobalMouseDown: (cb) => on<CursorPayload>(OP_CHANNELS.GlobalMouseDown, cb),
   onHoldProgress: (cb) => on<HoldProgressPayload>(OP_CHANNELS.HoldProgress, cb),
   onAgentEvent: (cb) => on<AgentEvent>(OP_CHANNELS.AgentEvent, cb),
+  onCuaTaskEvent: (cb) => on<CuaTaskEventPayload>(OP_CHANNELS.CuaTaskEvent, cb),
   onCaptureActivity: (cb) => on<CaptureActivityPayload>(OP_CHANNELS.CaptureActivity, cb),
   deactivate: () => ipcRenderer.send(OP_CHANNELS.RequestDeactivate),
   ready: () => ipcRenderer.send(OP_CHANNELS.RendererReady),
@@ -41,6 +44,8 @@ const api: DesktopApi = {
   readSelection: (req?: ReadSelectionRequest) => ipcRenderer.invoke(OP_CHANNELS.ReadSelection, req) as Promise<ReadSelectionResponse>,
   insertText: (req: InsertTextRequest) => ipcRenderer.invoke(OP_CHANNELS.InsertText, req) as Promise<InsertTextResponse>,
   submitInstruction: (req: SubmitInstructionRequest) => ipcRenderer.invoke(OP_CHANNELS.SubmitInstruction, req) as Promise<SubmitInstructionResponse>,
+  listCuaTasks: () => ipcRenderer.invoke(OP_CHANNELS.CuaTaskList) as Promise<CuaTaskSummary[]>,
+  cancelCuaTask: (taskId) => ipcRenderer.invoke(OP_CHANNELS.CuaTaskCancel, taskId) as Promise<void>,
   approveAgentRequest: (id, decision) => ipcRenderer.invoke(OP_CHANNELS.ApproveAgentRequest, id, decision) as Promise<void>,
   cancelRun: () => ipcRenderer.send(OP_CHANNELS.CancelRun),
   getSettings: () => ipcRenderer.invoke(OP_CHANNELS.GetSettings) as Promise<AppSettings>,

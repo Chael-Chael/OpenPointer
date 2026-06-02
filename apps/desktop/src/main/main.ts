@@ -9,7 +9,6 @@ import {
   createAgentBridge,
   resolveBackendForEnvelope,
   buildAgentContextEnvelope,
-  type AgentBridge,
   type AgentBridgeRegistryConfig,
   type ApprovalDecision
 } from '@openpointer/agent-bridge';
@@ -28,6 +27,7 @@ import type {
 import { CuaBroker } from './cua-broker.js';
 import { CuaGroundingProvider } from './cua-grounding.js';
 import { CuaSidecarManager, type CuaToolResult } from './cua-sidecar.js';
+import { CuaTaskManager, type CuaTaskRuntime } from './cua-task-manager.js';
 import { loadLocalEnv } from './env.js';
 import { getClaudeAgentApiKey, getCodexApiKey, getHermesApiKey, getLocalVlmApiKey, getOpenCodeApiKey, getSettings, saveSettings } from './settings.js';
 import { ChatHistoryManager } from './history.js';
@@ -50,11 +50,10 @@ let active = false;
 let activeDisplayId: number | null = null;
 let lastCursor: CursorPayload | null = null;
 let lastActivationCursor: CursorPayload | null = null;
-let activeAbort: AbortController | null = null;
-let activeBridge: AgentBridge | null = null;
 const cuaSidecar = new CuaSidecarManager(repoRoot);
 const cuaGrounding = new CuaGroundingProvider(cuaSidecar);
 const cuaBroker = new CuaBroker(cuaSidecar);
+const cuaTaskManager = new CuaTaskManager(4);
 const chatHistory = new ChatHistoryManager();
 
 // Single source of truth for the CUA tools exposed to the agent. This list is
@@ -174,6 +173,14 @@ function sendToDisplay(displayId: number, channel: string, payload?: unknown): v
   if (!win || win.isDestroyed()) return;
   win.webContents.send(channel, payload);
 }
+
+cuaTaskManager.on('taskEvent', (payload) => {
+  broadcast(OP_CHANNELS.CuaTaskEvent, payload);
+});
+
+cuaTaskManager.on('agentEvent', (taskId, agentEvent) => {
+  if (cuaTaskManager.isForeground(taskId)) broadcast(OP_CHANNELS.AgentEvent, agentEvent);
+});
 
 function displayIdForWebContents(sender: Electron.WebContents): number | undefined {
   for (const [displayId, win] of windows) {
@@ -324,9 +331,6 @@ function deactivate(): void {
   active = false;
   activeDisplayId = null;
   unregisterEscapeShortcut();
-  activeAbort?.abort();
-  activeAbort = null;
-  activeBridge = null;
   broadcast(OP_CHANNELS.Deactivate);
   for (const [displayId, win] of windows) {
     if (!win.isDestroyed()) setOverlayInteractive(displayId, false);
@@ -481,7 +485,7 @@ function registerIpc(): void {
   });
 
   ipcMain.on(OP_CHANNELS.RequestDeactivate, () => deactivate());
-  ipcMain.on(OP_CHANNELS.CancelRun, () => activeAbort?.abort());
+  ipcMain.on(OP_CHANNELS.CancelRun, () => cuaTaskManager.cancelForeground());
 
   ipcMain.on(OP_CHANNELS.RendererReady, (event) => {
     const displayId = displayIdForWebContents(event.sender);
@@ -562,11 +566,16 @@ function registerIpc(): void {
       cuaBroker.approve(id, decision === 'deny' ? 'deny' : 'approve');
       return;
     }
-    await activeBridge?.approve?.(id, decision);
+    await cuaTaskManager.approve(id, decision);
+  });
+
+  ipcMain.handle(OP_CHANNELS.CuaTaskList, () => cuaTaskManager.list());
+
+  ipcMain.handle(OP_CHANNELS.CuaTaskCancel, (_event, taskId: string) => {
+    cuaTaskManager.cancel(taskId);
   });
 
   ipcMain.handle(OP_CHANNELS.SubmitInstruction, async (event, req: SubmitInstructionRequest) => {
-    activeAbort?.abort();
     const settings = getSettings();
     const cursor = req.cursor ?? lastActivationCursor ?? lastCursor ?? cursorPayload();
     const includeCua = Boolean(req.includeCua) && settings.cuaMode !== 'off';
@@ -619,13 +628,16 @@ function registerIpc(): void {
     const config = bridgeConfig(settings);
     const backend = resolveBackendForEnvelope(initialEnvelope, config);
     const backendSessionId = backend === 'claude-agent' ? conversation?.backendSessions?.claudeAgent?.sessionId : undefined;
+    let submittedTaskId: string | undefined;
     const cuaBrokerSession =
       context.grounding?.status === 'matched'
         ? await cuaBroker.ensureStarted({
             requireApprovalBeforeCua: settings.requireApprovalBeforeCua,
             allowedTools: CUA_AGENT_TOOLS,
             localTools: createOpenPointerTools(context),
-            emit: (agentEvent) => event.sender.send(OP_CHANNELS.AgentEvent, agentEvent)
+            emit: (agentEvent) => {
+              if (submittedTaskId) cuaTaskManager.emitAgentEvent(submittedTaskId, agentEvent);
+            }
           })
         : undefined;
     const envelope: AgentContextEnvelope = {
@@ -644,31 +656,23 @@ function registerIpc(): void {
           ]
         : initialEnvelope.toolServers
     };
-    const controller = new AbortController();
-    activeAbort = controller;
-    activeBridge = createAgentBridge(backend, config);
-    void streamBridgeEvents(
-      event.sender,
-      activeBridge,
+    submittedTaskId = cuaTaskManager.submit({
+      conversationId,
+      instruction: req.text,
+      windowTitle: context.window?.title || context.window?.app || context.window?.process,
+      bridge: createAgentBridge(backend, config),
       envelope,
-      controller,
-      settings.localVlmEnabled && backend !== 'local-vlm',
-      cuaBrokerSession?.sessionId,
-      backendSessionId
-    );
-    return { requestId: envelope.requestId, backend, conversationId };
+      brokerSessionId: cuaBrokerSession?.sessionId,
+      backendSessionId,
+      allowLocalFallback: settings.localVlmEnabled && backend !== 'local-vlm',
+      cleanup: cuaBrokerSession ? () => cuaBroker.releaseSession(cuaBrokerSession.sessionId) : undefined,
+      runner: streamBridgeEvents
+    });
+    return { requestId: envelope.requestId, backend, conversationId, taskId: submittedTaskId };
   });
 }
 
-async function streamBridgeEvents(
-  sender: Electron.WebContents,
-  bridge: AgentBridge,
-  envelope: AgentContextEnvelope,
-  controller: AbortController,
-  allowLocalFallback: boolean,
-  cuaBrokerSessionId?: string,
-  backendSessionId?: string
-): Promise<void> {
+async function streamBridgeEvents(task: CuaTaskRuntime, forward: (event: AgentEvent) => void): Promise<void> {
   let emittedStarted = false;
   let sawTerminal = false;
   let fullAnswer = '';
@@ -677,38 +681,36 @@ async function streamBridgeEvents(
   const toolEvents: Array<Extract<AgentEvent, { type: 'tool.started' | 'tool.completed' }>> = [];
   const events: AgentEvent[] = [];
 
-  const forward = (agentEvent: AgentEvent) => {
-    if (sender.isDestroyed() || activeAbort !== controller || activeBridge !== bridge) return;
-    sender.send(OP_CHANNELS.AgentEvent, agentEvent);
+  const record = (agentEvent: AgentEvent) => {
+    if (task.controller.signal.aborted) return;
+    forward(agentEvent);
     if (agentEvent.type === 'run.completed' || agentEvent.type === 'run.failed') sawTerminal = true;
-    if (agentEvent.type === 'tool.started' || agentEvent.type === 'tool.completed') {
-      toolEvents.push(agentEvent);
-    }
+    if (agentEvent.type === 'tool.started' || agentEvent.type === 'tool.completed') toolEvents.push(agentEvent);
     events.push(agentEvent);
   };
 
   try {
-    for await (const agentEvent of bridge.run(envelope, {
-      signal: controller.signal,
-      sessionKey: sessionKeyForContext(envelope.pointerContext),
-      backendSessionId
+    for await (const agentEvent of task.bridge.run(task.envelope, {
+      signal: task.controller.signal,
+      sessionKey: sessionKeyForContext(task.envelope.pointerContext),
+      backendSessionId: task.backendSessionId
     })) {
-      if (activeAbort !== controller || activeBridge !== bridge) break;
-      if (agentEvent.type === 'run.failed' && agentEvent.recoverable && allowLocalFallback && !emittedStarted) {
+      if (task.controller.signal.aborted) break;
+      if (agentEvent.type === 'run.failed' && agentEvent.recoverable && task.allowLocalFallback && !emittedStarted) {
         // Recover silently via the local VLM instead of surfacing the primary failure to the UI.
-        const localEnvelope: AgentContextEnvelope = { ...envelope, routing: { ...envelope.routing, backend: 'local-vlm' } };
-        forward({ type: 'assistant.delta', text: 'Agent backend is unavailable. Falling back to local VLM.' });
+        const localEnvelope: AgentContextEnvelope = { ...task.envelope, routing: { ...task.envelope.routing, backend: 'local-vlm' } };
+        record({ type: 'assistant.delta', text: 'Agent backend is unavailable. Falling back to local VLM.' });
         const localBridge = createAgentBridge('local-vlm', bridgeConfig(getSettings()));
-        for await (const localEvent of localBridge.run(localEnvelope, { signal: controller.signal })) {
-          if (activeAbort !== controller || activeBridge !== bridge) break;
-          forward(localEvent);
+        for await (const localEvent of localBridge.run(localEnvelope, { signal: task.controller.signal })) {
+          if (task.controller.signal.aborted) break;
+          record(localEvent);
           if (localEvent.type === 'assistant.delta') fullAnswer += localEvent.text;
         }
         break;
       }
-      forward(agentEvent);
-      if (agentEvent.type === 'backend.session' && agentEvent.backend === 'claude-agent' && envelope.conversationId) {
-        await chatHistory.setClaudeAgentSession(envelope.conversationId, agentEvent.sessionId);
+      record(agentEvent);
+      if (agentEvent.type === 'backend.session' && agentEvent.backend === 'claude-agent' && task.envelope.conversationId) {
+        await chatHistory.setClaudeAgentSession(task.envelope.conversationId, agentEvent.sessionId);
       }
       if (agentEvent.type === 'run.started') emittedStarted = true;
       if (agentEvent.type === 'assistant.delta') fullAnswer += agentEvent.text;
@@ -716,27 +718,23 @@ async function streamBridgeEvents(
 
     // Guarantee the UI leaves the streaming state even if the runtime stream
     // closed without a terminal (run.completed / run.failed) event.
-    if (!controller.signal.aborted && activeAbort === controller && activeBridge === bridge && !sawTerminal) {
-      forward({ type: 'run.completed', text: fullAnswer || undefined });
+    if (!task.controller.signal.aborted && !sawTerminal) {
+      record({ type: 'run.completed', text: fullAnswer || undefined });
     }
   } catch (error) {
-    if (!controller.signal.aborted && activeAbort === controller && activeBridge === bridge && !sawTerminal) {
-      forward({
+    if (!task.controller.signal.aborted && !sawTerminal) {
+      record({
         type: 'run.failed',
         error: error instanceof Error ? error.message : String(error),
         recoverable: true
       });
     }
-  } finally {
-    if (activeAbort === controller) activeAbort = null;
-    if (activeBridge === bridge) activeBridge = null;
-    if (cuaBrokerSessionId) cuaBroker.releaseSession(cuaBrokerSessionId);
   }
 
-  if (!controller.signal.aborted && envelope.conversationId && fullAnswer) {
+  if (!task.controller.signal.aborted && task.envelope.conversationId && fullAnswer) {
     const thinkingTime = Math.round((Date.now() - startTime) / 1000);
     try {
-      await chatHistory.appendTurn(envelope.conversationId, {
+      await chatHistory.appendTurn(task.envelope.conversationId, {
         id: `turn-${Date.now()}-assistant`,
         role: 'assistant',
         text: fullAnswer,
@@ -1637,7 +1635,7 @@ app.on('window-all-closed', () => {
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
   if (cursorTimer) clearInterval(cursorTimer);
-  activeAbort?.abort();
+  cuaTaskManager.cancelAll();
   cuaBroker.stop();
   cuaSidecar.stop();
   clearHoldTimers();
