@@ -152,6 +152,7 @@ function summarizeConversationContextHistory(envelope: AgentContextEnvelope) {
                       name: context.target.name,
                       role: context.target.role,
                       bbox: context.target.bbox,
+                      state: context.target.state,
                       groundingRef: context.target.groundingRef
                     }
                   : undefined,
@@ -201,6 +202,7 @@ function summarizeMultimodalContext(envelope: AgentContextEnvelope) {
                   name: context.target.name,
                   role: context.target.role,
                   bbox: context.target.bbox,
+                  state: context.target.state,
                   groundingRef: context.target.groundingRef
                 }
               : undefined,
@@ -210,6 +212,7 @@ function summarizeMultimodalContext(envelope: AgentContextEnvelope) {
               name: entity.name,
               role: entity.role,
               bbox: entity.bbox,
+              state: entity.state,
               groundingRef: entity.groundingRef
             }))
           }
@@ -223,7 +226,8 @@ function summarizeMultimodalContext(envelope: AgentContextEnvelope) {
             text: context.target.text,
             name: context.target.name,
             role: context.target.role,
-            bbox: context.target.bbox
+            bbox: context.target.bbox,
+            state: context.target.state
           }
         : undefined
     }

@@ -58,6 +58,7 @@ export function buildPointerContext(input: BuildContextInput): PointerContext {
       name: entity.name,
       bbox: entity.bbox,
       confidence: entity.confidence,
+      state: entity.state,
       groundingRef: entity.groundingRef
     })),
     createdAt: Date.now()

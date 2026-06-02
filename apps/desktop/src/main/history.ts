@@ -80,4 +80,17 @@ export class ChatHistoryManager {
     await this.save();
     return conv;
   }
+
+  async setClaudeAgentSession(conversationId: string, sessionId: string): Promise<Conversation | null> {
+    await this.load();
+    const conv = this.conversations.get(conversationId);
+    if (!conv) return null;
+    conv.backendSessions = {
+      ...conv.backendSessions,
+      claudeAgent: { sessionId }
+    };
+    conv.updatedAt = Date.now();
+    await this.save();
+    return conv;
+  }
 }

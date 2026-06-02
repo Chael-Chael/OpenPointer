@@ -1,8 +1,88 @@
+diff --git a/libs/cua-driver/rust/crates/platform-windows/src/uia/mod.rs b/libs/cua-driver/rust/crates/platform-windows/src/uia/mod.rs
+index 8c3e7d4a..45c9b7d2 100644
+--- a/libs/cua-driver/rust/crates/platform-windows/src/uia/mod.rs
++++ b/libs/cua-driver/rust/crates/platform-windows/src/uia/mod.rs
+@@ -17,7 +17,7 @@ use windows::Win32::UI::Accessibility::{
+     UIA_IsEnabledPropertyId, UIA_IsOffscreenPropertyId, UIA_NamePropertyId,
+     UIA_ProcessIdPropertyId, UIA_ValueValuePropertyId,
+-    UIA_InvokePatternId, UIA_SelectionItemPatternId,
++    IUIAutomationSelectionItemPattern, UIA_InvokePatternId, UIA_SelectionItemPatternId,
+     UIA_TogglePatternId, UIA_ExpandCollapsePatternId, UIA_TextPatternId,
+     UIA_ValuePatternId, UIA_RangeValuePatternId, UIA_ScrollPatternId,
+     TreeScope_Children, TreeScope_Subtree,
+@@ -49,6 +49,7 @@ pub struct UiaNode {
+     pub help_text: Option<String>,
+     pub actions: Vec<String>,
++    pub is_selected: Option<bool>,
+     /// Raw COM pointer (IUIAutomationElement for UIA path, IAccessible for
+     /// MSAA path) as usize. Retained -- `ElementCache` Drop releases it via
+     /// the `kind`-appropriate vtable.
+@@ -390,5 +391,6 @@ unsafe fn walk_cached(
+     let is_offscreen = read_cached_bool(element, UIA_IsOffscreenPropertyId).unwrap_or(false);
+     let actions = detect_cached_actions(element, is_enabled);
++    let is_selected = read_cached_selection_item_selected(element);
+     let is_actionable = !actions.is_empty() && is_enabled && !is_offscreen;
+     let has_content = name.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false)
+         || value.as_deref().map(|s| !s.trim().is_empty()).unwrap_or(false);
+@@ -411,6 +413,7 @@ unsafe fn walk_cached(
+                 automation_id: automation_id.clone(),
+                 help_text: help_text.clone(),
+                 actions: actions.clone(),
++                is_selected,
+                 element_ptr: ptr,
+                 center_x,
+                 center_y,
+@@ -426,6 +429,7 @@ unsafe fn walk_cached(
+                 automation_id: automation_id.clone(),
+                 help_text: help_text.clone(),
+                 actions: vec![],
++                is_selected,
+                 element_ptr: ptr,
+                 center_x: 0,
+                 center_y: 0,
+@@ -510,5 +514,18 @@ fn read_cached_bounding_rect_full(element: &IUIAutomationElement) -> (i32, i32,
+     }
+ }
++
++fn read_cached_selection_item_selected(element: &IUIAutomationElement) -> Option<bool> {
++    unsafe {
++        element
++            .GetCachedPattern(UIA_SelectionItemPatternId)
++            .ok()
++            .and_then(|pattern| pattern.cast::<IUIAutomationSelectionItemPattern>().ok())
++            .and_then(|selection| selection.CurrentIsSelected().ok())
++            .map(|value| value.as_bool())
++    }
++}
++
+ fn detect_cached_actions(element: &IUIAutomationElement, is_enabled: bool) -> Vec<String> {
+     if !is_enabled { return vec![]; }
+     let mut actions = Vec::new();
+diff --git a/libs/cua-driver/rust/crates/platform-windows/src/msaa.rs b/libs/cua-driver/rust/crates/platform-windows/src/msaa.rs
+index cfd7b334..1e0b9f71 100644
+--- a/libs/cua-driver/rust/crates/platform-windows/src/msaa.rs
++++ b/libs/cua-driver/rust/crates/platform-windows/src/msaa.rs
+@@ -181,6 +181,7 @@ fn walk_node(
+                 automation_id: None,
+                 help_text: None,
+                 actions: actions.clone(),
++                is_selected: None,
+                 element_ptr: ptr,
+                 center_x,
+                 center_y,
+@@ -196,6 +197,7 @@ fn walk_node(
+                 automation_id: None,
+                 help_text: None,
+                 actions: Vec::new(),
++                is_selected: None,
+                 element_ptr: ptr,
+                 center_x: 0,
+                 center_y: 0,
 diff --git a/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs b/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs
-index 05a388e0..fe0ec7fe 100644
+index 05a388e0..d7f88caa 100644
 --- a/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs
 +++ b/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs
-@@ -681,6 +681,29 @@ impl Tool for GetWindowStateTool {
+@@ -681,6 +681,30 @@ impl Tool for GetWindowStateTool {
                      }
                      structured["element_count"] = json!(count);
                      structured["tree_markdown"] = json!(tr.tree_markdown);
@@ -23,6 +103,7 @@ index 05a388e0..fe0ec7fe 100644
 +                                "automation_id": &n.automation_id,
 +                                "help_text": &n.help_text,
 +                                "actions": &n.actions,
++                                "is_selected": n.is_selected,
 +                                "rect": rect,
 +                                "center": { "x": n.center_x, "y": n.center_y },
 +                                "source": if n.msaa_role.is_some() { "msaa" } else { "uia" },

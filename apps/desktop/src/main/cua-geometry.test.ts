@@ -9,6 +9,7 @@ import {
   parseTreeMarkdown,
   resolveHoveredEntity,
   screenRectToLocal,
+  selectedStateFromCuaElement,
   type DisplayBounds
 } from './cua-geometry.js';
 
@@ -109,6 +110,19 @@ describe('kindFromControlType', () => {
     expect(kindFromControlType('Pane')).toBe('container');
     expect(kindFromControlType('Group')).toBe('container');
     expect(kindFromControlType('Custom')).toBe('container');
+  });
+});
+
+describe('selectedStateFromCuaElement', () => {
+  it('recognizes selected flags from structured CUA elements', () => {
+    expect(selectedStateFromCuaElement({ is_selected: true })).toEqual({ selected: true });
+    expect(selectedStateFromCuaElement({ selected: 'true' })).toEqual({ selected: true });
+    expect(selectedStateFromCuaElement({ isSelected: 1 })).toEqual({ selected: true });
+  });
+
+  it('preserves explicit false and ignores unknown values', () => {
+    expect(selectedStateFromCuaElement({ is_selected: false })).toEqual({ selected: false });
+    expect(selectedStateFromCuaElement({ selected: 'maybe' })).toBeUndefined();
   });
 });
 

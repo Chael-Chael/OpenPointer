@@ -141,12 +141,13 @@ export class ClaudeAgentBridge implements AgentBridge {
     this.resolvedPermissionResults.clear();
     this.inFlightPermissionResults.clear();
     const permissionEnv = await this.ensurePermissionServer();
-    const runEnvelope = materializeAttachmentFiles(envelope);
+    const runEnvelope = materializeAttachmentFiles({ ...envelope, history: undefined });
 
     try {
       const sdkMessages = sdk.query({
         prompt: `${buildAgentInstructions(runEnvelope)}\n\n${buildAgentInput(runEnvelope)}`,
         options: {
+          ...(options.backendSessionId ? { resume: options.backendSessionId } : {}),
           allowedTools: allowedToolsForEnvelope(envelope),
           canUseTool: (toolName: string, input: Record<string, unknown>, permissionOptions: Record<string, unknown>) =>
             this.requestToolApproval(toolName, input, permissionOptions, approvalEvents),
@@ -161,7 +162,13 @@ export class ClaudeAgentBridge implements AgentBridge {
         }
       });
 
+      let emittedBackendSessionId: string | undefined;
       for await (const raw of mergeSdkMessagesWithEvents(sdkMessages, approvalEvents)) {
+        const sessionId = claudeSessionIdFromMessage(raw);
+        if (sessionId && sessionId !== emittedBackendSessionId) {
+          emittedBackendSessionId = sessionId;
+          yield { type: 'backend.session', backend: this.id, sessionId };
+        }
         yield mapClaudeMessage(raw);
       }
       yield { type: 'run.completed' };
@@ -484,9 +491,17 @@ function permissionRuleMatches(rule: PermissionRule, toolName: string, input: Re
 }
 
 function isAgentEventType(type: string): type is AgentEvent['type'] {
-  return ['run.started', 'assistant.delta', 'tool.discovery', 'tool.started', 'tool.completed', 'approval.requested', 'run.completed', 'run.failed'].includes(
-    type
-  );
+  return [
+    'run.started',
+    'backend.session',
+    'assistant.delta',
+    'tool.discovery',
+    'tool.started',
+    'tool.completed',
+    'approval.requested',
+    'run.completed',
+    'run.failed'
+  ].includes(type);
 }
 
 function getRealBinaryPath(inputPath: string): string | undefined {
@@ -842,6 +857,12 @@ function mapClaudeMessage(raw: unknown): AgentEvent {
   // Fallback - try to extract any text content
   const text = extractText(msg);
   return { type: 'assistant.delta', text };
+}
+
+function claudeSessionIdFromMessage(raw: unknown): string | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const msg = raw as Record<string, unknown>;
+  return typeof msg.session_id === 'string' ? msg.session_id : typeof msg.sessionId === 'string' ? msg.sessionId : undefined;
 }
 
 function extractText(msg: Record<string, unknown>): string {

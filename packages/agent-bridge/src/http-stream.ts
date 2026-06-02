@@ -145,9 +145,17 @@ function findEventBoundary(buffer: string): number {
 function isAgentEvent(raw: RuntimeEvent): raw is AgentEvent {
   return (
     typeof raw.type === 'string' &&
-    ['run.started', 'assistant.delta', 'tool.discovery', 'tool.started', 'tool.completed', 'approval.requested', 'run.completed', 'run.failed'].includes(
-      raw.type
-    )
+    [
+      'run.started',
+      'backend.session',
+      'assistant.delta',
+      'tool.discovery',
+      'tool.started',
+      'tool.completed',
+      'approval.requested',
+      'run.completed',
+      'run.failed'
+    ].includes(raw.type)
   );
 }
 

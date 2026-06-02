@@ -19,6 +19,7 @@ import {
 } from './state';
 import { backendLabel, backendReadiness, latestEvent, placeholderForState, secretConfigured, statusLabel } from './lib/backend-status';
 import { availablePanelHeight, computeShellPosition, focusPromptInput, normalizeSelection, resolvedPanelHeight, selectionFromDrag } from './lib/geometry';
+import { selectedCuaAttachmentTitle, selectedListItemsForContext } from './lib/cua-selection';
 import { HoldRing, ToolRows } from './components/fields';
 import { SettingsPanel } from './components/SettingsPanel';
 import { HistoryPanel } from './components/HistoryPanel';
@@ -55,6 +56,50 @@ function WindowGlyph({ size = 14 }: { size?: number }) {
       <circle cx="6.8" cy="4.75" r="0.55" fill="currentColor" />
     </svg>
   );
+}
+
+function EntityKindGlyph({ kind, size = 14 }: { kind: PointerEntity['kind']; size?: number }) {
+  if (kind === 'listitem') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M6 4h7M6 8h7M6 12h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        <circle cx="3" cy="4" r="0.8" fill="currentColor" />
+        <circle cx="3" cy="8" r="0.8" fill="currentColor" />
+        <circle cx="3" cy="12" r="0.8" fill="currentColor" />
+      </svg>
+    );
+  }
+  if (kind === 'text' || kind === 'input') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M4 3h8M8 3v10M5.5 13h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (kind === 'image') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <rect x="2.5" y="3" width="11" height="10" rx="1.8" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M3.5 11l3-3 2 2 1.5-1.5 2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="10.8" cy="5.8" r="0.8" fill="currentColor" />
+      </svg>
+    );
+  }
+  if (kind === 'container') return <WindowGlyph size={size} />;
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M8 2.5v3M8 10.5v3M2.5 8h3M10.5 8h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="8" cy="8" r="3" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
+}
+
+function entityKindTitle(entity: PointerEntity): string {
+  if (entity.kind === 'listitem') return 'Attached list item';
+  if (entity.kind === 'text' || entity.kind === 'input') return 'Attached text';
+  if (entity.kind === 'image') return 'Attached image';
+  if (entity.kind === 'container') return 'Attached window';
+  return 'Attached element';
 }
 
 const initialCursor: CursorPayload = { x: 300, y: 300, localX: 300, localY: 300, displayId: 0, dpr: 1 };
@@ -1120,8 +1165,15 @@ export function App() {
         .requestGrounding({ cursor: requestCursor })
         .then((preview) => {
           if (cancelled || groundingRequestSeqRef.current !== requestSeq) return;
+          const cursorStillNearRequest = cursorDistanceSquared(cursorRef.current, requestCursor) < minCursorDeltaSquared;
+          const hoveredEntityId = cursorStillNearRequest ? (preview.hoveredEntityId ?? null) : null;
           setCuaEntities(preview.entities);
-          setHoveredCuaEntityId(cursorDistanceSquared(cursorRef.current, requestCursor) < minCursorDeltaSquared ? (preview.hoveredEntityId ?? null) : null);
+          setHoveredCuaEntityId(hoveredEntityId);
+          const selectedListItems = selectedListItemsForContext(preview.entities);
+          if (selectedListItems.length > 0) {
+            setSelectedCuaEntities((current) => (current.length === 0 ? selectedListItems : current));
+            setDraftCuaEntities([]);
+          }
           lastCompletedAt = Date.now();
         })
         .catch(() => {
@@ -1742,6 +1794,7 @@ export function App() {
   const selectedEntity = useMemo(() => {
     return selectedCuaEntities[0];
   }, [selectedCuaEntities]);
+  const selectedCuaListItems = useMemo(() => selectedListItemsForContext(selectedCuaEntities), [selectedCuaEntities]);
 
   const cuaCandidateCursor = liveCuaPreview ? cursor : cuaPickerAnchor;
   const cuaHighlightRegion = useMemo(() => contextRegionAroundCursor(cuaCandidateCursor), [cuaCandidateCursor]);
@@ -1974,22 +2027,9 @@ export function App() {
     settingsOpen
   ]);
 
-  // Pointer tint state, by actual timing/priority:
-  //   'both'    teal   – submit-time screenshot taken with a selected CUA element
-  //   'capture' purple – submit-time screenshot only
-  //   'cua'     blue   – hovering over a CUA-grounded element (no screenshot yet)
-  //   'none'           – default glow
-  const pointerActivity = useMemo<'both' | 'capture' | 'cua' | 'none'>(() => {
-    if (captureActivity.active) return captureActivity.withCua ? 'both' : 'capture';
-    if (cuaEntities.length > 0) return 'cua';
-    return 'none';
-  }, [captureActivity.active, captureActivity.withCua, cuaEntities.length]);
 
-  const glowFillColor = useMemo(() => {
-    if (pointerActivity === 'capture') return '#8b5cf6';
-    if (pointerActivity === 'cua' || pointerActivity === 'both') return '#14b8a6';
-    return '#0D6FFF';
-  }, [pointerActivity]);
+
+  const glowFillColor = '#0D6FFF';
   const modalOpen = settingsOpen || historyOpen;
   const shellHiddenForContextCapture = selecting || Boolean(selectionDrag) || captureActivity.active;
   const overlayNeedsPointerEvents =
@@ -2033,7 +2073,7 @@ export function App() {
 
       {active && (
         <>
-          <CursorTrail x={cursor.localX} y={cursor.localY} enabled={active} />
+          <CursorTrail x={cursor.localX} y={cursor.localY} enabled={active} color={glowFillColor} />
           <svg
             className="absolute pointer-events-none z-0 animate-glow-breathe"
             style={{
@@ -2118,6 +2158,9 @@ export function App() {
                       onClick={(event) => selectCuaEntity(entity, event)}
                       title={entity.text ?? entity.name ?? entity.role ?? entity.kind}
                     >
+                      <span className="cua-picker-icon">
+                        <EntityKindGlyph kind={entity.kind} size={13} />
+                      </span>
                       <span className="cua-picker-main">
                         <span className="cua-picker-label">{entityLabel(entity)}</span>
                         <span className="cua-picker-meta">
@@ -2321,24 +2364,31 @@ export function App() {
                   {/* Inner Shadow Layer covering the ENTIRE card, inheriting border-radius */}
                   <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
                   <div className="flex items-center gap-2">
-                    <span className="text-base text-white/90">
-                      {selectedEntity.kind === 'text' ? '📝' : selectedEntity.kind === 'image' ? '🖼️' : selectedEntity.kind === 'container' ? '💻' : '🎯'}
+                    <span className="inline-flex text-white/90">
+                      <EntityKindGlyph kind={selectedEntity.kind} size={16} />
                     </span>
                     <div className="flex flex-col">
                       <span className="text-[12px] font-bold text-white/95 leading-tight">
-                        {selectedEntity.kind === 'text'
-                          ? '已附带文本'
-                          : selectedEntity.kind === 'image'
-                            ? '已附带图像'
-                            : selectedEntity.kind === 'container'
-                              ? '已附带窗口'
-                              : '已附带元素'}
+                        {selectedCuaListItems.length > 1 ? 'Attached selected list items' : entityKindTitle(selectedEntity)}
                       </span>
                       <span className="text-[9px] text-white/60 leading-none">Attached Context</span>
                     </div>
                   </div>
                   <div className="h-px bg-white/12 my-0.5" />
                   <div className="flex flex-col gap-1 text-[11px] text-white/85">
+                    {selectedCuaListItems.length > 0 && (
+                      <div className="rounded-[var(--radius-pill)] bg-white/5 p-1.5 text-white/85">
+                        <div className="mb-1 text-[9px] uppercase text-white/50">{selectedCuaListItems.length} selected list item{selectedCuaListItems.length === 1 ? '' : 's'}</div>
+                        <div className="grid gap-0.5">
+                          {selectedCuaListItems.slice(0, 5).map((entity) => (
+                            <div key={entity.id} className="truncate">
+                              {entityLabel(entity)}
+                            </div>
+                          ))}
+                          {selectedCuaListItems.length > 5 && <div className="text-[10px] text-white/50">+{selectedCuaListItems.length - 5} more</div>}
+                        </div>
+                      </div>
+                    )}
                     {selectedEntity.name && (
                       <div>
                         <span className="text-white/50">名称:</span> {selectedEntity.name}
@@ -2414,92 +2464,97 @@ export function App() {
               {/* Custom glassmorphic backend selector dropdown list, hovering above the small pill */}
               {backendDropdownOpen && (
                 <div
-                  className="backend-dropdown absolute left-0 z-10 min-w-[180px] p-1 border border-glass-border rounded-[var(--radius-pill)] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] animate-dropdown-appear flex flex-col gap-0.5"
+                  className="backend-dropdown absolute left-0 z-10 animate-dropdown-appear flex flex-row items-end gap-1"
                   style={{ bottom: `calc(100% + ${previewCardBottom}px)` }}
                 >
-                  {/* Inner Shadow Layer */}
-                  <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
-                  {selectableBackends.map((item) => {
-                    const isSelected = backend === item;
-                    const isClaude = item === 'claude-agent';
-                    const showSubmenu = isClaude && claudeSubmenuOpen;
-                    return (
-                      <div key={item} className="relative">
+                  {/* Column 1: Main backend list */}
+                  <div className="relative min-w-[180px] p-1 border border-glass-border rounded-[var(--radius-pill)] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] flex flex-col gap-0.5">
+                    {/* Inner Shadow Layer */}
+                    <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
+                    {selectableBackends.map((item) => {
+                      const isSelected = backend === item;
+                      const isClaude = item === 'claude-agent';
+                      const showSubmenu = isClaude && claudeSubmenuOpen;
+                      return (
+                        <div key={item} className="relative">
+                          <button
+                            type="button"
+                            className={`flex items-center justify-between w-full py-1.5 px-3 border-0 rounded-[var(--radius-pill)] bg-transparent text-left cursor-pointer transition-colors duration-140 font-semibold text-[11px] relative z-1 ${
+                              isSelected ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]' : 'text-white/80 hover:bg-white/10 hover:text-white'
+                            }`}
+                            onClick={() => {
+                              if (isClaude) {
+                                setClaudeSubmenuOpen(!claudeSubmenuOpen);
+                              } else {
+                                setBackend(item);
+                                setBackendDropdownOpen(false);
+                                window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+                              }
+                            }}
+                          >
+                            <span className="flex items-center gap-1.5">
+                              {getBackendIcon(item, 11)}
+                              <span>{backendLabel(item)}</span>
+                            </span>
+                            <span className="flex items-center gap-1">
+                              {isSelected && <span className="text-[9px] font-bold">✓</span>}
+                              {isClaude && <ChevronIcon size={6} isOpen={showSubmenu} />}
+                            </span>
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Column 2: Model sub-panel (shown when Claude submenu is open) */}
+                  {claudeSubmenuOpen && (
+                    <div className="relative min-w-[110px] p-1 border border-glass-border rounded-[var(--radius-pill)] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] flex flex-col gap-0.5 animate-dropdown-appear">
+                      <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
+                      <div className="text-[9px] text-white/50 uppercase tracking-wider px-3 pt-1.5 pb-0.5">Model</div>
+                      {['', 'sonnet', 'opus', 'haiku'].map((model) => (
                         <button
+                          key={model || 'default'}
                           type="button"
-                          className={`flex items-center justify-between w-full py-1.5 px-3 border-0 rounded-[var(--radius-pill)] bg-transparent text-left cursor-pointer transition-colors duration-140 font-semibold text-[11px] relative z-1 ${
-                            isSelected ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]' : 'text-white/80 hover:bg-white/10 hover:text-white'
+                          className={`w-full text-left py-1.5 px-3 border-0 rounded-[var(--radius-pill)] text-[11px] font-semibold cursor-pointer transition-colors ${
+                            (settings?.claudeAgentModel || '') === model
+                              ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]'
+                              : 'bg-transparent text-white/80 hover:bg-white/10 hover:text-white'
                           }`}
-                          onClick={() => {
-                            if (isClaude) {
-                              setClaudeSubmenuOpen(!claudeSubmenuOpen);
-                            } else {
-                              setBackend(item);
-                              setBackendDropdownOpen(false);
-                              window.setTimeout(() => focusPromptInput(inputRef.current), 0);
-                            }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void window.openPointer.saveSettings({ ...settings!, claudeAgentModel: model });
                           }}
                         >
-                          <span className="flex items-center gap-1.5">
-                            {getBackendIcon(item, 11)}
-                            <span>{backendLabel(item)}</span>
-                          </span>
-                          <span className="flex items-center gap-1">
-                            {isSelected && <span className="text-[9px] font-bold">✓</span>}
-                            {isClaude && <ChevronIcon size={6} isOpen={showSubmenu} />}
-                          </span>
+                          {model || 'Default'}
                         </button>
+                      ))}
+                    </div>
+                  )}
 
-                        {/* Claude submenu - Model and Effort */}
-                        {showSubmenu && (
-                          <div className="ml-2 mt-0.5 mb-1 p-1.5 bg-white/10 rounded-[10px] flex flex-col gap-1">
-                            {/* Model selector */}
-                            <div className="text-[9px] text-white/50 uppercase tracking-wider px-1">Model</div>
-                            {['', 'sonnet', 'opus', 'haiku'].map((model) => (
-                              <button
-                                key={model || 'default'}
-                                type="button"
-                                className={`w-full text-left px-2 py-1 rounded-[6px] text-[10px] border-0 cursor-pointer transition-colors ${
-                                  (settings?.claudeAgentModel || '') === model
-                                    ? 'bg-white text-[#0D6FFF] font-bold'
-                                    : 'bg-transparent text-white/70 hover:bg-white/15'
-                                }`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void window.openPointer.saveSettings({ ...settings!, claudeAgentModel: model });
-                                }}
-                              >
-                                {model || 'Default'}
-                              </button>
-                            ))}
-
-                            {/* Divider */}
-                            <div className="h-px bg-white/15 my-0.5" />
-
-                            {/* Effort selector */}
-                            <div className="text-[9px] text-white/50 uppercase tracking-wider px-1">Effort</div>
-                            {(['low', 'medium', 'high', 'max'] as const).map((effort) => (
-                              <button
-                                key={effort}
-                                type="button"
-                                className={`w-full text-left px-2 py-1 rounded-[6px] text-[10px] border-0 cursor-pointer transition-colors ${
-                                  (settings?.claudeAgentEffort || 'high') === effort
-                                    ? 'bg-white text-[#0D6FFF] font-bold'
-                                    : 'bg-transparent text-white/70 hover:bg-white/15'
-                                }`}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void window.openPointer.saveSettings({ ...settings!, claudeAgentEffort: effort });
-                                }}
-                              >
-                                {effort.charAt(0).toUpperCase() + effort.slice(1)}
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                  {/* Column 3: Effort sub-panel (shown when Claude submenu is open) */}
+                  {claudeSubmenuOpen && (
+                    <div className="relative min-w-[100px] p-1 border border-glass-border rounded-[var(--radius-pill)] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] flex flex-col gap-0.5 animate-dropdown-appear">
+                      <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
+                      <div className="text-[9px] text-white/50 uppercase tracking-wider px-3 pt-1.5 pb-0.5">Effort</div>
+                      {(['low', 'medium', 'high', 'max'] as const).map((effort) => (
+                        <button
+                          key={effort}
+                          type="button"
+                          className={`w-full text-left py-1.5 px-3 border-0 rounded-[var(--radius-pill)] text-[11px] font-semibold cursor-pointer transition-colors ${
+                            (settings?.claudeAgentEffort || 'high') === effort
+                              ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]'
+                              : 'bg-transparent text-white/80 hover:bg-white/10 hover:text-white'
+                          }`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void window.openPointer.saveSettings({ ...settings!, claudeAgentEffort: effort });
+                          }}
+                        >
+                          {effort.charAt(0).toUpperCase() + effort.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2598,14 +2653,18 @@ export function App() {
                           }}
                           onMouseEnter={() => setHoveredAttachment('entity')}
                           onMouseLeave={() => setHoveredAttachment(null)}
-                          title={`Attached: ${selectedCuaEntities.length} CUA element${selectedCuaEntities.length === 1 ? '' : 's'} (Click to remove)`}
+                          title={selectedCuaAttachmentTitle(selectedCuaEntities)}
                         >
                           <span
                             className="group-hover:hidden flex items-center justify-center text-white/90"
-                            style={{ fontSize: `${Math.max(10, Math.min(13, pillHeight - 14))}px` }}
                           >
-                            {selectedEntity.kind === 'text' ? '📝' : selectedEntity.kind === 'image' ? '🖼️' : selectedEntity.kind === 'container' ? '💻' : '🎯'}
+                            <EntityKindGlyph kind={selectedEntity.kind} size={Math.max(11, Math.min(14, pillHeight - 12))} />
                           </span>
+                          {selectedCuaListItems.length > 1 && (
+                            <span className="pointer-events-none absolute -right-1 -top-1 flex min-w-[14px] items-center justify-center rounded-full bg-white px-1 text-[8px] font-black leading-[14px] text-[#0D6FFF] shadow-[0_1px_4px_rgba(0,0,0,0.18)]">
+                              {selectedCuaListItems.length}
+                            </span>
+                          )}
                           <span
                             className="hidden group-hover:flex items-center justify-center text-white"
                             style={{ fontSize: `${Math.max(12, Math.min(14, pillHeight - 14))}px` }}

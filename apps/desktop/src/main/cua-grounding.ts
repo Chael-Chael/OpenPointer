@@ -14,7 +14,8 @@ import {
   providerPointForCursor,
   pointInRect,
   resolveHoveredEntity,
-  screenRectToLocal
+  screenRectToLocal,
+  selectedStateFromCuaElement
 } from './cua-geometry.js';
 
 type CuaWindowRecord = {
@@ -39,6 +40,9 @@ type CuaElementRecord = {
   boundingRect?: Rect | [number, number, number, number];
   frame?: Rect | [number, number, number, number];
   center?: { x: number; y: number };
+  is_selected?: unknown;
+  selected?: unknown;
+  isSelected?: unknown;
   source?: 'uia' | 'msaa';
 };
 
@@ -226,6 +230,7 @@ function entityFromCuaElement(
     accessibilityPath: `cua:${pid}:${windowId}:${element.element_index}`,
     confidence: 0.9,
     origin: 'accessibility',
+    state: selectedStateFromCuaElement(element),
     groundingRef: {
       provider: 'cua',
       pid,

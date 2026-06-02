@@ -3,6 +3,7 @@ import type { AgentBackendId, AgentContextEnvelope, AgentEvent } from '@openpoin
 export type AgentRunOptions = {
   signal?: AbortSignal;
   sessionKey?: string;
+  backendSessionId?: string;
 };
 
 export type ApprovalDecision = 'approve' | 'deny' | 'always_allow';

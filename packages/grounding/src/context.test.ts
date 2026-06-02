@@ -45,4 +45,10 @@ describe('buildPointerContext target selection', () => {
     const context = buildPointerContext({ cursor, entities });
     expect(context.nearby).toHaveLength(12);
   });
+
+  it('preserves selected entity state in nearby context', () => {
+    const selected: PointerEntity = { ...entity('row', { x: 0, y: 0, width: 20, height: 20 }), kind: 'listitem', state: { selected: true } };
+    const context = buildPointerContext({ cursor, entities: [selected] });
+    expect(context.nearby[0]?.state?.selected).toBe(true);
+  });
 });

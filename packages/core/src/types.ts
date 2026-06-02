@@ -71,6 +71,9 @@ export type PointerEntity = {
   accessibilityPath?: string;
   confidence: number;
   origin: 'accessibility' | 'ocr' | 'vision' | 'manual' | 'mock';
+  state?: {
+    selected?: boolean;
+  };
   groundingRef?: {
     provider: 'cua';
     pid: number;
@@ -120,7 +123,7 @@ export type PointerContext = {
     error?: string;
   };
   gesture?: PointerGesture;
-  nearby: Array<Pick<PointerEntity, 'id' | 'kind' | 'text' | 'bbox' | 'confidence' | 'role' | 'name' | 'groundingRef'>>;
+  nearby: Array<Pick<PointerEntity, 'id' | 'kind' | 'text' | 'bbox' | 'confidence' | 'role' | 'name' | 'state' | 'groundingRef'>>;
   grounding?: {
     provider: 'cua';
     status: 'matched' | 'unavailable' | 'fallback';
@@ -182,6 +185,11 @@ export type ChatTurn = {
 export type Conversation = {
   id: string;
   title?: string;
+  backendSessions?: {
+    claudeAgent?: {
+      sessionId: string;
+    };
+  };
   turns: ChatTurn[];
   createdAt: number;
   updatedAt: number;
@@ -217,6 +225,7 @@ export type AgentContextEnvelope = {
 
 export type AgentEvent =
   | { type: 'run.started'; runId: string; backend: AgentBackendId }
+  | { type: 'backend.session'; backend: AgentBackendId; sessionId: string }
   | { type: 'assistant.delta'; text: string }
   | { type: 'tool.discovery'; tools: string[]; skills: string[]; message: string }
   | { type: 'tool.started'; name: string; input?: unknown }

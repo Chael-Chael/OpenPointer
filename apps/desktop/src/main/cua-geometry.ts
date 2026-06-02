@@ -48,6 +48,22 @@ export function firstNonEmpty(...values: Array<string | undefined>): string | un
   return values.find((value) => value?.trim())?.trim();
 }
 
+export function selectedStateFromCuaElement(element: { is_selected?: unknown; selected?: unknown; isSelected?: unknown }): PointerEntity['state'] | undefined {
+  const selected = coerceSelectedFlag(element.is_selected ?? element.selected ?? element.isSelected);
+  return selected === undefined ? undefined : { selected };
+}
+
+function coerceSelectedFlag(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1 ? true : value === 0 ? false : undefined;
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes') return true;
+    if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
+  }
+  return undefined;
+}
+
 export function kindFromControlType(controlType: string): PointerEntityKind {
   const value = controlType.toLowerCase();
   // Order matters: match specific control types before broad ones. 'input' is

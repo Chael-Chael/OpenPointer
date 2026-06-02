@@ -618,6 +618,7 @@ function registerIpc(): void {
     }
     const config = bridgeConfig(settings);
     const backend = resolveBackendForEnvelope(initialEnvelope, config);
+    const backendSessionId = backend === 'claude-agent' ? conversation?.backendSessions?.claudeAgent?.sessionId : undefined;
     const cuaBrokerSession =
       context.grounding?.status === 'matched'
         ? await cuaBroker.ensureStarted({
@@ -629,6 +630,7 @@ function registerIpc(): void {
         : undefined;
     const envelope: AgentContextEnvelope = {
       ...initialEnvelope,
+      history: backend === 'claude-agent' ? undefined : initialEnvelope.history,
       routing: { ...initialEnvelope.routing, backend },
       toolServers: cuaBrokerSession
         ? [
@@ -645,7 +647,15 @@ function registerIpc(): void {
     const controller = new AbortController();
     activeAbort = controller;
     activeBridge = createAgentBridge(backend, config);
-    void streamBridgeEvents(event.sender, activeBridge, envelope, controller, settings.localVlmEnabled && backend !== 'local-vlm', cuaBrokerSession?.sessionId);
+    void streamBridgeEvents(
+      event.sender,
+      activeBridge,
+      envelope,
+      controller,
+      settings.localVlmEnabled && backend !== 'local-vlm',
+      cuaBrokerSession?.sessionId,
+      backendSessionId
+    );
     return { requestId: envelope.requestId, backend, conversationId };
   });
 }
@@ -656,7 +666,8 @@ async function streamBridgeEvents(
   envelope: AgentContextEnvelope,
   controller: AbortController,
   allowLocalFallback: boolean,
-  cuaBrokerSessionId?: string
+  cuaBrokerSessionId?: string,
+  backendSessionId?: string
 ): Promise<void> {
   let emittedStarted = false;
   let sawTerminal = false;
@@ -677,7 +688,11 @@ async function streamBridgeEvents(
   };
 
   try {
-    for await (const agentEvent of bridge.run(envelope, { signal: controller.signal, sessionKey: sessionKeyForContext(envelope.pointerContext) })) {
+    for await (const agentEvent of bridge.run(envelope, {
+      signal: controller.signal,
+      sessionKey: sessionKeyForContext(envelope.pointerContext),
+      backendSessionId
+    })) {
       if (activeAbort !== controller || activeBridge !== bridge) break;
       if (agentEvent.type === 'run.failed' && agentEvent.recoverable && allowLocalFallback && !emittedStarted) {
         // Recover silently via the local VLM instead of surfacing the primary failure to the UI.
@@ -692,6 +707,9 @@ async function streamBridgeEvents(
         break;
       }
       forward(agentEvent);
+      if (agentEvent.type === 'backend.session' && agentEvent.backend === 'claude-agent' && envelope.conversationId) {
+        await chatHistory.setClaudeAgentSession(envelope.conversationId, agentEvent.sessionId);
+      }
       if (agentEvent.type === 'run.started') emittedStarted = true;
       if (agentEvent.type === 'assistant.delta') fullAnswer += agentEvent.text;
     }

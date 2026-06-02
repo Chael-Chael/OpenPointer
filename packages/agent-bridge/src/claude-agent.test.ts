@@ -31,6 +31,107 @@ afterEach(() => {
 });
 
 describe('ClaudeAgentBridge', () => {
+  it('starts a fresh SDK session when no backend session id is provided', async () => {
+    let capturedOptions: Record<string, unknown> | undefined;
+    const bridge = new ClaudeAgentBridge({
+      enabled: true,
+      sdk: {
+        async *query(args: unknown) {
+          capturedOptions = (args as { options?: Record<string, unknown> }).options;
+          yield { type: 'result', result: 'done' };
+        }
+      }
+    });
+
+    const events = [];
+    for await (const event of bridge.run(buildAgentContextEnvelope({ instruction: 'summarize this paper', mode: 'text', context, backend: 'claude-agent' }))) {
+      events.push(event);
+    }
+
+    expect(events.at(-1)).toMatchObject({ type: 'run.completed' });
+    expect(capturedOptions).not.toHaveProperty('resume');
+  });
+
+  it('resumes a saved Claude SDK session when a backend session id is provided', async () => {
+    let capturedOptions: Record<string, unknown> | undefined;
+    const bridge = new ClaudeAgentBridge({
+      enabled: true,
+      sdk: {
+        async *query(args: unknown) {
+          capturedOptions = (args as { options?: Record<string, unknown> }).options;
+          yield { type: 'result', result: 'done' };
+        }
+      }
+    });
+
+    const events = [];
+    for await (const event of bridge.run(buildAgentContextEnvelope({ instruction: 'continue', mode: 'text', context, backend: 'claude-agent' }), {
+      backendSessionId: '550e8400-e29b-41d4-a716-446655440000'
+    })) {
+      events.push(event);
+    }
+
+    expect(events.at(-1)).toMatchObject({ type: 'run.completed' });
+    expect(capturedOptions?.resume).toBe('550e8400-e29b-41d4-a716-446655440000');
+  });
+
+  it('emits a backend session event when the SDK reports a Claude session id', async () => {
+    const bridge = new ClaudeAgentBridge({
+      enabled: true,
+      sdk: {
+        async *query() {
+          yield { type: 'system', subtype: 'init', session_id: '550e8400-e29b-41d4-a716-446655440001' };
+          yield { type: 'result', result: 'done' };
+        }
+      }
+    });
+
+    const events = [];
+    for await (const event of bridge.run(buildAgentContextEnvelope({ instruction: 'start', mode: 'text', context, backend: 'claude-agent' }))) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual({
+      type: 'backend.session',
+      backend: 'claude-agent',
+      sessionId: '550e8400-e29b-41d4-a716-446655440001'
+    });
+    expect(events.at(-1)).toMatchObject({ type: 'run.completed' });
+  });
+
+  it('does not inject OpenPointer conversation history into Claude prompts', async () => {
+    let capturedPrompt = '';
+    const bridge = new ClaudeAgentBridge({
+      enabled: true,
+      sdk: {
+        async *query(args: unknown) {
+          capturedPrompt = String((args as { prompt?: unknown }).prompt ?? '');
+          yield { type: 'result', result: 'done' };
+        }
+      }
+    });
+    const envelope = buildAgentContextEnvelope({ instruction: 'continue', mode: 'text', context, backend: 'claude-agent' });
+    envelope.history = [
+      {
+        id: 'turn-old',
+        role: 'user',
+        text: 'old pointer instruction should not be sent to Claude',
+        pointerContext: context,
+        timestamp: 1
+      }
+    ];
+
+    const events = [];
+    for await (const event of bridge.run(envelope, { backendSessionId: '550e8400-e29b-41d4-a716-446655440002' })) {
+      events.push(event);
+    }
+
+    expect(events.at(-1)).toMatchObject({ type: 'run.completed' });
+    expect(capturedPrompt).not.toContain('old pointer instruction should not be sent to Claude');
+    expect(capturedPrompt).toContain('Conversation context history:');
+    expect(capturedPrompt).toContain('[]');
+  });
+
   it('surfaces SDK tool permission requests and resolves one-time approval decisions', async () => {
     let decision: unknown;
     const bridge = new ClaudeAgentBridge({
