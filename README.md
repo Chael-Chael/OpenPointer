@@ -1,10 +1,10 @@
-# 🪄 OpenMagicPointer (OMP)
+# 🪄 OpenPointer (OP)
 
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-Windows-lightgrey.svg)](#)
 [![Tech Stack](https://img.shields.io/badge/Stack-Electron%20%7C%20React%20%7C%20TypeScript-blue.svg)](#)
 
-> **OpenMagicPointer** is an elegant, high-performance desktop pointer context bridge. Long-press any screen object, input a text or voice command, and the application instantly captures visual, structural, and cursor context, sending it directly to a local VLM or custom agent backend.
+> **OpenPointer** is an elegant, high-performance desktop pointer context bridge. Long-press any screen object, input a text or voice command, and the application instantly captures visual, structural, and cursor context, sending it directly to a local VLM or custom agent backend.
 
 ---
 
@@ -44,7 +44,7 @@
 
 ## 🧱 Monorepo Architecture
 
-OpenMagicPointer is structured as a clean TypeScript monorepo using npm workspaces:
+OpenPointer is structured as a clean TypeScript monorepo using npm workspaces:
 
 ```text
 ├── apps/
@@ -78,11 +78,11 @@ OpenMagicPointer is structured as a clean TypeScript monorepo using npm workspac
 ### Step-by-Step Guide
 
 ### 1. Clone Repository & Submodules
-OpenMagicPointer relies on standard submodules (e.g., `cua` for Computer Use Agent execution). Make sure to clone recursively:
+OpenPointer relies on standard submodules (e.g., `cua` for Computer Use Agent execution). Make sure to clone recursively:
 
 ```powershell
-git clone --recursive https://github.com/Chael-Chael/OpenMagicPointer.git
-cd OpenMagicPointer
+git clone --recursive https://github.com/Chael-Chael/OpenPointer.git
+cd OpenPointer
 ```
 
 > [!TIP]
@@ -99,7 +99,7 @@ npm install --cache .\.npm-cache
 ```
 
 > [!NOTE]
-> During the `postinstall` step, OpenMagicPointer automatically applies a custom patch to `vendor/cua` (`patches/cua/0001-get-window-state-elements-structured-output.patch`) to enable deep, structured Windows element outputs.
+> During the `postinstall` step, OpenPointer automatically applies a custom patch to `vendor/cua` (`patches/cua/0001-get-window-state-elements-structured-output.patch`) to enable deep, structured Windows element outputs.
 
 ### 3. Configure Local Environment Variables
 Create your local configuration by copying the example environment file:
@@ -111,12 +111,12 @@ copy .env.example .env
 Open `.env` in your editor and configure your active backend. For example, to run with a local VLM (like Ollama or LM Studio):
 
 ```env
-OMP_AGENT_BACKEND=local-vlm
+OP_AGENT_BACKEND=local-vlm
 
-OMP_LOCAL_VLM_ENABLED=true
-OMP_LOCAL_VLM_BASE_URL=http://127.0.0.1:11434/v1   # Local VLM endpoint (Ollama)
-OMP_LOCAL_VLM_MODEL=qwen2-vl                       # VLM Model name
-OMP_LOCAL_VLM_API_KEY=ollama                       # API Key (non-empty fallback)
+OP_LOCAL_VLM_ENABLED=true
+OP_LOCAL_VLM_BASE_URL=http://127.0.0.1:11434/v1   # Local VLM endpoint (Ollama)
+OP_LOCAL_VLM_MODEL=qwen2-vl                       # VLM Model name
+OP_LOCAL_VLM_API_KEY=ollama                       # API Key (non-empty fallback)
 ```
 
 Other adapters available in `.env` include `claude-agent`, `hermes`, `opencode`, and `codex`.

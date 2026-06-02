@@ -188,7 +188,7 @@ export type Conversation = {
 };
 
 export type AgentContextEnvelope = {
-  schemaVersion: 'openmagicpointer.agent-context.v1';
+  schemaVersion: 'openpointer.agent-context.v1';
   requestId: string;
   instruction: {
     text: string;

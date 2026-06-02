@@ -1,4 +1,4 @@
-import type { AgentBackendId, AgentEvent } from '@openmagicpointer/core';
+import type { AgentBackendId, AgentEvent } from '@openpointer/core';
 import type { FetchLike } from './types.js';
 
 export type RuntimeEvent = Record<string, unknown>;

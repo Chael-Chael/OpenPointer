@@ -1,4 +1,4 @@
-import type { Point } from '@openmagicpointer/core';
+import type { Point } from '@openpointer/core';
 
 export type WiggleOptions = {
   windowMs: number;

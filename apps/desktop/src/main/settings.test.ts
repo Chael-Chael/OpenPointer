@@ -24,7 +24,7 @@ vi.mock('node:fs', () => ({
   mkdirSync: () => undefined
 }));
 
-const ENV_KEYS = ['OMP_AGENT_BACKEND', 'OMP_LOCAL_VLM_BASE_URL', 'OMP_LOCAL_VLM_MODEL', 'OMP_CUA_MODE'];
+const ENV_KEYS = ['OP_AGENT_BACKEND', 'OP_LOCAL_VLM_BASE_URL', 'OP_LOCAL_VLM_MODEL', 'OP_CUA_MODE'];
 
 let settings: typeof import('./settings.js');
 
@@ -41,8 +41,8 @@ afterEach(() => {
 
 describe('getSettings env vs persisted precedence', () => {
   it('uses env vars to seed config when no settings file exists', () => {
-    process.env.OMP_LOCAL_VLM_BASE_URL = 'http://env-host/v1';
-    process.env.OMP_CUA_MODE = 'off';
+    process.env.OP_LOCAL_VLM_BASE_URL = 'http://env-host/v1';
+    process.env.OP_CUA_MODE = 'off';
     const result = settings.getSettings();
     expect(result.localVlmBaseUrl).toBe('http://env-host/v1');
     expect(result.cuaMode).toBe('off');
@@ -51,8 +51,8 @@ describe('getSettings env vs persisted precedence', () => {
   it('prefers persisted values over env vars once settings are saved', () => {
     settings.saveSettings({ localVlmBaseUrl: 'http://saved-host/v1', cuaMode: 'require-on-explicit-command' });
     // Env now disagrees with what the user saved; saved values must win.
-    process.env.OMP_LOCAL_VLM_BASE_URL = 'http://env-host/v1';
-    process.env.OMP_CUA_MODE = 'off';
+    process.env.OP_LOCAL_VLM_BASE_URL = 'http://env-host/v1';
+    process.env.OP_CUA_MODE = 'off';
     const result = settings.getSettings();
     expect(result.localVlmBaseUrl).toBe('http://saved-host/v1');
     expect(result.cuaMode).toBe('require-on-explicit-command');

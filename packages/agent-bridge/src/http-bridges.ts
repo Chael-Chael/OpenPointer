@@ -1,4 +1,4 @@
-import type { AgentContextEnvelope, AgentEvent } from '@openmagicpointer/core';
+import type { AgentContextEnvelope, AgentEvent } from '@openpointer/core';
 import { materializeAttachmentFiles } from './attachments.js';
 import { buildAgentInput, buildAgentInstructions, buildToolDiscoveryEvent } from './prompt.js';
 import { postRunAndStream } from './http-stream.js';
@@ -25,7 +25,7 @@ export class HermesBridge implements AgentBridge {
         session_id: options.sessionKey,
         metadata: {
           requestId: runEnvelope.requestId,
-          source: 'openmagicpointer'
+          source: 'openpointer'
         },
         attachments: runEnvelope.attachments.map((attachment) => ({
           type: attachment.type,
@@ -81,7 +81,7 @@ export class CodexBridge implements AgentBridge {
 
   async *run(envelope: AgentContextEnvelope, options: AgentRunOptions = {}): AsyncIterable<AgentEvent> {
     if (!this.config?.baseUrl) {
-      yield { type: 'run.failed', error: 'Codex app-server is not configured. Set OMP_CODEX_APP_SERVER_URL for coding workflows.', recoverable: true };
+      yield { type: 'run.failed', error: 'Codex app-server is not configured. Set OP_CODEX_APP_SERVER_URL for coding workflows.', recoverable: true };
       return;
     }
     const runEnvelope = materializeAttachmentFiles(envelope);

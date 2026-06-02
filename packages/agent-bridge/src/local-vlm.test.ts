@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LocalVlmBridge } from './local-vlm.js';
 import { buildAgentContextEnvelope } from './routing.js';
-import type { PointerContext } from '@openmagicpointer/core';
+import type { PointerContext } from '@openpointer/core';
 
 const originalFetch = globalThis.fetch;
 

@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { AgentAttachment, AgentContextEnvelope } from '@openmagicpointer/core';
+import type { AgentAttachment, AgentContextEnvelope } from '@openpointer/core';
 
 export function materializeAttachmentFiles(envelope: AgentContextEnvelope): AgentContextEnvelope {
   const attachments = envelope.attachments.map((attachment, index) => materializeAttachment(attachment, envelope.requestId, index));
@@ -12,7 +12,7 @@ function materializeAttachment(attachment: AgentAttachment, requestId: string, i
   if (attachment.tempPath || !attachment.dataUrl) return attachment;
   const parsed = parseDataUrl(attachment.dataUrl);
   if (!parsed) return attachment;
-  const dir = join(tmpdir(), 'openmagicpointer', 'attachments', sanitizePathPart(requestId));
+  const dir = join(tmpdir(), 'openpointer', 'attachments', sanitizePathPart(requestId));
   mkdirSync(dir, { recursive: true });
   const extension = attachment.mimeType === 'image/png' ? 'png' : 'jpg';
   const scope = sanitizePathPart(attachment.scope ?? `attachment-${index}`);

@@ -1,5 +1,5 @@
-import type { Point, PointerContext, PointerEntity, PointerGesture, PointerGestureKind, Rect } from '@openmagicpointer/core';
-import { bboxFromPoints, isClosedGesture, rectsIntersect } from '@openmagicpointer/gestures';
+import type { Point, PointerContext, PointerEntity, PointerGesture, PointerGestureKind, Rect } from '@openpointer/core';
+import { bboxFromPoints, isClosedGesture, rectsIntersect } from '@openpointer/gestures';
 
 export type BuildContextInput = {
   cursor: PointerContext['cursor'];

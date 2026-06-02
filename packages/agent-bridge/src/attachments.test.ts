@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { buildAgentInput } from './prompt.js';
 import { buildAgentContextEnvelope } from './routing.js';
 import { materializeAttachmentFiles } from './attachments.js';
-import type { PointerContext } from '@openmagicpointer/core';
+import type { PointerContext } from '@openpointer/core';
 
 const onePixelJpegBase64 = '/9j/4AAQSkZJRgABAQAAAQABAAD/2w==';
 

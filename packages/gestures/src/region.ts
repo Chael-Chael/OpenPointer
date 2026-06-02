@@ -1,4 +1,4 @@
-import type { Point, Rect } from '@openmagicpointer/core';
+import type { Point, Rect } from '@openpointer/core';
 
 export function bboxFromPoints(points: Point[]): Rect {
   if (points.length === 0) return { x: 0, y: 0, width: 0, height: 0 };

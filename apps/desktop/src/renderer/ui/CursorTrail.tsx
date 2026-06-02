@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { nextTrail } from '@openmagicpointer/gestures';
-import type { Point } from '@openmagicpointer/core';
+import { nextTrail } from '@openpointer/gestures';
+import type { Point } from '@openpointer/core';
 
 type Props = {
   x: number;

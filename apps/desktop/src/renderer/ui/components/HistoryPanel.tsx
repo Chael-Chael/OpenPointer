@@ -1,5 +1,5 @@
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import type { Conversation } from '@openmagicpointer/core';
+import type { Conversation } from '@openpointer/core';
 
 type HistoryPanelProps = {
   conversations: Conversation[];
@@ -10,7 +10,7 @@ type HistoryPanelProps = {
 
 export function HistoryPanel({ conversations, onClose, loadConversation, deleteConversation }: HistoryPanelProps) {
   return (
-    <div className="modal" role="dialog" aria-modal="true" aria-label="OpenMagicPointer conversation history">
+    <div className="modal" role="dialog" aria-modal="true" aria-label="OpenPointer conversation history">
       <div className="modal-card">
         <header className="flex items-center justify-between gap-3 mb-4">
           <div>

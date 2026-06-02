@@ -1,6 +1,6 @@
-# OpenMagicPointer
+# OpenPointer
 
-OpenMagicPointer is a desktop pointer context bridge for local VLMs and agent runtimes.
+OpenPointer is a desktop pointer context bridge for local VLMs and agent runtimes.
 
 Core flow:
 

@@ -1,4 +1,4 @@
-import type { PointerEntity, PointerEntityKind, Rect } from '@openmagicpointer/core';
+import type { PointerEntity, PointerEntityKind, Rect } from '@openpointer/core';
 import type { CursorPayload } from '../shared/types.js';
 
 export type DisplayBounds = { id?: number; x: number; y: number; width: number; height: number; scaleFactor?: number };
@@ -121,7 +121,11 @@ function rangesOverlap(aStart: number, aEnd: number, bStart: number, bEnd: numbe
   return aStart < bEnd && aEnd > bStart;
 }
 
-export function physicalOriginForDisplay(display: DisplayBounds, displays: DisplayBounds[], fallbackScale = display.scaleFactor ?? 1): { x: number; y: number } {
+export function physicalOriginForDisplay(
+  display: DisplayBounds,
+  displays: DisplayBounds[],
+  fallbackScale = display.scaleFactor ?? 1
+): { x: number; y: number } {
   const leftEdge = display.x;
   const topEdge = display.y;
   const rightEdge = display.x + display.width;
@@ -131,32 +135,22 @@ export function physicalOriginForDisplay(display: DisplayBounds, displays: Displ
       ? displays
           .filter(
             (candidate) =>
-              candidate.x >= 0 &&
-              candidate.x + candidate.width <= leftEdge &&
-              rangesOverlap(candidate.y, candidate.y + candidate.height, topEdge, bottomEdge)
+              candidate.x >= 0 && candidate.x + candidate.width <= leftEdge && rangesOverlap(candidate.y, candidate.y + candidate.height, topEdge, bottomEdge)
           )
           .reduce((sum, candidate) => sum + physicalWidth(candidate, fallbackScale), 0)
       : -displays
-          .filter(
-            (candidate) =>
-              candidate.x >= leftEdge && candidate.x < 0 && rangesOverlap(candidate.y, candidate.y + candidate.height, topEdge, bottomEdge)
-          )
+          .filter((candidate) => candidate.x >= leftEdge && candidate.x < 0 && rangesOverlap(candidate.y, candidate.y + candidate.height, topEdge, bottomEdge))
           .reduce((sum, candidate) => sum + physicalWidth(candidate, fallbackScale), 0);
   const physicalY =
     topEdge >= 0
       ? displays
           .filter(
             (candidate) =>
-              candidate.y >= 0 &&
-              candidate.y + candidate.height <= topEdge &&
-              rangesOverlap(candidate.x, candidate.x + candidate.width, leftEdge, rightEdge)
+              candidate.y >= 0 && candidate.y + candidate.height <= topEdge && rangesOverlap(candidate.x, candidate.x + candidate.width, leftEdge, rightEdge)
           )
           .reduce((sum, candidate) => sum + physicalHeight(candidate, fallbackScale), 0)
       : -displays
-          .filter(
-            (candidate) =>
-              candidate.y >= topEdge && candidate.y < 0 && rangesOverlap(candidate.x, candidate.x + candidate.width, leftEdge, rightEdge)
-          )
+          .filter((candidate) => candidate.y >= topEdge && candidate.y < 0 && rangesOverlap(candidate.x, candidate.x + candidate.width, leftEdge, rightEdge))
           .reduce((sum, candidate) => sum + physicalHeight(candidate, fallbackScale), 0);
 
   return { x: physicalX, y: physicalY };
@@ -256,7 +250,7 @@ export type ParsedTreeElement = {
 /**
  * Parse the `tree_markdown` emitted by `get_window_state`. The release build of
  * cua-driver does not return a structured `elements` array (that field is added
- * by the OpenMagicPointer source patch), but it always renders an indented
+ * by the OpenPointer source patch), but it always renders an indented
  * markdown tree where actionable nodes look like:
  *
  *   - [3] Button "Close tab" [id=CloseButton actions=[invoke]]

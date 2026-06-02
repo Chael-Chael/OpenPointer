@@ -1,4 +1,4 @@
-import type { AgentBackendId, AgentContextEnvelope, AgentInputMode, AgentToolPolicy, CuaDirective, PointerContext } from '@openmagicpointer/core';
+import type { AgentBackendId, AgentContextEnvelope, AgentInputMode, AgentToolPolicy, CuaDirective, PointerContext } from '@openpointer/core';
 
 const OPERATION_PATTERN =
   /\b(click|merge|add|insert|paste|fill|type|open|move|drag|scroll|operate|select|selection|selected|highlight|read|copy)\b|(?:\u70b9|\u9ede)(?:\u51fb|\u64ca)|\u5408\u5e76|\u6dfb\u52a0|\u52a0\u5165|\u63d2\u5165|\u7c98\u8d34|\u66ff\u6362|\u6539\u5199|\u586b(?:\u5145)?|\u8f93\u5165|\u8bfb\u53d6|\u8bc6\u522b|\u590d\u5236|\u9ad8\u4eae|\u6253\u5f00|\u64cd\u4f5c|\u9009\u62e9|\u9009\u4e2d/iu;
@@ -17,7 +17,7 @@ export function buildAgentContextEnvelope(args: {
   const preferredTools = buildPreferredTools(operationIntent);
   const requiredCapabilities = ['screen_understanding', ...(operationIntent ? ['desktop_context'] : []), ...(forceCua ? ['desktop_control'] : [])];
   return {
-    schemaVersion: 'openmagicpointer.agent-context.v1',
+    schemaVersion: 'openpointer.agent-context.v1',
     requestId: `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     instruction: {
       text: args.instruction,
@@ -67,7 +67,13 @@ function contextAttachments(context: PointerContext): AgentContextEnvelope['atta
 
 function buildCuaDirective(instruction: string, context: PointerContext, mode: 'prefer' | 'require'): CuaDirective {
   const targetBbox = context.target ? (context.target.groundingRef?.screenRect ?? context.target.bbox) : context.visual?.crop;
-  const coordinateSpace = context.target?.groundingRef?.screenRect ? 'screen' : context.target?.bbox ? 'window' : context.visual?.crop && !context.target ? 'crop' : 'screen';
+  const coordinateSpace = context.target?.groundingRef?.screenRect
+    ? 'screen'
+    : context.target?.bbox
+      ? 'window'
+      : context.visual?.crop && !context.target
+        ? 'crop'
+        : 'screen';
   return {
     enabled: true,
     mode,

@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import type { AgentBackendId } from '@openmagicpointer/core';
-import type { AppSettings } from '@openmagicpointer/storage';
-import type { Conversation } from '@openmagicpointer/core';
+import type { AgentBackendId } from '@openpointer/core';
+import type { AppSettings } from '@openpointer/storage';
+import type { Conversation } from '@openpointer/core';
 import type { SecretDrafts, ClearSecretFlags, SecretKey } from '../state';
 import { selectableBackends } from '../state';
 import { backendReadiness, backendLabel, secretConfigured } from '../lib/backend-status';
@@ -62,7 +62,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const modalTheme = settings.modalTheme ?? 'blue';
 
   return (
-    <div className="modal" role="dialog" aria-modal="true" aria-label="OpenMagicPointer settings">
+    <div className="modal" role="dialog" aria-modal="true" aria-label="OpenPointer settings">
       <div className="modal-card" data-theme={modalTheme}>
         <header className="flex items-center justify-between gap-3 mb-4">
           <h2 className="m-0 text-2xl font-instrument font-normal leading-tight text-white">Settings</h2>
@@ -74,11 +74,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
         <div className="segmented-control">
           <div className="segmented-control-track">
             {(['general', 'customization', 'history'] as SettingsTab[]).map((tab) => (
-              <button
-                key={tab}
-                className={`segmented-control-item${activeTab === tab ? ' active' : ''}`}
-                onClick={() => setActiveTab(tab)}
-              >
+              <button key={tab} className={`segmented-control-item${activeTab === tab ? ' active' : ''}`} onClick={() => setActiveTab(tab)}>
                 {tab === 'general' ? 'General' : tab === 'customization' ? 'Customization' : 'History'}
               </button>
             ))}
@@ -210,7 +206,11 @@ export function SettingsPanel(props: SettingsPanelProps) {
 
               <BackendCard title="Claude Code" status={backendReadiness(draftAwareSettings, 'claude-agent')}>
                 <label className="toggle-row">
-                  <input type="checkbox" checked={settings.claudeAgentEnabled} onChange={(event) => updateSettings({ claudeAgentEnabled: event.target.checked })} />
+                  <input
+                    type="checkbox"
+                    checked={settings.claudeAgentEnabled}
+                    onChange={(event) => updateSettings({ claudeAgentEnabled: event.target.checked })}
+                  />
                   <span>Enabled</span>
                 </label>
                 <TextField

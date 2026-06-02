@@ -1,4 +1,4 @@
-import type { AgentContextEnvelope, CuaDirective, PointerContext } from '@openmagicpointer/core';
+import type { AgentContextEnvelope, CuaDirective, PointerContext } from '@openpointer/core';
 
 const TOOL_DISCOVERY_MESSAGE = 'Agent may use available MCP tools, skills, or CUA depending on backend configuration.';
 
@@ -15,11 +15,11 @@ export function buildToolDiscoveryEvent(envelope: AgentContextEnvelope) {
 
 export function buildAgentInstructions(envelope: AgentContextEnvelope): string {
   const cues = [
-    'You are receiving a desktop pointer context from OpenMagicPointer.',
+    'You are receiving a desktop pointer context from OpenPointer.',
     'Treat the user instruction text as the primary intent.',
     'Use screenshots as visual evidence and CUA grounding as structured UI evidence/action references.',
     'If text, screenshot, and CUA disagree, follow the user instruction and explain the uncertainty instead of inventing missing state.',
-    'Do not assume OpenMagicPointer can execute actions locally.',
+    'Do not assume OpenPointer can execute actions locally.',
     'If useful, discover and use configured MCP tools, skills, or CUA tools in your own runtime.',
     'If a desktop-control action can change state, request approval before proceeding.',
     `Tool policy: ${envelope.routing.toolPolicy}.`,
@@ -279,7 +279,7 @@ function formatToolServers(toolServers: NonNullable<AgentContextEnvelope['toolSe
   return [
     'Local tool servers:',
     JSON.stringify(toolServers, null, 2),
-    'OpenMagicPointer local CUA tools include:',
+    'OpenPointer local CUA tools include:',
     '- read_selected_text({}): read the currently selected text from the target app.',
     '- insert_text({ "text": string, "click_target"?: boolean }): insert text at the current pointer/target location.'
   ].join('\n');

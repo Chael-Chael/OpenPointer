@@ -65,7 +65,7 @@ export class CuaSidecarManager {
   private async startProcess(): Promise<void> {
     const binary = resolveCuaDriverPath(this.repoRoot);
     if (!binary) {
-      throw new Error('CUA driver binary not found. Build vendor/cua or set OMP_CUA_DRIVER_PATH.');
+      throw new Error('CUA driver binary not found. Build vendor/cua or set OP_CUA_DRIVER_PATH.');
     }
 
     const proc = spawn(binary, ['mcp'], {
@@ -78,7 +78,7 @@ export class CuaSidecarManager {
     this.reader.on('line', (line) => this.handleLine(line));
     proc.stderr.on('data', (chunk) => {
       const text = String(chunk).trim();
-      if (text) console.debug('[omp:cua]', text);
+      if (text) console.debug('[op:cua]', text);
     });
     proc.on('exit', () => {
       this.proc = null;
@@ -98,7 +98,7 @@ export class CuaSidecarManager {
         {
           protocolVersion: '2025-06-18',
           capabilities: {},
-          clientInfo: { name: 'OpenMagicPointer', version: app.getVersion() }
+          clientInfo: { name: 'OpenPointer', version: app.getVersion() }
         },
         5000
       );
@@ -144,7 +144,7 @@ export class CuaSidecarManager {
 }
 
 function resolveCuaDriverPath(repoRoot: string): string | undefined {
-  const override = process.env.OMP_CUA_DRIVER_PATH?.trim();
+  const override = process.env.OP_CUA_DRIVER_PATH?.trim();
   if (override && existsSync(override)) return override;
   const exe = process.platform === 'win32' ? 'cua-driver.exe' : 'cua-driver';
   const candidates = [

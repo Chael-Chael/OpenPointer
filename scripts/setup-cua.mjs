@@ -8,7 +8,7 @@
 //   2. Apply the get_window_state elements patch (skipped if already applied).
 //   3. Download the prebuilt cua-driver release binary (Windows/macOS/Linux).
 //
-// The downloaded release driver works with OpenMagicPointer's release-compat
+// The downloaded release driver works with OpenPointer's release-compat
 // grounding path (tree_markdown parsing). For pixel-precise element bounds you
 // still need to compile the patched submodule with Rust + a C/C++ toolchain;
 // pass --build to attempt that when cargo is available.
@@ -112,7 +112,7 @@ function main() {
     applyPatch();
     installDriver();
     if (wantBuild) buildDriver();
-    log('done', 'CUA setup complete. Set OMP_CUA_MODE=prefer (or use the in-app setting) and run `npm run dev`.');
+    log('done', 'CUA setup complete. Set OP_CUA_MODE=prefer (or use the in-app setting) and run `npm run dev`.');
   } catch (error) {
     console.error(`\n[setup:cua] FAILED: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);

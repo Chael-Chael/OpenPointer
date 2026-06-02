@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import type { AgentContextEnvelope, AgentEvent } from '@openmagicpointer/core';
+import type { AgentContextEnvelope, AgentEvent } from '@openpointer/core';
 import { execSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
@@ -321,9 +321,9 @@ export class ClaudeAgentBridge implements AgentBridge {
       this.permissionEndpoint = `http://127.0.0.1:${address.port}/permission`;
     }
     return {
-      OPENMAGICPOINTER_SESSION: '1',
-      OPENMAGICPOINTER_PERMISSION_URL: this.permissionEndpoint,
-      OPENMAGICPOINTER_PERMISSION_TOKEN: this.permissionToken
+      OPENPOINTER_SESSION: '1',
+      OPENPOINTER_PERMISSION_URL: this.permissionEndpoint,
+      OPENPOINTER_PERMISSION_TOKEN: this.permissionToken
     };
   }
 
@@ -457,11 +457,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isPermissionRule(value: unknown): value is PermissionRule {
-  return (
-    isRecord(value) &&
-    typeof value.toolName === 'string' &&
-    (value.ruleContent === undefined || typeof value.ruleContent === 'string')
-  );
+  return isRecord(value) && typeof value.toolName === 'string' && (value.ruleContent === undefined || typeof value.ruleContent === 'string');
 }
 
 function permissionRulesFromUpdates(updates: unknown[] | undefined): PermissionRule[] {
@@ -488,7 +484,9 @@ function permissionRuleMatches(rule: PermissionRule, toolName: string, input: Re
 }
 
 function isAgentEventType(type: string): type is AgentEvent['type'] {
-  return ['run.started', 'assistant.delta', 'tool.discovery', 'tool.started', 'tool.completed', 'approval.requested', 'run.completed', 'run.failed'].includes(type);
+  return ['run.started', 'assistant.delta', 'tool.discovery', 'tool.started', 'tool.completed', 'approval.requested', 'run.completed', 'run.failed'].includes(
+    type
+  );
 }
 
 function getRealBinaryPath(inputPath: string): string | undefined {
@@ -503,7 +501,11 @@ function getRealBinaryPath(inputPath: string): string | undefined {
 
   // If it's a directory, search common binary locations inside it.
   let stat: import('fs').Stats | undefined;
-  try { stat = statSync(resolved); } catch { /* ignore */ }
+  try {
+    stat = statSync(resolved);
+  } catch {
+    /* ignore */
+  }
   if (stat?.isDirectory()) {
     const candidates = [
       join(resolved, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js'),
@@ -558,7 +560,7 @@ function findClaudeExecutable(config?: ClaudeAgentBridgeConfig): string | undefi
   }
 
   // 2) Environment variable override
-  const envPath = process.env.OMP_CLAUDE_EXECUTABLE || process.env.OP_CLAUDE_EXECUTABLE;
+  const envPath = process.env.OP_CLAUDE_EXECUTABLE || process.env.OP_CLAUDE_EXECUTABLE;
   if (envPath) {
     const realPath = getRealBinaryPath(envPath);
     if (realPath) return realPath;
@@ -664,7 +666,7 @@ function hasCuaContext(envelope: AgentContextEnvelope): boolean {
 function findCuaDriverExecutable(): string | undefined {
   const exe = process.platform === 'win32' ? 'cua-driver.exe' : 'cua-driver';
   const maybeProcess = process as NodeJS.Process & { resourcesPath?: string };
-  const override = process.env.OMP_CUA_DRIVER_PATH?.trim() || process.env.CUA_DRIVER_PATH?.trim();
+  const override = process.env.OP_CUA_DRIVER_PATH?.trim() || process.env.CUA_DRIVER_PATH?.trim();
   const cwd = process.cwd();
   const candidates = [
     override,

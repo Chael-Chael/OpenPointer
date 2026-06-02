@@ -1,4 +1,4 @@
-﻿commit daf657d18320388e319c022d49da8a0b9ded503c
+commit daf657d18320388e319c022d49da8a0b9ded503c
 Author: ChenYu Zhu <2792357190@qq.com>
 Date:   Wed May 27 00:31:54 2026 +0800
 
@@ -11,9 +11,9 @@ index 0000000..b197d95
 +++ b/apps/desktop/src/renderer/ui/App.tsx
 @@ -0,0 +1,430 @@
 +import { useEffect, useMemo, useRef, useState } from 'react';
-+import type { Point, PointerActionPlan, PointerContext, PointerGestureKind, PointerIntent } from '@openmagicpointer/core';
-+import type { AppSettings } from '@openmagicpointer/storage';
-+import { parseVoiceCommand } from '@openmagicpointer/voice';
++import type { Point, PointerActionPlan, PointerContext, PointerGestureKind, PointerIntent } from '@openpointer/core';
++import type { AppSettings } from '@openpointer/storage';
++import { parseVoiceCommand } from '@openpointer/voice';
 +import type { CursorPayload } from '../../shared/types';
 +import { CursorTrail } from './CursorTrail';
 +
@@ -42,25 +42,25 @@ index 0000000..b197d95
 +  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; panelX: number; panelY: number } | null>(null);
 +
 +  useEffect(() => {
-+    void window.openMagicPointer.getSettings().then(setSettings);
-+    return window.openMagicPointer.onCursor((payload) => setCursor(payload));
++    void window.openPointer.getSettings().then(setSettings);
++    return window.openPointer.onCursor((payload) => setCursor(payload));
 +  }, []);
 +
 +  useEffect(() => {
-+    const offActivate = window.openMagicPointer.onActivate((payload) => {
++    const offActivate = window.openPointer.onActivate((payload) => {
 +      setCursor(payload);
 +      setPanelPosition(computePanelPosition(payload.localX, payload.localY));
 +      setActive(true);
 +      setAnswer('');
 +      setPlan(null);
-+      window.openMagicPointer.setInteractive(true);
++      window.openPointer.setInteractive(true);
 +      void buildContext(payload, 'hover', [{ x: payload.localX, y: payload.localY, t: Date.now() }]);
 +    });
-+    const offDeactivate = window.openMagicPointer.onDeactivate(() => {
++    const offDeactivate = window.openPointer.onDeactivate(() => {
 +      setActive(false);
 +      setCaptureMode('none');
 +      setPath([]);
-+      window.openMagicPointer.setInteractive(false);
++      window.openPointer.setInteractive(false);
 +    });
 +    return () => {
 +      offActivate();
@@ -69,7 +69,7 @@ index 0000000..b197d95
 +  }, []);
 +
 +  useEffect(() => {
-+    window.openMagicPointer.ready();
++    window.openPointer.ready();
 +  }, []);
 +
 +  useEffect(() => {
@@ -93,7 +93,7 @@ index 0000000..b197d95
 +        setActive(false);
 +        setPlan(null);
 +        setPath([]);
-+        window.openMagicPointer.deactivate();
++        window.openPointer.deactivate();
 +      }
 +    }
 +    window.addEventListener('keydown', onKeyDown, { capture: true });
@@ -140,7 +140,7 @@ index 0000000..b197d95
 +  }
 +
 +  async function buildContext(currentCursor = cursor, kind?: PointerGestureKind, gesturePath?: Point[]) {
-+    const result = await window.openMagicPointer.buildContext({
++    const result = await window.openPointer.buildContext({
 +      cursor: currentCursor,
 +      gestureKind: kind,
 +      gesturePath
@@ -157,7 +157,7 @@ index 0000000..b197d95
 +    setStatus('Asking model...');
 +    setAnswer('');
 +    setPlan(null);
-+    const response = await window.openMagicPointer.query({ context, prompt: text || 'Explain this pointer context.' });
++    const response = await window.openPointer.query({ context, prompt: text || 'Explain this pointer context.' });
 +    setAnswer(response.answer);
 +    setIntents(response.intents);
 +    setStatus('Answer ready');
@@ -178,7 +178,7 @@ index 0000000..b197d95
 +  async function chooseIntent(intent: PointerIntent) {
 +    if (!context) return;
 +    setStatus('Preparing action preview...');
-+    const nextPlan = await window.openMagicPointer.createPlan({ context, intent, prompt: prompt || intent.defaultPrompt });
++    const nextPlan = await window.openPointer.createPlan({ context, intent, prompt: prompt || intent.defaultPrompt });
 +    if (nextPlan.requiresConfirmation) {
 +      setPlan(nextPlan);
 +      setStatus('Preview ready');
@@ -190,7 +190,7 @@ index 0000000..b197d95
 +  async function executePlan() {
 +    if (!plan) return;
 +    setStatus('Executing...');
-+    const result = await window.openMagicPointer.executePlan(plan);
++    const result = await window.openPointer.executePlan(plan);
 +    setStatus(result.ok ? result.summary : `Execution failed: ${result.error ?? result.summary}`);
 +    setPlan(null);
 +  }
@@ -207,7 +207,7 @@ index 0000000..b197d95
 +    setCaptureMode(mode);
 +    setPath([]);
 +    setStatus(`${mode} capture armed`);
-+    window.openMagicPointer.setInteractive(true);
++    window.openPointer.setInteractive(true);
 +  }
 +
 +  function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
@@ -275,7 +275,7 @@ index 0000000..b197d95
 +  }
 +
 +  async function saveSettings() {
-+    const next = await window.openMagicPointer.saveSettings({
++    const next = await window.openPointer.saveSettings({
 +      ...(settings ?? {}),
 +      apiKey: apiKeyDraft || undefined
 +    });
@@ -311,12 +311,12 @@ index 0000000..b197d95
 +            onPointerCancel={endPanelDrag}
 +          >
 +            <div>
-+              <strong>OpenMagicPointer</strong>
++              <strong>OpenPointer</strong>
 +              <span>{status || 'Ready'}</span>
 +            </div>
 +            <div className="header-actions">
 +              <button onClick={() => setSettingsOpen(true)}>Settings</button>
-+              <button onClick={() => window.openMagicPointer.deactivate()}>Close</button>
++              <button onClick={() => window.openPointer.deactivate()}>Close</button>
 +            </div>
 +          </header>
 +

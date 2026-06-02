@@ -57,7 +57,7 @@ function MermaidDiagram({ chart }: { chart: string }) {
     let canceled = false;
     setError(null);
     mermaid
-      .render(`omp-mermaid-${id}`, chart)
+      .render(`op-mermaid-${id}`, chart)
       .then(({ svg }) => {
         if (canceled || !ref.current) return;
         ref.current.innerHTML = svg;

@@ -1,5 +1,5 @@
 import { screen } from 'electron';
-import type { PointerContext, PointerEntity, Rect } from '@openmagicpointer/core';
+import type { PointerContext, PointerEntity, Rect } from '@openpointer/core';
 import type { CursorPayload, GroundingPreviewResponse, WindowPreviewResponse } from '../shared/types.js';
 import { CuaSidecarManager, type CuaToolResult } from './cua-sidecar.js';
 import {
@@ -104,7 +104,9 @@ export class CuaGroundingProvider {
         return { status: 'unavailable', entities: [], error: cuaErrorText(state) ?? 'CUA get_window_state reported an error.' };
       }
       const structured = state.structuredContent as { elements?: CuaElementRecord[]; element_count?: number; tree_markdown?: string } | undefined;
-      const coordinateScale = usesPhysicalCoordinates(matched.bounds, cursor, cursorDisplay, displays) ? Math.max(1, cursorDisplay?.scaleFactor ?? cursor.dpr ?? 1) : 1;
+      const coordinateScale = usesPhysicalCoordinates(matched.bounds, cursor, cursorDisplay, displays)
+        ? Math.max(1, cursorDisplay?.scaleFactor ?? cursor.dpr ?? 1)
+        : 1;
       let entities = (structured?.elements ?? [])
         .map((element) => entityFromCuaElement(element, matched.pid!, String(matched.window_id), coordinateScale, displays, cursorDisplay))
         .filter((entity): entity is PointerEntity => Boolean(entity))
@@ -183,7 +185,7 @@ function matchWindow(
     if (!record.bounds || typeof record.pid !== 'number' || typeof record.window_id !== 'number') continue;
 
     // Ignore our own transparent overlay
-    if (record.title === 'OpenMagicPointer' || record.app_name === 'OpenMagicPointer.exe' || record.title?.includes('Cua.AgentCursorOverlay')) {
+    if (record.title === 'OpenPointer' || record.app_name === 'OpenPointer.exe' || record.title?.includes('Cua.AgentCursorOverlay')) {
       continue;
     }
 

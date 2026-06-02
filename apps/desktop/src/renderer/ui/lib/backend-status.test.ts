@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AppSettings } from '@openmagicpointer/storage';
+import type { AppSettings } from '@openpointer/storage';
 import { backendReadiness, secretConfigured, runtimeStatusFor } from './backend-status';
 
 function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {

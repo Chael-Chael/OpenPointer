@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from 'react';
-import { clampNumber, type AgentBackendId, type AgentEvent, type PointerContext, type PointerEntity } from '@openmagicpointer/core';
-import type { ApprovalDecision } from '@openmagicpointer/agent-bridge';
-import type { AppSettings } from '@openmagicpointer/storage';
-import { parseVoiceCommand } from '@openmagicpointer/voice';
+import { clampNumber, type AgentBackendId, type AgentEvent, type PointerContext, type PointerEntity } from '@openpointer/core';
+import type { ApprovalDecision } from '@openpointer/agent-bridge';
+import type { AppSettings } from '@openpointer/storage';
+import { parseVoiceCommand } from '@openpointer/voice';
 import type { CursorPayload, HoldProgressPayload, WindowPreviewResponse } from '../../shared/types';
 import { CursorTrail } from './CursorTrail';
 import { MarkdownRenderer } from './MarkdownRenderer';
@@ -264,9 +264,7 @@ function HistoryThinkingBlock({ thinkingTime, toolEvents }: { thinkingTime?: num
       >
         <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 shrink-0 opacity-60" />
         <span>思考过程 · {thinkingTime}s</span>
-        {toolEvents && toolEvents.length > 0 && (
-          <span className="text-[10px] text-white/40 ml-1">({toolEvents.length} 个工具)</span>
-        )}
+        {toolEvents && toolEvents.length > 0 && <span className="text-[10px] text-white/40 ml-1">({toolEvents.length} 个工具)</span>}
         <span className="arrow inline-block text-[7px] rotate-0 transition-transform duration-150 leading-none">▶</span>
       </div>
       {expanded && toolEvents && toolEvents.length > 0 && (
@@ -281,7 +279,12 @@ function HistoryThinkingBlock({ thinkingTime, toolEvents }: { thinkingTime?: num
 export type DialogueBlock =
   | { type: 'text'; text: string }
   | { type: 'reasoning'; text: string; isRunning: boolean }
-  | { type: 'tool'; name: string; startedEvent: Extract<AgentEvent, { type: 'tool.started' }>; completedEvent?: Extract<AgentEvent, { type: 'tool.completed' }> }
+  | {
+      type: 'tool';
+      name: string;
+      startedEvent: Extract<AgentEvent, { type: 'tool.started' }>;
+      completedEvent?: Extract<AgentEvent, { type: 'tool.completed' }>;
+    }
   | { type: 'discovery'; message: string };
 
 export function parseTextToBlocks(fullText: string): DialogueBlock[] {
@@ -377,10 +380,7 @@ function DialogueReasoningBlock({ text, isRunning }: { text: string; isRunning: 
   return (
     <div className="flex flex-col w-full rounded-[var(--radius-pill)] border border-white/10 bg-white/5 overflow-hidden animate-fade-in select-none my-1">
       {/* Header Bar */}
-      <div
-        className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/5 transition-all duration-150"
-        onClick={() => setExpanded(!expanded)}
-      >
+      <div className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-white/5 transition-all duration-150" onClick={() => setExpanded(!expanded)}>
         <span className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-md bg-cyan-500/20 text-cyan-400">
           {isRunning ? (
             <span className="h-2.5 w-2.5 animate-spin rounded-full border-[1.2px] border-cyan-400 border-t-transparent" />
@@ -392,10 +392,10 @@ function DialogueReasoningBlock({ text, isRunning }: { text: string; isRunning: 
           )}
         </span>
         <span className="text-[11.5px] font-semibold text-white/80">思考过程</span>
-        {isRunning && (
-          <span className="text-[9px] font-bold text-cyan-400 animate-pulse ml-auto uppercase tracking-wider">Thinking</span>
-        )}
-        <span className={`arrow text-[8px] text-white/40 transition-transform duration-150 leading-none ml-auto ${expanded ? 'rotate-90' : 'rotate-0'}`}>▶</span>
+        {isRunning && <span className="text-[9px] font-bold text-cyan-400 animate-pulse ml-auto uppercase tracking-wider">Thinking</span>}
+        <span className={`arrow text-[8px] text-white/40 transition-transform duration-150 leading-none ml-auto ${expanded ? 'rotate-90' : 'rotate-0'}`}>
+          ▶
+        </span>
       </div>
 
       {/* Content Area */}
@@ -420,9 +420,7 @@ function DialogueBlocksRenderer({ blocks }: { blocks: DialogueBlock[] }) {
             </article>
           );
         } else if (block.type === 'reasoning') {
-          return (
-            <DialogueReasoningBlock key={idx} text={block.text} isRunning={block.isRunning} />
-          );
+          return <DialogueReasoningBlock key={idx} text={block.text} isRunning={block.isRunning} />;
         } else if (block.type === 'tool') {
           const isRunning = !block.completedEvent;
           return (
@@ -441,13 +439,9 @@ function DialogueBlocksRenderer({ blocks }: { blocks: DialogueBlock[] }) {
                 )}
               </span>
               {/* 工具名称 */}
-              <span className="font-semibold text-white/95 truncate">
-                {block.name}
-              </span>
+              <span className="font-semibold text-white/95 truncate">{block.name}</span>
               {/* 状态右文本 */}
-              <span className="text-[9px] text-white/55 font-bold ml-auto uppercase tracking-wider">
-                {isRunning ? 'Running' : 'Done'}
-              </span>
+              <span className="text-[9px] text-white/55 font-bold ml-auto uppercase tracking-wider">{isRunning ? 'Running' : 'Done'}</span>
             </div>
           );
         } else if (block.type === 'discovery') {
@@ -469,9 +463,12 @@ export function App() {
     const parsed = raw === null ? NaN : Number(raw);
     return Number.isFinite(parsed) ? parsed : null;
   }, []);
-  const isCursorOnThisOverlay = useCallback((payload: CursorPayload): boolean => {
-    return overlayDisplayId === null || payload.displayId === overlayDisplayId;
-  }, [overlayDisplayId]);
+  const isCursorOnThisOverlay = useCallback(
+    (payload: CursorPayload): boolean => {
+      return overlayDisplayId === null || payload.displayId === overlayDisplayId;
+    },
+    [overlayDisplayId]
+  );
 
   const [cursor, setCursor] = useState<CursorPayload>(initialCursor);
   const [hold, setHold] = useState<HoldProgressPayload | null>(null);
@@ -510,9 +507,7 @@ export function App() {
   const [cuaPickerLocked, setCuaPickerLocked] = useState(false);
   const [cuaPickerPosition, setCuaPickerPosition] = useState<{ left: number; top: number } | null>(null);
   const [cuaPickerSize, setCuaPickerSize] = useState(DEFAULT_CUA_PICKER_SIZE);
-  const [cuaPickerResizeDrag, setCuaPickerResizeDrag] = useState<{ startX: number; startY: number; startWidth: number; startHeight: number } | null>(
-    null
-  );
+  const [cuaPickerResizeDrag, setCuaPickerResizeDrag] = useState<{ startX: number; startY: number; startWidth: number; startHeight: number } | null>(null);
   const [hoveredCuaEntityId, setHoveredCuaEntityId] = useState<string | null>(null);
   const [draftCuaEntities, setDraftCuaEntities] = useState<PointerEntity[]>([]);
   const [selectedCuaEntities, setSelectedCuaEntities] = useState<PointerEntity[]>([]);
@@ -541,9 +536,9 @@ export function App() {
   const cuaPickerInteractiveRef = useRef(false);
   // Submit-time screenshot signal from the main process (see CaptureActivity IPC).
   const [captureActivity, setCaptureActivity] = useState<{ active: boolean; withCua: boolean }>({ active: false, withCua: false });
-  const [historyTurns, setHistoryTurns] = useState<import('@openmagicpointer/core').ChatTurn[]>([]);
+  const [historyTurns, setHistoryTurns] = useState<import('@openpointer/core').ChatTurn[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [conversationsList, setConversationsList] = useState<import('@openmagicpointer/core').Conversation[]>([]);
+  const [conversationsList, setConversationsList] = useState<import('@openpointer/core').Conversation[]>([]);
   const [pillDrag, setPillDrag] = useState<{ startX: number; startY: number; initialPos: { x: number; y: number } } | null>(null);
   const [pillWidthDrag, setPillWidthDrag] = useState<{
     side: 'left' | 'right';
@@ -568,7 +563,7 @@ export function App() {
     setFetchedModels(null);
     try {
       const key = secretDrafts.localVlmApiKey || (settings.hasLocalVlmApiKey ? 'STORED' : '');
-      const res = await window.openMagicPointer.fetchVisionModels({
+      const res = await window.openPointer.fetchVisionModels({
         baseUrl: settings.localVlmBaseUrl,
         apiKey: key === 'STORED' ? '' : key
       });
@@ -610,19 +605,19 @@ export function App() {
     cuaPickerInteractiveRef.current = false;
     if (lastInteractiveRef.current) {
       lastInteractiveRef.current = false;
-      window.openMagicPointer.setInteractive(false);
+      window.openPointer.setInteractive(false);
     }
   }, []);
 
   useEffect(() => {
-    void window.openMagicPointer.getSettings().then((value) => {
+    void window.openPointer.getSettings().then((value) => {
       setSettings(value);
       setBackend(value.agentBackend);
     });
-    const offCursor = window.openMagicPointer.onCursor((payload) => {
+    const offCursor = window.openPointer.onCursor((payload) => {
       if (isCursorOnThisOverlay(payload)) setCursor(payload);
     });
-    const offHold = window.openMagicPointer.onHoldProgress((payload) => {
+    const offHold = window.openPointer.onHoldProgress((payload) => {
       if (!isCursorOnThisOverlay(payload.cursor)) return;
       if (payload.state === 'canceled') {
         setHold(null);
@@ -657,7 +652,7 @@ export function App() {
         }
       }
     });
-    const offActivate = window.openMagicPointer.onActivate((payload) => {
+    const offActivate = window.openPointer.onActivate((payload) => {
       if (!isCursorOnThisOverlay(payload)) return;
       setCursor(payload);
       setCuaPickerAnchor(payload);
@@ -675,13 +670,13 @@ export function App() {
       setConversationId(null);
       setHistoryTurns([]);
 
-      window.openMagicPointer.getSettings().then(async (currentSettings) => {
+      window.openPointer.getSettings().then(async (currentSettings) => {
         setSettings(currentSettings);
       });
 
       setState('composing');
     });
-    const offDeactivate = window.openMagicPointer.onDeactivate(() => {
+    const offDeactivate = window.openPointer.onDeactivate(() => {
       lastInteractiveRef.current = false;
       groundingRequestSeqRef.current += 1;
       if (conversationIdRef.current) {
@@ -726,7 +721,7 @@ export function App() {
         thinkingTimerRef.current = null;
       }
     });
-    const offEvent = window.openMagicPointer.onAgentEvent((event) => {
+    const offEvent = window.openPointer.onAgentEvent((event) => {
       if (event.type === 'run.started') {
         streamPanelStreamingResponseRef.current = false;
         streamPanelStickToBottomRef.current = true;
@@ -742,7 +737,7 @@ export function App() {
       if (event.type === 'run.completed') setState('completed');
       if (event.type === 'run.failed') setState('failed');
     });
-    window.openMagicPointer.ready();
+    window.openPointer.ready();
     return () => {
       offCursor();
       offHold();
@@ -761,7 +756,7 @@ export function App() {
       // Guard against a stale response from a previous conversationId/state
       // overwriting the history after a rapid switch.
       let cancelled = false;
-      window.openMagicPointer
+      window.openPointer
         .getConversation(conversationId)
         .then((conv) => {
           if (!cancelled && conversationIdRef.current === conversationId && conv) setHistoryTurns(conv.turns);
@@ -815,7 +810,7 @@ export function App() {
       if (shouldCapture && !active) return;
       if (shouldCapture !== lastInteractiveRef.current) {
         lastInteractiveRef.current = shouldCapture;
-        window.openMagicPointer.setInteractive(shouldCapture);
+        window.openPointer.setInteractive(shouldCapture);
       }
     }
 
@@ -895,8 +890,8 @@ export function App() {
       if (event.key !== 'Escape') return;
       event.preventDefault();
       setSettingsOpen(false);
-      window.openMagicPointer.cancelRun();
-      window.openMagicPointer.deactivate();
+      window.openPointer.cancelRun();
+      window.openPointer.deactivate();
     }
     // Toggle the edit dialog with the right mouse button. This is a pure
     // toggle, so it can be triggered to enter/exit any number of times.
@@ -906,14 +901,14 @@ export function App() {
       if (Date.now() - lastGlobalContextMenuAtRef.current < 300) return;
       toggleEditDialog();
     }
-    const offGlobalContextMenu = window.openMagicPointer.onGlobalContextMenu((payload) => {
+    const offGlobalContextMenu = window.openPointer.onGlobalContextMenu((payload) => {
       if (!isCursorOnThisOverlay(payload)) return;
       lastGlobalContextMenuAtRef.current = Date.now();
       setCursor(payload);
       setCuaPickerAnchor(payload);
       toggleEditDialog(payload);
     });
-    const offGlobalMouseDown = window.openMagicPointer.onGlobalMouseDown((payload) => {
+    const offGlobalMouseDown = window.openPointer.onGlobalMouseDown((payload) => {
       if (!isCursorOnThisOverlay(payload)) return;
       setCursor(payload);
       setCuaPickerAnchor(payload);
@@ -1032,7 +1027,7 @@ export function App() {
     function onMouseUp() {
       setPillWidthDrag(null);
       if (settings) {
-        void window.openMagicPointer.saveSettings({
+        void window.openPointer.saveSettings({
           ...settings,
           pillWidth
         });
@@ -1121,7 +1116,7 @@ export function App() {
       const requestCursor = cursorRef.current;
       lastRequestedCursor = requestCursor;
       inFlight = true;
-      void window.openMagicPointer
+      void window.openPointer
         .requestGrounding({ cursor: requestCursor })
         .then((preview) => {
           if (cancelled || groundingRequestSeqRef.current !== requestSeq) return;
@@ -1189,7 +1184,7 @@ export function App() {
       const requestCursor = cursorRef.current;
       lastRequestedCursor = requestCursor;
       inFlight = true;
-      void window.openMagicPointer
+      void window.openPointer
         .requestWindowContext({ cursor: requestCursor })
         .then((preview) => {
           if (cancelled || windowRequestSeqRef.current !== requestSeq) return;
@@ -1218,7 +1213,7 @@ export function App() {
 
   // Track submit-time screenshot capture so the pointer can tint while it runs.
   useEffect(() => {
-    const off = window.openMagicPointer.onCaptureActivity((payload) => {
+    const off = window.openPointer.onCaptureActivity((payload) => {
       setCaptureActivity({ active: payload.phase === 'start', withCua: payload.withCua });
     });
     return off;
@@ -1391,7 +1386,7 @@ export function App() {
   async function decideApproval(id: string, decision: ApprovalDecision) {
     setSettledApprovalIds((prev) => new Set(prev).add(id));
     setState('streaming');
-    await window.openMagicPointer.approveAgentRequest(id, decision);
+    await window.openPointer.approveAgentRequest(id, decision);
   }
 
   async function submit(mode: 'text' | 'voice' = 'text', overrideText = prompt) {
@@ -1447,7 +1442,7 @@ export function App() {
     setPrompt('');
     try {
       const currentConversationId = conversationIdRef.current;
-      const res = await window.openMagicPointer.submitInstruction({
+      const res = await window.openPointer.submitInstruction({
         text: instructionText,
         mode,
         backend,
@@ -1467,7 +1462,7 @@ export function App() {
       lastConversationIdRef.current = res.conversationId;
       lastDeactivatedAtRef.current = Date.now();
       setConversationId(res.conversationId);
-      const conv = await window.openMagicPointer.getConversation(res.conversationId);
+      const conv = await window.openPointer.getConversation(res.conversationId);
       if (conversationIdRef.current === res.conversationId && conv) setHistoryTurns(conv.turns);
     } catch (error) {
       // Without this the UI is stuck in the submitting state forever (no agent
@@ -1527,7 +1522,7 @@ export function App() {
 
   async function saveSettings() {
     if (!settings) return;
-    const next = await window.openMagicPointer.saveSettings({
+    const next = await window.openPointer.saveSettings({
       ...settings,
       agentBackend: backend === 'mock' ? 'auto' : backend,
       localVlmApiKey: secretDrafts.localVlmApiKey || undefined,
@@ -1604,7 +1599,7 @@ export function App() {
     conversationIdRef.current = null;
     lastConversationIdRef.current = null;
     lastDeactivatedAtRef.current = 0;
-    window.openMagicPointer.cancelRun();
+    window.openPointer.cancelRun();
     if (thinkingTimerRef.current) {
       clearInterval(thinkingTimerRef.current);
       thinkingTimerRef.current = null;
@@ -1630,7 +1625,7 @@ export function App() {
   }
 
   async function loadConversation(id: string) {
-    const conv = await window.openMagicPointer.getConversation(id);
+    const conv = await window.openPointer.getConversation(id);
     if (conv) {
       conversationRestoreEpochRef.current += 1;
       newConversationRequestedRef.current = false;
@@ -1654,8 +1649,8 @@ export function App() {
 
   async function handleDeleteConversation(id: string, event: ReactMouseEvent) {
     event.stopPropagation();
-    await window.openMagicPointer.deleteConversation(id);
-    const list = await window.openMagicPointer.getConversations();
+    await window.openPointer.deleteConversation(id);
+    const list = await window.openPointer.getConversations();
     setConversationsList(list);
     if (conversationId === id) {
       conversationIdRef.current = null;
@@ -1878,7 +1873,12 @@ export function App() {
   };
   const cursorInsideCuaPicker =
     showCuaPicker &&
-    pointInLocalRect(cursor.localX, cursor.localY, { x: cuaPickerLayout.left, y: cuaPickerLayout.top, width: cuaPickerLayout.width, height: cuaPickerLayout.height }, 2);
+    pointInLocalRect(
+      cursor.localX,
+      cursor.localY,
+      { x: cuaPickerLayout.left, y: cuaPickerLayout.top, width: cuaPickerLayout.width, height: cuaPickerLayout.height },
+      2
+    );
   const cursorInsideCuaDebugBox =
     showCuaDebugOverlay &&
     debugCuaBoxEntities.some((entity) => {
@@ -1920,15 +1920,7 @@ export function App() {
       lockCuaPickerAtCurrentPosition();
     }, CUA_PICKER_HOVER_LOCK_MS);
     return () => window.clearTimeout(timer);
-  }, [
-    cuaPickerCandidates.length,
-    cuaPickerLocked,
-    cursor.localX,
-    cursor.localY,
-    liveCuaPreview,
-    lockCuaPickerAtCurrentPosition,
-    showCuaPicker
-  ]);
+  }, [cuaPickerCandidates.length, cuaPickerLocked, cursor.localX, cursor.localY, liveCuaPreview, lockCuaPickerAtCurrentPosition, showCuaPicker]);
 
   useEffect(() => {
     if (!active) {
@@ -1953,7 +1945,7 @@ export function App() {
       cuaPickerInteractiveRef.current = true;
       if (!lastInteractiveRef.current) {
         lastInteractiveRef.current = true;
-        window.openMagicPointer.setInteractive(true);
+        window.openPointer.setInteractive(true);
       }
       return;
     }
@@ -1962,7 +1954,7 @@ export function App() {
       cuaPickerInteractiveRef.current = false;
       if (!otherCaptureActive && lastInteractiveRef.current) {
         lastInteractiveRef.current = false;
-        window.openMagicPointer.setInteractive(false);
+        window.openPointer.setInteractive(false);
       }
     }
   }, [
@@ -2255,7 +2247,9 @@ export function App() {
                       </span>
                       <div className="flex min-w-0 flex-col">
                         <span className="truncate text-[12px] font-bold text-white/95 leading-tight">{windowPreviewLabel(windowPreview)}</span>
-                        <span className="truncate text-[9px] text-white/60 leading-none">{windowPreview.window.app || windowPreview.window.process || 'Current window'}</span>
+                        <span className="truncate text-[9px] text-white/60 leading-none">
+                          {windowPreview.window.app || windowPreview.window.process || 'Current window'}
+                        </span>
                       </div>
                     </div>
                     <span className="rounded-full bg-white/12 px-2 py-0.5 text-[10px] font-bold uppercase text-white/80">{windowPreview.source}</span>
@@ -2472,7 +2466,7 @@ export function App() {
                                 }`}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  void window.openMagicPointer.saveSettings({ ...settings!, claudeAgentModel: model });
+                                  void window.openPointer.saveSettings({ ...settings!, claudeAgentModel: model });
                                 }}
                               >
                                 {model || 'Default'}
@@ -2495,7 +2489,7 @@ export function App() {
                                 }`}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  void window.openMagicPointer.saveSettings({ ...settings!, claudeAgentEffort: effort });
+                                  void window.openPointer.saveSettings({ ...settings!, claudeAgentEffort: effort });
                                 }}
                               >
                                 {effort.charAt(0).toUpperCase() + effort.slice(1)}
@@ -2620,7 +2614,6 @@ export function App() {
                           </span>
                         </div>
                       )}
-
                     </div>
                   )}
 
@@ -2640,8 +2633,8 @@ export function App() {
                         event.preventDefault();
                         event.stopPropagation();
                         setSettingsOpen(false);
-                        window.openMagicPointer.cancelRun();
-                        window.openMagicPointer.deactivate();
+                        window.openPointer.cancelRun();
+                        window.openPointer.deactivate();
                         return;
                       }
                       if (event.key === 'Enter' && !event.shiftKey) {
@@ -2672,7 +2665,12 @@ export function App() {
                 {showFullContext && (
                   <>
                     <div className="mx-4 h-px bg-white/12" />
-                    <div className="capsule-stream-panel scrollbar-capsule px-4 pb-5 pt-3" style={streamPanelStyle} ref={streamPanelRef} onScroll={onStreamPanelScroll}>
+                    <div
+                      className="capsule-stream-panel scrollbar-capsule px-4 pb-5 pt-3"
+                      style={streamPanelStyle}
+                      ref={streamPanelRef}
+                      onScroll={onStreamPanelScroll}
+                    >
                       <div className="flex justify-between gap-2.5 text-white/50 text-[11px] font-semibold uppercase tracking-[0.02em]">
                         <span>{backendLabel(backend)}</span>
                         <span>{statusLabel(state)}</span>
@@ -2728,7 +2726,12 @@ export function App() {
                               <div className="approval-box mt-3 w-full border border-yellow-500/30 bg-yellow-500/10 rounded-[14px] p-3 flex items-start gap-2.5 shadow-[0_8px_16px_rgba(0,0,0,0.12)] animate-fade-in">
                                 <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-yellow-500/20 text-yellow-400 mt-0.5">
                                   <svg viewBox="0 0 14 14" className="h-3.5 w-3.5" fill="none">
-                                    <path d="M7 1.5c-3 0-5.5 2.5-5.5 5.5S4 12.5 7 12.5s5.5-2.5 5.5-5.5c0-1.4-.5-2.7-1.4-3.7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                                    <path
+                                      d="M7 1.5c-3 0-5.5 2.5-5.5 5.5S4 12.5 7 12.5s5.5-2.5 5.5-5.5c0-1.4-.5-2.7-1.4-3.7"
+                                      stroke="currentColor"
+                                      strokeWidth="1.4"
+                                      strokeLinecap="round"
+                                    />
                                     <path d="M7 5v3M7 10v.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
                                   </svg>
                                 </span>
@@ -2796,10 +2799,7 @@ export function App() {
                   ))}
                 </select>
               </label>
-              <button
-                className="bubble-dropdown-item"
-                onClick={startNewConversation}
-              >
+              <button className="bubble-dropdown-item" onClick={startNewConversation}>
                 <span className="bubble-dropdown-icon">N</span>
                 New Conversation
               </button>
@@ -2808,7 +2808,7 @@ export function App() {
                 onClick={() => {
                   setMenuOpen(false);
                   setHistoryOpen(true);
-                  window.openMagicPointer.getConversations().then(setConversationsList);
+                  window.openPointer.getConversations().then(setConversationsList);
                 }}
               >
                 <span className="bubble-dropdown-icon">H</span>

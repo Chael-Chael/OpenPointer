@@ -12,10 +12,10 @@ import {
   type AgentBridge,
   type AgentBridgeRegistryConfig,
   type ApprovalDecision
-} from '@openmagicpointer/agent-bridge';
-import type { AgentContextEnvelope, AgentEvent, Point, PointerContext, PointerEntity, Rect } from '@openmagicpointer/core';
-import { buildPointerContext } from '@openmagicpointer/grounding';
-import { OMP_CHANNELS } from '../shared/ipc.js';
+} from '@openpointer/agent-bridge';
+import type { AgentContextEnvelope, AgentEvent, Point, PointerContext, PointerEntity, Rect } from '@openpointer/core';
+import { buildPointerContext } from '@openpointer/grounding';
+import { OP_CHANNELS } from '../shared/ipc.js';
 import type {
   CursorPayload,
   HoldProgressPayload,
@@ -37,7 +37,7 @@ const repoRoot = resolve(__dirname, '../../../..');
 loadLocalEnv(repoRoot);
 
 if (!app.isPackaged) {
-  const devCachePath = join(tmpdir(), 'openmagicpointer', 'chromium-cache', String(process.pid));
+  const devCachePath = join(tmpdir(), 'openpointer', 'chromium-cache', String(process.pid));
   mkdirSync(devCachePath, { recursive: true });
   app.setPath('sessionData', devCachePath);
   app.commandLine.appendSwitch('disk-cache-dir', devCachePath);
@@ -73,8 +73,8 @@ const CUA_DRIVER_AGENT_TOOLS = [
   'drag',
   'set_value'
 ];
-const OMP_AGENT_TOOLS = ['read_selected_text', 'insert_text'];
-const CUA_AGENT_TOOLS = [...CUA_DRIVER_AGENT_TOOLS, ...OMP_AGENT_TOOLS];
+const OP_AGENT_TOOLS = ['read_selected_text', 'insert_text'];
+const CUA_AGENT_TOOLS = [...CUA_DRIVER_AGENT_TOOLS, ...OP_AGENT_TOOLS];
 
 const hold = {
   active: false,
@@ -127,11 +127,11 @@ async function createOverlay(display: Electron.Display): Promise<void> {
   win.webContents.on('did-finish-load', () => {
     if (!win.isVisible()) win.showInactive();
     const payload = cursorPayload();
-    if (payload.displayId === display.id) win.webContents.send(OMP_CHANNELS.Cursor, payload);
+    if (payload.displayId === display.id) win.webContents.send(OP_CHANNELS.Cursor, payload);
     if (active && activeDisplayId === display.id) {
-      win.webContents.send(OMP_CHANNELS.Activate, lastActivationCursor ?? payload);
+      win.webContents.send(OP_CHANNELS.Activate, lastActivationCursor ?? payload);
     } else {
-      win.webContents.send(OMP_CHANNELS.Deactivate);
+      win.webContents.send(OP_CHANNELS.Deactivate);
     }
   });
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
@@ -295,11 +295,11 @@ function activate(cursor = cursorPayload()): void {
     win.setAlwaysOnTop(true, 'screen-saver');
     win.moveTop();
     setOverlayInteractive(displayId, false);
-    if (displayId !== activeDisplayId) win.webContents.send(OMP_CHANNELS.Deactivate);
+    if (displayId !== activeDisplayId) win.webContents.send(OP_CHANNELS.Deactivate);
   }
   if (activeWin && !activeWin.isDestroyed()) {
     activeWin.showInactive();
-    activeWin.webContents.send(OMP_CHANNELS.Activate, cursor);
+    activeWin.webContents.send(OP_CHANNELS.Activate, cursor);
   }
 }
 
@@ -313,7 +313,7 @@ function focusActiveOverlayWithoutActivate(cursor: CursorPayload): void {
     win.setAlwaysOnTop(true, 'screen-saver');
     win.moveTop();
     setOverlayInteractive(displayId, false);
-    if (displayId !== cursor.displayId) win.webContents.send(OMP_CHANNELS.Deactivate);
+    if (displayId !== cursor.displayId) win.webContents.send(OP_CHANNELS.Deactivate);
   }
   if (activeWin && !activeWin.isDestroyed()) {
     activeWin.showInactive();
@@ -327,7 +327,7 @@ function deactivate(): void {
   activeAbort?.abort();
   activeAbort = null;
   activeBridge = null;
-  broadcast(OMP_CHANNELS.Deactivate);
+  broadcast(OP_CHANNELS.Deactivate);
   for (const [displayId, win] of windows) {
     if (!win.isDestroyed()) setOverlayInteractive(displayId, false);
   }
@@ -358,7 +358,7 @@ function startCursorLoop(): void {
   cursorTimer = setInterval(() => {
     const payload = cursorPayload();
     lastCursor = payload;
-    sendToDisplay(payload.displayId, OMP_CHANNELS.Cursor, payload);
+    sendToDisplay(payload.displayId, OP_CHANNELS.Cursor, payload);
   }, 33);
 }
 
@@ -438,7 +438,7 @@ function clearHoldTimers(): void {
 }
 
 function broadcastHold(payload: HoldProgressPayload): void {
-  sendToDisplay(payload.cursor.displayId, OMP_CHANNELS.HoldProgress, payload);
+  sendToDisplay(payload.cursor.displayId, OP_CHANNELS.HoldProgress, payload);
 }
 
 function isPrimaryMouseButton(button: unknown): boolean {
@@ -455,7 +455,7 @@ function handleGlobalPrimaryMouseDown(): void {
   const win = windows.get(cursor.displayId);
   if (!win || win.isDestroyed()) return;
   if (overlayInteractive.get(cursor.displayId)) return;
-  win.webContents.send(OMP_CHANNELS.GlobalMouseDown, cursor);
+  win.webContents.send(OP_CHANNELS.GlobalMouseDown, cursor);
 }
 
 function handleGlobalContextMouseDown(): void {
@@ -471,41 +471,41 @@ function handleGlobalContextMouseDown(): void {
   setOverlayInteractive(cursor.displayId, true);
   win.focus();
   win.webContents.focus();
-  win.webContents.send(OMP_CHANNELS.GlobalContextMenu, cursor);
+  win.webContents.send(OP_CHANNELS.GlobalContextMenu, cursor);
 }
 
 function registerIpc(): void {
-  ipcMain.on(OMP_CHANNELS.SetInteractive, (event, value: boolean) => {
+  ipcMain.on(OP_CHANNELS.SetInteractive, (event, value: boolean) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win) setWindowInteractive(win, value);
   });
 
-  ipcMain.on(OMP_CHANNELS.RequestDeactivate, () => deactivate());
-  ipcMain.on(OMP_CHANNELS.CancelRun, () => activeAbort?.abort());
+  ipcMain.on(OP_CHANNELS.RequestDeactivate, () => deactivate());
+  ipcMain.on(OP_CHANNELS.CancelRun, () => activeAbort?.abort());
 
-  ipcMain.on(OMP_CHANNELS.RendererReady, (event) => {
+  ipcMain.on(OP_CHANNELS.RendererReady, (event) => {
     const displayId = displayIdForWebContents(event.sender);
     const payload = cursorPayload();
-    if (displayId === undefined || payload.displayId === displayId) event.sender.send(OMP_CHANNELS.Cursor, payload);
+    if (displayId === undefined || payload.displayId === displayId) event.sender.send(OP_CHANNELS.Cursor, payload);
     if (active && displayId !== undefined && activeDisplayId === displayId) {
-      event.sender.send(OMP_CHANNELS.Activate, lastActivationCursor ?? payload);
+      event.sender.send(OP_CHANNELS.Activate, lastActivationCursor ?? payload);
     } else {
-      event.sender.send(OMP_CHANNELS.Deactivate);
+      event.sender.send(OP_CHANNELS.Deactivate);
     }
   });
 
-  ipcMain.handle(OMP_CHANNELS.GetSettings, () => getSettings());
-  ipcMain.handle(OMP_CHANNELS.SaveSettings, (_event, patch) => {
+  ipcMain.handle(OP_CHANNELS.GetSettings, () => getSettings());
+  ipcMain.handle(OP_CHANNELS.SaveSettings, (_event, patch) => {
     const next = saveSettings(patch);
     // Re-apply runtime settings that are bound at registration time so saved
     // changes (e.g. the activation hotkey) take effect without a restart.
     registerActivationHotkey(next.activationHotkey);
     return next;
   });
-  ipcMain.handle(OMP_CHANNELS.GetConversations, () => chatHistory.getConversations());
-  ipcMain.handle(OMP_CHANNELS.GetConversation, (_event, id: string) => chatHistory.getConversation(id));
-  ipcMain.handle(OMP_CHANNELS.DeleteConversation, (_event, id: string) => chatHistory.deleteConversation(id));
-  ipcMain.handle(OMP_CHANNELS.FetchVisionModels, async (_event, req: { baseUrl: string; apiKey: string }) => {
+  ipcMain.handle(OP_CHANNELS.GetConversations, () => chatHistory.getConversations());
+  ipcMain.handle(OP_CHANNELS.GetConversation, (_event, id: string) => chatHistory.getConversation(id));
+  ipcMain.handle(OP_CHANNELS.DeleteConversation, (_event, id: string) => chatHistory.deleteConversation(id));
+  ipcMain.handle(OP_CHANNELS.FetchVisionModels, async (_event, req: { baseUrl: string; apiKey: string }) => {
     try {
       const apiKey = req.apiKey || getLocalVlmApiKey();
       const response = await fetch(`${req.baseUrl.replace(/\/$/, '')}/models`, {
@@ -525,20 +525,20 @@ function registerIpc(): void {
       return { success: false, error: e instanceof Error ? e.message : String(e) };
     }
   });
-  ipcMain.handle(OMP_CHANNELS.RequestGrounding, async (_event, req: { cursor: CursorPayload }) => {
+  ipcMain.handle(OP_CHANNELS.RequestGrounding, async (_event, req: { cursor: CursorPayload }) => {
     const settings = getSettings();
     if (settings.cuaMode === 'off') return { status: 'fallback', entities: [], error: 'CUA mode is off.' };
     // Live CUA preview is accessibility-tree based; hiding the overlay here
     // makes the composer blink whenever background grounding refreshes.
     return cuaGrounding.preview(req.cursor, await activeWindowInfo());
   });
-  ipcMain.handle(OMP_CHANNELS.ReadSelection, async (_event, req?: ReadSelectionRequest) => {
+  ipcMain.handle(OP_CHANNELS.ReadSelection, async (_event, req?: ReadSelectionRequest) => {
     return readSelectedText(req);
   });
-  ipcMain.handle(OMP_CHANNELS.InsertText, async (_event, req: InsertTextRequest) => {
+  ipcMain.handle(OP_CHANNELS.InsertText, async (_event, req: InsertTextRequest) => {
     return insertText(req);
   });
-  ipcMain.handle(OMP_CHANNELS.RequestWindowContext, async (_event, req: { cursor: CursorPayload }) => {
+  ipcMain.handle(OP_CHANNELS.RequestWindowContext, async (_event, req: { cursor: CursorPayload }) => {
     const settings = getSettings();
     const activeInfo = await activeWindowPreviewInfo();
     if (settings.cuaMode !== 'off') {
@@ -557,7 +557,7 @@ function registerIpc(): void {
     }
     return { status: 'fallback', source: 'active-window', error: 'No active window information available.' };
   });
-  ipcMain.handle(OMP_CHANNELS.ApproveAgentRequest, async (_event, id: string, decision: ApprovalDecision) => {
+  ipcMain.handle(OP_CHANNELS.ApproveAgentRequest, async (_event, id: string, decision: ApprovalDecision) => {
     if (cuaBroker.hasPendingApproval(id)) {
       cuaBroker.approve(id, decision === 'deny' ? 'deny' : 'approve');
       return;
@@ -565,7 +565,7 @@ function registerIpc(): void {
     await activeBridge?.approve?.(id, decision);
   });
 
-  ipcMain.handle(OMP_CHANNELS.SubmitInstruction, async (event, req: SubmitInstructionRequest) => {
+  ipcMain.handle(OP_CHANNELS.SubmitInstruction, async (event, req: SubmitInstructionRequest) => {
     activeAbort?.abort();
     const settings = getSettings();
     const cursor = req.cursor ?? lastActivationCursor ?? lastCursor ?? cursorPayload();
@@ -585,7 +585,16 @@ function registerIpc(): void {
           req.windowBounds,
           selectedText
         )
-      : await buildLightPointerContext(cursor, req.selectedEntity, providedCuaEntities, includeCua, req.windowContext, req.windowPid, req.windowBounds, selectedText);
+      : await buildLightPointerContext(
+          cursor,
+          req.selectedEntity,
+          providedCuaEntities,
+          includeCua,
+          req.windowContext,
+          req.windowPid,
+          req.windowBounds,
+          selectedText
+        );
 
     const conversationId = req.conversationId || `conv-${Date.now()}`;
     await chatHistory.appendTurn(conversationId, {
@@ -614,8 +623,8 @@ function registerIpc(): void {
         ? await cuaBroker.ensureStarted({
             requireApprovalBeforeCua: settings.requireApprovalBeforeCua,
             allowedTools: CUA_AGENT_TOOLS,
-            localTools: createOpenMagicPointerTools(context),
-            emit: (agentEvent) => event.sender.send(OMP_CHANNELS.AgentEvent, agentEvent)
+            localTools: createOpenPointerTools(context),
+            emit: (agentEvent) => event.sender.send(OP_CHANNELS.AgentEvent, agentEvent)
           })
         : undefined;
     const envelope: AgentContextEnvelope = {
@@ -659,7 +668,7 @@ async function streamBridgeEvents(
 
   const forward = (agentEvent: AgentEvent) => {
     if (sender.isDestroyed() || activeAbort !== controller || activeBridge !== bridge) return;
-    sender.send(OMP_CHANNELS.AgentEvent, agentEvent);
+    sender.send(OP_CHANNELS.AgentEvent, agentEvent);
     if (agentEvent.type === 'run.completed' || agentEvent.type === 'run.failed') sawTerminal = true;
     if (agentEvent.type === 'tool.started' || agentEvent.type === 'tool.completed') {
       toolEvents.push(agentEvent);
@@ -765,7 +774,7 @@ type ClipboardSnapshot = {
   image?: NativeImage;
 };
 
-function createOpenMagicPointerTools(context: PointerContext): Record<string, (args: Record<string, unknown>) => Promise<CuaToolResult>> {
+function createOpenPointerTools(context: PointerContext): Record<string, (args: Record<string, unknown>) => Promise<CuaToolResult>> {
   return {
     read_selected_text: async () => toolResultFromReadSelection(await readSelectedText({ cursor: context.cursor, windowContext: context.window })),
     insert_text: async (args) => {
@@ -841,10 +850,7 @@ type UiaSelectionToolPayload = {
   source?: string;
 };
 
-async function readSelectedTextViaUia(target: {
-  pid: number;
-  windowId: string;
-}): Promise<ReadSelectionResponse | undefined> {
+async function readSelectedTextViaUia(target: { pid: number; windowId: string }): Promise<ReadSelectionResponse | undefined> {
   try {
     const result = await cuaSidecar.callTool('get_selected_text', {
       pid: target.pid,
@@ -861,8 +867,7 @@ async function readSelectedTextViaUia(target: {
         text: structured.text,
         source: 'uia-textpattern',
         pid: structured.pid ?? target.pid,
-        windowId:
-          typeof structured.window_id === 'number' ? String(structured.window_id) : target.windowId
+        windowId: typeof structured.window_id === 'number' ? String(structured.window_id) : target.windowId
       };
     }
   } catch {
@@ -1047,7 +1052,7 @@ async function capturePointerContext(
   // pointer can tint accordingly. `withCua` distinguishes a plain screenshot
   // (purple) from a screenshot that is paired with CUA grounding (teal).
   const withCua = useCua || Boolean(selectedEntity?.groundingRef) || seedCuaEntities.some((entity) => entity.groundingRef?.provider === 'cua');
-  sendToDisplay(cursor.displayId, OMP_CHANNELS.CaptureActivity, { phase: 'start', withCua });
+  sendToDisplay(cursor.displayId, OP_CHANNELS.CaptureActivity, { phase: 'start', withCua });
   let capture: Awaited<ReturnType<typeof captureContextImage>>;
   let windowInfo: PointerContext['window'];
   let windowSnapshot: PointerContext['windowSnapshot'];
@@ -1072,7 +1077,7 @@ async function capturePointerContext(
     windowInfo = hiddenResult.windowInfo;
     cuaPreview = hiddenResult.cuaPreview;
   } finally {
-    sendToDisplay(cursor.displayId, OMP_CHANNELS.CaptureActivity, { phase: 'end', withCua });
+    sendToDisplay(cursor.displayId, OP_CHANNELS.CaptureActivity, { phase: 'end', withCua });
   }
 
   const manualEntities = targetPath && targetPath.length > 1 ? visualEntities(cursor, capture.crop, targetPath) : [];
@@ -1350,13 +1355,16 @@ async function captureWindowViaCuaVision(
 async function captureWindowSourceImage(
   bounds: Rect,
   windowInfo?: PointerContext['window']
-): Promise<{
-  id: string;
-  source: 'electron-window';
-  imageBase64: string;
-  mimeType: 'image/jpeg';
-  crop: Rect;
-} | undefined> {
+): Promise<
+  | {
+      id: string;
+      source: 'electron-window';
+      imageBase64: string;
+      mimeType: 'image/jpeg';
+      crop: Rect;
+    }
+  | undefined
+> {
   const scale = Math.max(1, screen.getDisplayMatching(bounds).scaleFactor || 1);
   const sources = await desktopCapturer.getSources({
     types: ['window'],
@@ -1540,7 +1548,7 @@ function sessionKeyForContext(context: PointerContext): string {
 function ensureClaudePermissionHookRegistered(): void {
   const home = app.getPath('home');
   const settingsPath = join(home, '.claude', 'settings.json');
-  const hookPath = join(repoRoot, 'apps', 'desktop', 'resources', 'omp-claude-hook.cjs');
+  const hookPath = join(repoRoot, 'apps', 'desktop', 'resources', 'op-claude-hook.cjs');
   if (!existsSync(hookPath)) return;
   let settings: Record<string, unknown> = {};
   try {

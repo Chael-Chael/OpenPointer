@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ClaudeAgentBridge } from './claude-agent.js';
 import { buildAgentContextEnvelope } from './routing.js';
-import type { PointerContext } from '@openmagicpointer/core';
+import type { PointerContext } from '@openpointer/core';
 
 const context: PointerContext = {
   id: 'ctx',
@@ -18,13 +18,13 @@ const context: PointerContext = {
 const tempDirs: string[] = [];
 
 function tempPermissionStorePath(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'omp-claude-permissions-'));
+  const dir = mkdtempSync(join(tmpdir(), 'op-claude-permissions-'));
   tempDirs.push(dir);
   return join(dir, 'claude-permissions.json');
 }
 
 afterEach(() => {
-  delete process.env.OMP_CUA_DRIVER_PATH;
+  delete process.env.OP_CUA_DRIVER_PATH;
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -38,12 +38,16 @@ describe('ClaudeAgentBridge', () => {
       sdk: {
         async *query(args: unknown) {
           const options = (args as { options: { canUseTool: (...args: unknown[]) => Promise<unknown> } }).options;
-          decision = await options.canUseTool('mcp__zotero__search', {}, {
-            toolUseID: 'tool-1',
-            title: 'Claude wants to use Zotero MCP.',
-            displayName: 'Zotero MCP',
-            suggestions: [{ type: 'addRules', rules: [{ toolName: 'mcp__zotero__search' }], behavior: 'allow', destination: 'session' }]
-          });
+          decision = await options.canUseTool(
+            'mcp__zotero__search',
+            {},
+            {
+              toolUseID: 'tool-1',
+              title: 'Claude wants to use Zotero MCP.',
+              displayName: 'Zotero MCP',
+              suggestions: [{ type: 'addRules', rules: [{ toolName: 'mcp__zotero__search' }], behavior: 'allow', destination: 'session' }]
+            }
+          );
           yield { type: 'result', result: 'done' };
         }
       }
@@ -70,12 +74,16 @@ describe('ClaudeAgentBridge', () => {
       sdk: {
         async *query(args: unknown) {
           const options = (args as { options: { canUseTool: (...args: unknown[]) => Promise<unknown> } }).options;
-          decision = await options.canUseTool('mcp__zotero__search', {}, {
-            toolUseID: 'tool-2',
-            title: 'Claude wants to use Zotero MCP.',
-            displayName: 'Zotero MCP',
-            suggestions: [{ type: 'addRules', rules: [{ toolName: 'mcp__zotero__search' }], behavior: 'allow', destination: 'session' }]
-          });
+          decision = await options.canUseTool(
+            'mcp__zotero__search',
+            {},
+            {
+              toolUseID: 'tool-2',
+              title: 'Claude wants to use Zotero MCP.',
+              displayName: 'Zotero MCP',
+              suggestions: [{ type: 'addRules', rules: [{ toolName: 'mcp__zotero__search' }], behavior: 'allow', destination: 'session' }]
+            }
+          );
           yield { type: 'result', result: 'done' };
         }
       }
@@ -108,12 +116,16 @@ describe('ClaudeAgentBridge', () => {
       sdk: {
         async *query(args: unknown) {
           const options = (args as { options: { canUseTool: (...args: unknown[]) => Promise<unknown> } }).options;
-          await options.canUseTool('mcp__zotero__search', {}, {
-            toolUseID: 'tool-3',
-            title: 'Claude wants to use Zotero MCP.',
-            displayName: 'Zotero MCP',
-            suggestions
-          });
+          await options.canUseTool(
+            'mcp__zotero__search',
+            {},
+            {
+              toolUseID: 'tool-3',
+              title: 'Claude wants to use Zotero MCP.',
+              displayName: 'Zotero MCP',
+              suggestions
+            }
+          );
           yield { type: 'result', result: 'done' };
         }
       }
@@ -141,12 +153,16 @@ describe('ClaudeAgentBridge', () => {
       sdk: {
         async *query(args: unknown) {
           const options = (args as { options: { canUseTool: (...args: unknown[]) => Promise<unknown> } }).options;
-          secondDecision = await options.canUseTool('mcp__zotero__search', {}, {
-            toolUseID: 'tool-4',
-            title: 'Claude wants to use Zotero MCP.',
-            displayName: 'Zotero MCP',
-            suggestions
-          });
+          secondDecision = await options.canUseTool(
+            'mcp__zotero__search',
+            {},
+            {
+              toolUseID: 'tool-4',
+              title: 'Claude wants to use Zotero MCP.',
+              displayName: 'Zotero MCP',
+              suggestions
+            }
+          );
           yield { type: 'result', result: 'done' };
         }
       }
@@ -165,11 +181,11 @@ describe('ClaudeAgentBridge', () => {
   });
 
   it('injects the local CUA MCP server when the envelope carries CUA context', async () => {
-    const driverDir = mkdtempSync(join(tmpdir(), 'omp-cua-driver-'));
+    const driverDir = mkdtempSync(join(tmpdir(), 'op-cua-driver-'));
     tempDirs.push(driverDir);
     const driverPath = join(driverDir, process.platform === 'win32' ? 'cua-driver.exe' : 'cua-driver');
     writeFileSync(driverPath, '');
-    process.env.OMP_CUA_DRIVER_PATH = driverPath;
+    process.env.OP_CUA_DRIVER_PATH = driverPath;
 
     let capturedOptions: Record<string, unknown> | undefined;
     const bridge = new ClaudeAgentBridge({
@@ -198,7 +214,7 @@ describe('ClaudeAgentBridge', () => {
   });
 
   it('resolves Windows npm Claude wrappers to the real JS CLI for SDK spawning', async () => {
-    const wrapperDir = mkdtempSync(join(tmpdir(), 'omp-claude-wrapper-'));
+    const wrapperDir = mkdtempSync(join(tmpdir(), 'op-claude-wrapper-'));
     tempDirs.push(wrapperDir);
     const wrapperPath = join(wrapperDir, process.platform === 'win32' ? 'claude.cmd' : 'claude');
     const cliPath = join(wrapperDir, 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');

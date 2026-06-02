@@ -1,8 +1,8 @@
 import { app, safeStorage } from 'electron';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { clampNumber } from '@openmagicpointer/core';
-import type { AppSettings } from '@openmagicpointer/storage';
+import { clampNumber } from '@openpointer/core';
+import type { AppSettings } from '@openpointer/storage';
 
 type StoredSettings = AppSettings & {
   encryptedLocalVlmApiKey?: string;
@@ -77,33 +77,21 @@ export function getSettings(): AppSettings {
   return {
     ...DEFAULTS,
     ...loaded,
-    agentBackend: normalizeBackend(envOverride(['OMP_AGENT_BACKEND', 'OP_AGENT_BACKEND']) || loaded.agentBackend || DEFAULTS.agentBackend),
-    localVlmEnabled: readBoolean(envOverride(['OMP_LOCAL_VLM_ENABLED', 'OP_LOCAL_VLM_ENABLED']), loaded.localVlmEnabled ?? DEFAULTS.localVlmEnabled),
-    localVlmBaseUrl:
-      envOverride(['OMP_LOCAL_VLM_BASE_URL', 'OMP_OPENAI_COMPAT_BASE_URL', 'OP_LOCAL_VLM_BASE_URL', 'OP_OPENAI_COMPAT_BASE_URL']) ||
-      loaded.localVlmBaseUrl ||
-      DEFAULTS.localVlmBaseUrl,
-    localVlmModel:
-      envOverride(['OMP_LOCAL_VLM_MODEL', 'OMP_OPENAI_COMPAT_MODEL', 'OP_LOCAL_VLM_MODEL', 'OP_OPENAI_COMPAT_MODEL']) || loaded.localVlmModel || '',
-    hermesBaseUrl: envOverride(['OMP_HERMES_BASE_URL', 'OP_HERMES_BASE_URL']) || loaded.hermesBaseUrl || DEFAULTS.hermesBaseUrl,
-    opencodeBaseUrl: envOverride(['OMP_OPENCODE_BASE_URL', 'OP_OPENCODE_BASE_URL']) || loaded.opencodeBaseUrl || '',
-    claudeAgentEnabled: readBoolean(
-      envOverride(['OMP_CLAUDE_AGENT_ENABLED', 'OP_CLAUDE_AGENT_ENABLED']),
-      loaded.claudeAgentEnabled ?? DEFAULTS.claudeAgentEnabled
-    ),
-    claudeAgentBaseUrl: envOverride(['OMP_CLAUDE_AGENT_BASE_URL', 'OP_CLAUDE_AGENT_BASE_URL']) || loaded.claudeAgentBaseUrl || DEFAULTS.claudeAgentBaseUrl,
-    claudeAgentExecutable: envOverride(['OMP_CLAUDE_EXECUTABLE', 'OP_CLAUDE_EXECUTABLE']) || loaded.claudeAgentExecutable || DEFAULTS.claudeAgentExecutable,
-    codexAppServerUrl: envOverride(['OMP_CODEX_APP_SERVER_URL', 'OP_CODEX_APP_SERVER_URL']) || loaded.codexAppServerUrl || '',
-    codexExecutablePath:
-      envOverride(['OMP_CODEX_EXECUTABLE', 'OMP_CODEX_CLI_PATH', 'OP_CODEX_EXECUTABLE', 'OP_CODEX_CLI_PATH']) ||
-      loaded.codexExecutablePath ||
-      detectDefaultCodexExecutable(),
+    agentBackend: normalizeBackend(envOverride(['OP_AGENT_BACKEND']) || loaded.agentBackend || DEFAULTS.agentBackend),
+    localVlmEnabled: readBoolean(envOverride(['OP_LOCAL_VLM_ENABLED']), loaded.localVlmEnabled ?? DEFAULTS.localVlmEnabled),
+    localVlmBaseUrl: envOverride(['OP_LOCAL_VLM_BASE_URL', 'OP_OPENAI_COMPAT_BASE_URL']) || loaded.localVlmBaseUrl || DEFAULTS.localVlmBaseUrl,
+    localVlmModel: envOverride(['OP_LOCAL_VLM_MODEL', 'OP_OPENAI_COMPAT_MODEL']) || loaded.localVlmModel || '',
+    hermesBaseUrl: envOverride(['OP_HERMES_BASE_URL']) || loaded.hermesBaseUrl || DEFAULTS.hermesBaseUrl,
+    opencodeBaseUrl: envOverride(['OP_OPENCODE_BASE_URL']) || loaded.opencodeBaseUrl || '',
+    claudeAgentEnabled: readBoolean(envOverride(['OP_CLAUDE_AGENT_ENABLED']), loaded.claudeAgentEnabled ?? DEFAULTS.claudeAgentEnabled),
+    claudeAgentBaseUrl: envOverride(['OP_CLAUDE_AGENT_BASE_URL']) || loaded.claudeAgentBaseUrl || DEFAULTS.claudeAgentBaseUrl,
+    claudeAgentExecutable: envOverride(['OP_CLAUDE_EXECUTABLE']) || loaded.claudeAgentExecutable || DEFAULTS.claudeAgentExecutable,
+    codexAppServerUrl: envOverride(['OP_CODEX_APP_SERVER_URL']) || loaded.codexAppServerUrl || '',
+    codexExecutablePath: envOverride(['OP_CODEX_EXECUTABLE', 'OP_CODEX_CLI_PATH']) || loaded.codexExecutablePath || detectDefaultCodexExecutable(),
     codexAppServerTransport: normalizeCodexTransport(
-      envOverride(['OMP_CODEX_APP_SERVER_TRANSPORT', 'OMP_CODEX_TRANSPORT', 'OP_CODEX_APP_SERVER_TRANSPORT', 'OP_CODEX_TRANSPORT']) ||
-        loaded.codexAppServerTransport ||
-        DEFAULTS.codexAppServerTransport
+      envOverride(['OP_CODEX_APP_SERVER_TRANSPORT', 'OP_CODEX_TRANSPORT']) || loaded.codexAppServerTransport || DEFAULTS.codexAppServerTransport
     ),
-    cuaMode: normalizeCuaMode(envOverride(['OMP_CUA_MODE', 'OP_CUA_MODE']) || loaded.cuaMode || DEFAULTS.cuaMode),
+    cuaMode: normalizeCuaMode(envOverride(['OP_CUA_MODE']) || loaded.cuaMode || DEFAULTS.cuaMode),
     pillWidth: clampNumber(loaded.pillWidth, 280, 900, DEFAULTS.pillWidth),
     pillHeight: clampNumber(loaded.pillHeight, 24, 96, DEFAULTS.pillHeight),
     newDialogBehavior: normalizeNewDialogBehavior(loaded.newDialogBehavior || DEFAULTS.newDialogBehavior),
@@ -224,11 +212,11 @@ function readBoolean(value: string | undefined, fallback: boolean): boolean {
   return /^(1|true|yes|on)$/i.test(value);
 }
 
-const localVlmSecretEnvKeys = ['OMP_LOCAL_VLM_API_KEY', 'OMP_OPENAI_COMPAT_API_KEY', 'OP_LOCAL_VLM_API_KEY', 'OP_OPENAI_COMPAT_API_KEY'];
-const hermesSecretEnvKeys = ['OMP_HERMES_API_KEY', 'OP_HERMES_API_KEY'];
-const opencodeSecretEnvKeys = ['OMP_OPENCODE_API_KEY', 'OP_OPENCODE_API_KEY'];
-const claudeAgentSecretEnvKeys = ['OMP_CLAUDE_AGENT_API_KEY', 'OP_CLAUDE_AGENT_API_KEY', 'ANTHROPIC_API_KEY'];
-const codexSecretEnvKeys = ['OMP_CODEX_API_KEY', 'OP_CODEX_API_KEY'];
+const localVlmSecretEnvKeys = ['OP_LOCAL_VLM_API_KEY', 'OP_OPENAI_COMPAT_API_KEY'];
+const hermesSecretEnvKeys = ['OP_HERMES_API_KEY'];
+const opencodeSecretEnvKeys = ['OP_OPENCODE_API_KEY'];
+const claudeAgentSecretEnvKeys = ['OP_CLAUDE_AGENT_API_KEY', 'ANTHROPIC_API_KEY'];
+const codexSecretEnvKeys = ['OP_CODEX_API_KEY'];
 
 function firstEnv(keys: string[]): string | undefined {
   for (const key of keys) {

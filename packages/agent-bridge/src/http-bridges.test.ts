@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import { HermesBridge } from './http-bridges.js';
 import { buildAgentContextEnvelope } from './routing.js';
-import type { PointerContext } from '@openmagicpointer/core';
+import type { PointerContext } from '@openpointer/core';
 
 const servers: Array<{ close(cb?: () => void): void }> = [];
 

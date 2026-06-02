@@ -2,7 +2,7 @@ import type { DesktopApi } from '../shared/types';
 
 declare global {
   interface Window {
-    openMagicPointer: DesktopApi;
+    openPointer: DesktopApi;
     webkitSpeechRecognition?: unknown;
     SpeechRecognition?: unknown;
   }

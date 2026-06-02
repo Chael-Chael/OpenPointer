@@ -1,4 +1,4 @@
-import type { AgentEvent } from '@openmagicpointer/core';
+import type { AgentEvent } from '@openpointer/core';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';

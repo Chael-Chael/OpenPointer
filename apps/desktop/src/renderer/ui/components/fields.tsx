@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
-import { clampNumber } from '@openmagicpointer/core';
-import type { AgentEvent } from '@openmagicpointer/core';
+import { clampNumber } from '@openpointer/core';
+import type { AgentEvent } from '@openpointer/core';
 import type { CursorPayload } from '../../../shared/types';
 import type { BackendReadiness } from '../state';
 
@@ -37,13 +37,9 @@ export function ToolRows({ events }: { events: Array<Extract<AgentEvent, { type:
               )}
             </span>
             {/* 工具名称 */}
-            <span className="font-semibold text-white/95 truncate">
-              {event.name}
-            </span>
+            <span className="font-semibold text-white/95 truncate">{event.name}</span>
             {/* 状态右文本 */}
-            <span className="text-[9px] text-white/55 font-bold ml-auto uppercase tracking-wider">
-              {isRunning ? 'Running' : 'Done'}
-            </span>
+            <span className="text-[9px] text-white/55 font-bold ml-auto uppercase tracking-wider">{isRunning ? 'Running' : 'Done'}</span>
           </div>
         );
       })}

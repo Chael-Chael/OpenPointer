@@ -1,4 +1,4 @@
-import type { PointerContext } from '@openmagicpointer/core';
+import type { PointerContext } from '@openpointer/core';
 
 export type ChatMessage = {
   role: 'system' | 'user' | 'assistant';
@@ -209,7 +209,7 @@ export function buildPointerMessages(context: PointerContext, userPrompt: string
     {
       role: 'system',
       content:
-        'You are OpenMagicPointer. Answer based on the pointer context and attached screenshot. Do not claim to execute actions. If an action is needed, describe the intended action clearly for local preview.'
+        'You are OpenPointer. Answer based on the pointer context and attached screenshot. Do not claim to execute actions. If an action is needed, describe the intended action clearly for local preview.'
     },
     {
       role: 'user',

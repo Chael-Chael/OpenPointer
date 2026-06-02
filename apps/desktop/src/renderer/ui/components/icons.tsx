@@ -1,4 +1,4 @@
-import type { AgentBackendId } from '@openmagicpointer/core';
+import type { AgentBackendId } from '@openpointer/core';
 
 import claudeSvg from '../../assets/claude-color.svg?raw';
 import codexSvg from '../../assets/codex-color.svg?raw';
@@ -7,15 +7,8 @@ import openaiSvg from '../../assets/openai.svg?raw';
 import opencodeSvg from '../../assets/opencode.svg?raw';
 
 function SvgIcon({ svg, size }: { svg: string; size: number }) {
-  const rendered = svg
-    .replace(/width="[^"]*"/, `width="${size}"`)
-    .replace(/height="[^"]*"/, `height="${size}"`);
-  return (
-    <span
-      style={{ width: size, height: size, display: 'inline-flex', flexShrink: 0, lineHeight: 1 }}
-      dangerouslySetInnerHTML={{ __html: rendered }}
-    />
-  );
+  const rendered = svg.replace(/width="[^"]*"/, `width="${size}"`).replace(/height="[^"]*"/, `height="${size}"`);
+  return <span style={{ width: size, height: size, display: 'inline-flex', flexShrink: 0, lineHeight: 1 }} dangerouslySetInnerHTML={{ __html: rendered }} />;
 }
 
 export function ArrowMark() {

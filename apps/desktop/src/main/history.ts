@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { Conversation, ChatTurn } from '@openmagicpointer/core';
+import type { Conversation, ChatTurn } from '@openpointer/core';
 
 export class ChatHistoryManager {
   private filePath: string;

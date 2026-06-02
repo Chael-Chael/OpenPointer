@@ -1,6 +1,6 @@
-# OpenMagicPointer Architecture
+# OpenPointer Architecture
 
-OpenMagicPointer is a desktop pointer context bridge. It captures what the user points at, collects screenshot/window/cursor context, accepts text or voice instructions, and streams results from a local VLM or an external agent backend.
+OpenPointer is a desktop pointer context bridge. It captures what the user points at, collects screenshot/window/cursor context, accepts text or voice instructions, and streams results from a local VLM or an external agent backend.
 
 The app no longer owns local computer-use execution. CUA, MCP tools, and skills are selected and invoked by the configured agent runtime.
 
@@ -26,4 +26,4 @@ long press
 -> bubble progress/result/approval UI
 ```
 
-OpenMagicPointer passes generic tool hints such as app-specific MCP, document skill, screen skill, and CUA. It does not hardcode app-specific paths.
+OpenPointer passes generic tool hints such as app-specific MCP, document skill, screen skill, and CUA. It does not hardcode app-specific paths.

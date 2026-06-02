@@ -1,5 +1,5 @@
-import type { AgentBackendId, AgentEvent } from '@openmagicpointer/core';
-import type { AppSettings } from '@openmagicpointer/storage';
+import type { AgentBackendId, AgentEvent } from '@openpointer/core';
+import type { AppSettings } from '@openpointer/storage';
 import type { BackendReadiness, StatusTone, UiState } from '../state';
 import { selectableBackends } from '../state';
 

@@ -1,4 +1,4 @@
-import type { AgentBackendId, AgentContextEnvelope } from '@openmagicpointer/core';
+import type { AgentBackendId, AgentContextEnvelope } from '@openpointer/core';
 import { ClaudeAgentBridge } from './claude-agent.js';
 import { CodexBridge, HermesBridge, OpenCodeBridge } from './http-bridges.js';
 import { LocalVlmBridge } from './local-vlm.js';

@@ -1,6 +1,6 @@
 # Safety Policy
 
-OpenMagicPointer is a context and instruction layer. It does not click, type, open apps, run shell commands, or execute CUA locally.
+OpenPointer is a context and instruction layer. It does not click, type, open apps, run shell commands, or execute CUA locally.
 
 Rules:
 

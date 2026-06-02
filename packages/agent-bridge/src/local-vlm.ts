@@ -1,5 +1,5 @@
-import { OpenAICompatibleBackend, isUnsupportedImageInputError, type ChatMessage } from '@openmagicpointer/backends';
-import { estimateTextTokens, type AgentContextEnvelope, type AgentEvent } from '@openmagicpointer/core';
+import { OpenAICompatibleBackend, isUnsupportedImageInputError, type ChatMessage } from '@openpointer/backends';
+import { estimateTextTokens, type AgentContextEnvelope, type AgentEvent } from '@openpointer/core';
 import { buildLocalVlmPrompt, dataUrlsFromEnvelope } from './prompt.js';
 import type { AgentBridge, AgentRunOptions, LocalVlmBridgeConfig } from './types.js';
 
@@ -39,7 +39,7 @@ export class LocalVlmBridge implements AgentBridge {
       messages = [
         {
           role: 'system',
-          content: 'You are OpenMagicPointer local VLM fallback. Answer only. Here is a summary of the conversation context so far:\n\n' + summaryText
+          content: 'You are OpenPointer local VLM fallback. Answer only. Here is a summary of the conversation context so far:\n\n' + summaryText
         },
         buildLocalMessages(envelope, true).pop()!
       ];
@@ -86,7 +86,7 @@ function buildLocalMessages(envelope: AgentContextEnvelope, includeImage: boolea
   const messages: ChatMessage[] = [
     {
       role: 'system',
-      content: 'You are OpenMagicPointer local VLM fallback. Answer only; do not use tools or claim execution.'
+      content: 'You are OpenPointer local VLM fallback. Answer only; do not use tools or claim execution.'
     }
   ];
 
@@ -97,12 +97,10 @@ function buildLocalMessages(envelope: AgentContextEnvelope, includeImage: boolea
         const turnDataUrls = includeImage ? dataUrlsFromPointerContext(turn.pointerContext) : [];
         messages.push({
           role: 'user',
-          content: turnDataUrls.length > 0
-            ? [
-                { type: 'text', text: turn.text },
-                ...turnDataUrls.map((dataUrl) => ({ type: 'image_url' as const, image_url: { url: dataUrl } }))
-              ]
-            : turn.text
+          content:
+            turnDataUrls.length > 0
+              ? [{ type: 'text', text: turn.text }, ...turnDataUrls.map((dataUrl) => ({ type: 'image_url' as const, image_url: { url: dataUrl } }))]
+              : turn.text
         });
       } else {
         messages.push({
@@ -115,18 +113,16 @@ function buildLocalMessages(envelope: AgentContextEnvelope, includeImage: boolea
 
   messages.push({
     role: 'user',
-    content: dataUrls.length > 0
-      ? [
-          { type: 'text', text: prompt },
-          ...dataUrls.map((dataUrl) => ({ type: 'image_url' as const, image_url: { url: dataUrl } }))
-        ]
-      : prompt
+    content:
+      dataUrls.length > 0
+        ? [{ type: 'text', text: prompt }, ...dataUrls.map((dataUrl) => ({ type: 'image_url' as const, image_url: { url: dataUrl } }))]
+        : prompt
   });
 
   return messages;
 }
 
-function dataUrlsFromPointerContext(context: import('@openmagicpointer/core').PointerContext | undefined): string[] {
+function dataUrlsFromPointerContext(context: import('@openpointer/core').PointerContext | undefined): string[] {
   if (!context) return [];
   const urls: string[] = [];
   if (context.visual?.imageBase64) urls.push(`data:${context.visual.mimeType || 'image/jpeg'};base64,${context.visual.imageBase64}`);
@@ -136,7 +132,7 @@ function dataUrlsFromPointerContext(context: import('@openmagicpointer/core').Po
   return urls;
 }
 
-async function summarizeHistory(backend: OpenAICompatibleBackend, history: import('@openmagicpointer/core').ChatTurn[]): Promise<string> {
+async function summarizeHistory(backend: OpenAICompatibleBackend, history: import('@openpointer/core').ChatTurn[]): Promise<string> {
   const summaryPrompt: ChatMessage[] = [
     {
       role: 'system',

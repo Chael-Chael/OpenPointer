@@ -4,10 +4,10 @@
 const http = require('node:http');
 
 const event = process.argv[2] || '';
-const permissionUrl = process.env.OPENMAGICPOINTER_PERMISSION_URL || '';
-const token = process.env.OPENMAGICPOINTER_PERMISSION_TOKEN || '';
+const permissionUrl = process.env.OPENPOINTER_PERMISSION_URL || '';
+const token = process.env.OPENPOINTER_PERMISSION_TOKEN || '';
 
-if (process.env.OPENMAGICPOINTER_SESSION !== '1' || !permissionUrl || !token) {
+if (process.env.OPENPOINTER_SESSION !== '1' || !permissionUrl || !token) {
   process.exit(0);
 }
 

@@ -1,6 +1,6 @@
-import type { ApprovalDecision } from '@openmagicpointer/agent-bridge';
-import type { AgentBackendId, AgentEvent, AgentInputMode, Point, PointerContext, PointerEntity, Rect } from '@openmagicpointer/core';
-import type { AppSettings } from '@openmagicpointer/storage';
+import type { ApprovalDecision } from '@openpointer/agent-bridge';
+import type { AgentBackendId, AgentEvent, AgentInputMode, Point, PointerContext, PointerEntity, Rect } from '@openpointer/core';
+import type { AppSettings } from '@openpointer/storage';
 
 export type CursorPayload = {
   x: number;
@@ -140,8 +140,8 @@ export type DesktopApi = {
   cancelRun(): void;
   getSettings(): Promise<AppSettings>;
   saveSettings(patch: SaveSettingsPatch): Promise<AppSettings>;
-  getConversations(): Promise<import('@openmagicpointer/core').Conversation[]>;
-  getConversation(id: string): Promise<import('@openmagicpointer/core').Conversation | null>;
+  getConversations(): Promise<import('@openpointer/core').Conversation[]>;
+  getConversation(id: string): Promise<import('@openpointer/core').Conversation | null>;
   deleteConversation(id: string): Promise<void>;
   fetchVisionModels(req: { baseUrl: string; apiKey: string }): Promise<{ success: boolean; models?: string[]; error?: string }>;
 };

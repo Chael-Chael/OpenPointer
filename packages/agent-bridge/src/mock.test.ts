@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MockAgentBridge } from './mock.js';
 import { buildAgentContextEnvelope } from './routing.js';
-import type { PointerContext } from '@openmagicpointer/core';
+import type { PointerContext } from '@openpointer/core';
 
 const context: PointerContext = {
   id: 'ctx',

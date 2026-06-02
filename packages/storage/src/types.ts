@@ -1,4 +1,4 @@
-import type { AgentContextEnvelope, AgentEvent, PointerContext } from '@openmagicpointer/core';
+import type { AgentContextEnvelope, AgentEvent, PointerContext } from '@openpointer/core';
 
 export type AppSettings = {
   agentBackend: 'auto' | 'local-vlm' | 'hermes' | 'opencode' | 'claude-agent' | 'codex';

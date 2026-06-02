@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PointerEntity } from '@openmagicpointer/core';
+import type { PointerEntity } from '@openpointer/core';
 import {
   displayForRect,
   distanceToRectSquared,

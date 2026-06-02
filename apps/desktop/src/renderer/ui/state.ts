@@ -1,4 +1,4 @@
-import type { AgentBackendId } from '@openmagicpointer/core';
+import type { AgentBackendId } from '@openpointer/core';
 
 export type SecretKey = 'localVlmApiKey' | 'hermesApiKey' | 'opencodeApiKey' | 'claudeAgentApiKey' | 'codexApiKey';
 

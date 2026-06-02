@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PointerContext } from '@openmagicpointer/core';
+import type { PointerContext } from '@openpointer/core';
 import { buildAgentContextEnvelope } from './routing.js';
 
 const context: PointerContext = {
@@ -33,7 +33,7 @@ describe('buildAgentContextEnvelope', () => {
       mode: 'text',
       context
     });
-    expect(envelope.schemaVersion).toBe('openmagicpointer.agent-context.v1');
+    expect(envelope.schemaVersion).toBe('openpointer.agent-context.v1');
     expect(envelope.routing.preferredTools).toEqual(['app-specific-mcp', 'document-skill', 'screen-skill']);
     expect(envelope.routing.preferredTools.join(',')).not.toMatch(/zotero/i);
     expect(envelope.attachments[0]?.dataUrl).toContain('data:image/jpeg;base64,abc');

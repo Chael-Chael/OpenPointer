@@ -1,4 +1,4 @@
-import type { AgentContextEnvelope, AgentEvent } from '@openmagicpointer/core';
+import type { AgentContextEnvelope, AgentEvent } from '@openpointer/core';
 import type { AgentBridge, AgentRunOptions } from './types.js';
 
 export class MockAgentBridge implements AgentBridge {

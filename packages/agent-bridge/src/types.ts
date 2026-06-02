@@ -1,4 +1,4 @@
-import type { AgentBackendId, AgentContextEnvelope, AgentEvent } from '@openmagicpointer/core';
+import type { AgentBackendId, AgentContextEnvelope, AgentEvent } from '@openpointer/core';
 
 export type AgentRunOptions = {
   signal?: AbortSignal;
