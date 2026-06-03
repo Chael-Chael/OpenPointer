@@ -232,7 +232,7 @@ export function GeneralTab({
             label="Model"
             value={settings.codexModel}
             onChange={(value) => updateSettings({ codexModel: value })}
-            placeholder="gpt-5.4"
+            placeholder="gpt-5.5"
           />
           <label className="field">
             <span>Reasoning Effort</span>

@@ -2135,12 +2135,12 @@ export function App() {
                     <div className="relative min-w-[118px] p-1 border border-glass-border rounded-[var(--radius-pill)] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] flex flex-col gap-0.5 animate-dropdown-appear">
                       <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
                       <div className="text-[9px] text-white/50 uppercase tracking-wider px-3 pt-1.5 pb-0.5">Model</div>
-                      {['gpt-5.4', 'gpt-5.3', 'gpt-5.2'].map((model) => (
+                      {['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'].map((model) => (
                         <button
                           key={model}
                           type="button"
                           className={`w-full text-left py-1.5 px-3 border-0 rounded-[var(--radius-pill)] text-[11px] font-semibold cursor-pointer transition-colors ${
-                            (settings?.codexModel || 'gpt-5.4') === model
+                            (settings?.codexModel || 'gpt-5.5') === model
                               ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]'
                               : 'bg-transparent text-white/80 hover:bg-white/10 hover:text-white'
                           }`}
