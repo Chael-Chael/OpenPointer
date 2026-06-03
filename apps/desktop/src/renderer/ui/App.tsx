@@ -1799,6 +1799,7 @@ export function App() {
           {!shellHiddenForContextCapture && (
             <section
               className={`absolute left-0 top-0 pointer-events-auto will-change-transform w-[min(var(--pill-width,520px),calc(100vw-32px))] state-${state}${selecting ? ' is-selecting' : ''}`}
+              data-pill-theme={settings?.modalTheme ?? 'blue'}
               style={
                 {
                   transform: `translate3d(${effectiveShellPos.x}px, ${effectiveShellPos.y}px, 0)`,

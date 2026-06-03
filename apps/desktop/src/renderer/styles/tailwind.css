@@ -845,10 +845,16 @@
   border-radius: var(--radius-pill);
   background: rgba(255, 255, 255, 0.12);
   color: #ffffff;
-  padding: 0 8px;
+  padding: 0 28px 0 8px;
   font-size: 12px;
   font-weight: 600;
   outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='rgba(255,255,255,0.6)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  cursor: pointer;
 }
 
 .bubble-dropdown-select option {
@@ -2247,4 +2253,156 @@
 }
 @utility animate-pulse-scale {
   animation: pulseScale 1.2s infinite ease-in-out;
+}
+
+/* ================================================================
+   Pill-section theme propagation (white / black)
+   Targets small pill, preview cards, dropdown panels, glow, bubble-dropdown
+   ================================================================ */
+
+/* ── White theme ── */
+[data-pill-theme="white"] .small-pill {
+  background: rgba(255, 255, 255, 0.92) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  color: #1c1c1e !important;
+}
+[data-pill-theme="white"] .small-pill:hover {
+  background: rgba(255, 255, 255, 0.98) !important;
+}
+
+[data-pill-theme="white"] .backend-dropdown > div {
+  background: rgba(255, 255, 255, 0.96) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  color: #1c1c1e !important;
+}
+[data-pill-theme="white"] .backend-dropdown button {
+  color: rgba(0, 0, 0, 0.7) !important;
+}
+[data-pill-theme="white"] .backend-dropdown button:hover {
+  background: rgba(0, 0, 0, 0.06) !important;
+  color: #1c1c1e !important;
+}
+[data-pill-theme="white"] .backend-dropdown button.bg-white {
+  background: #1c1c1e !important;
+  color: #ffffff !important;
+}
+[data-pill-theme="white"] .backend-dropdown .text-white\/50 {
+  color: rgba(0, 0, 0, 0.4) !important;
+}
+
+[data-pill-theme="white"] .bubble-dropdown {
+  background: rgba(255, 255, 255, 0.96) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  color: #1c1c1e !important;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.12), inset 0 1px 1px rgba(255, 255, 255, 0.9) !important;
+}
+[data-pill-theme="white"] .bubble-dropdown-item {
+  color: rgba(0, 0, 0, 0.75) !important;
+}
+[data-pill-theme="white"] .bubble-dropdown-item:hover {
+  background: rgba(0, 0, 0, 0.06) !important;
+  color: #1c1c1e !important;
+}
+[data-pill-theme="white"] .bubble-dropdown-icon {
+  background: rgba(0, 0, 0, 0.08) !important;
+  color: #1c1c1e !important;
+}
+[data-pill-theme="white"] .bubble-dropdown-separator {
+  background: rgba(0, 0, 0, 0.1) !important;
+}
+[data-pill-theme="white"] .bubble-dropdown-select {
+  background: rgba(0, 0, 0, 0.06) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+  color: #1c1c1e !important;
+  background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' viewBox='0 0 10 6' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L5 5L9 1' stroke='rgba(0,0,0,0.45)' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 8px center !important;
+}
+[data-pill-theme="white"] .bubble-dropdown-select option {
+  background: #ffffff !important;
+  color: #1c1c1e !important;
+}
+
+/* Preview cards above pill */
+[data-pill-theme="white"] .absolute.z-10.text-white {
+  background: rgba(255, 255, 255, 0.94) !important;
+  border-color: rgba(0, 0, 0, 0.1) !important;
+  color: #1c1c1e !important;
+}
+[data-pill-theme="white"] .absolute.z-10.text-white .text-white\/95,
+[data-pill-theme="white"] .absolute.z-10.text-white .text-white\/90,
+[data-pill-theme="white"] .absolute.z-10.text-white .text-white\/85,
+[data-pill-theme="white"] .absolute.z-10.text-white .text-white\/\[0\.84\] {
+  color: #1c1c1e !important;
+}
+[data-pill-theme="white"] .absolute.z-10.text-white .text-white\/60,
+[data-pill-theme="white"] .absolute.z-10.text-white .text-white\/55,
+[data-pill-theme="white"] .absolute.z-10.text-white .text-white\/50 {
+  color: rgba(0, 0, 0, 0.45) !important;
+}
+[data-pill-theme="white"] .absolute.z-10.text-white .h-px.bg-white\/12 {
+  background: rgba(0, 0, 0, 0.1) !important;
+}
+[data-pill-theme="white"] .absolute.z-10.text-white .bg-white\/\[0\.08\],
+[data-pill-theme="white"] .absolute.z-10.text-white .bg-white\/5 {
+  background: rgba(0, 0, 0, 0.05) !important;
+}
+[data-pill-theme="white"] .absolute.z-10.text-white .bg-white\/12 {
+  background: rgba(0, 0, 0, 0.08) !important;
+}
+[data-pill-theme="white"] .absolute.z-10.text-white .rounded-full.bg-white\/12 {
+  background: rgba(0, 0, 0, 0.08) !important;
+}
+[data-pill-theme="white"] .absolute.z-10.text-white .text-white\/80 {
+  color: rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Glow */
+[data-pill-theme="white"] .animate-pill-glow {
+  background: rgba(200, 200, 200, 0.35) !important;
+}
+
+/* ── Black theme ── */
+[data-pill-theme="black"] .small-pill {
+  background: rgba(28, 28, 30, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+}
+[data-pill-theme="black"] .small-pill:hover {
+  background: rgba(44, 44, 46, 0.98) !important;
+}
+
+[data-pill-theme="black"] .backend-dropdown > div {
+  background: rgba(28, 28, 30, 0.96) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+[data-pill-theme="black"] .backend-dropdown button {
+  color: rgba(255, 255, 255, 0.75) !important;
+}
+[data-pill-theme="black"] .backend-dropdown button:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: #ffffff !important;
+}
+[data-pill-theme="black"] .backend-dropdown button.bg-white {
+  background: rgba(255, 255, 255, 0.15) !important;
+  color: #ffffff !important;
+}
+
+[data-pill-theme="black"] .bubble-dropdown {
+  background: rgba(28, 28, 30, 0.96) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+[data-pill-theme="black"] .bubble-dropdown-select option {
+  background: #1c1c1e !important;
+}
+
+/* Preview cards */
+[data-pill-theme="black"] .absolute.z-10.text-white {
+  background: rgba(28, 28, 30, 0.92) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Glow */
+[data-pill-theme="black"] .animate-pill-glow {
+  background: rgba(60, 60, 65, 0.5) !important;
 }
