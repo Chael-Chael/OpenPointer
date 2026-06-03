@@ -31,7 +31,6 @@ import {
   CUA_PICKER_MIN_WIDTH,
   DEFAULT_CUA_PICKER_SIZE,
   MAX_CUA_HIGHLIGHTS,
-  type LocalRect
 } from './lib/cua-constants';
 import {
   contextRegionAroundCursor,

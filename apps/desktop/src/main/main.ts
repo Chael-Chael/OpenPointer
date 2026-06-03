@@ -6,13 +6,10 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import {
-  createAgentBridge,
-  resolveBackendForEnvelope,
-  buildAgentContextEnvelope,
   type AgentBridgeRegistryConfig,
   type ApprovalDecision
 } from '@openpointer/agent-bridge';
-import type { AgentContextEnvelope, AgentEvent, Point, PointerContext, PointerEntity, Rect } from '@openpointer/core';
+import type { Point, PointerContext, PointerEntity, Rect } from '@openpointer/core';
 import { buildPointerContext } from '@openpointer/grounding';
 import { OP_CHANNELS } from '../shared/ipc.js';
 import type {
@@ -28,10 +25,11 @@ import { CuaBroker } from './cua-broker.js';
 import { CodexAdapterManager } from './codex-adapter.js';
 import { CuaGroundingProvider } from './cua-grounding.js';
 import { CuaSidecarManager, type CuaToolResult } from './cua-sidecar.js';
-import { CuaTaskManager, type CuaTaskRuntime } from './cua-task-manager.js';
+import { CuaTaskManager } from './cua-task-manager.js';
 import { loadLocalEnv } from './env.js';
 import { getClaudeAgentApiKey, getCodexApiKey, getHermesApiKey, getLocalVlmApiKey, getOpenCodeApiKey, getSettings, saveSettings } from './settings.js';
 import { ChatHistoryManager } from './history.js';
+import { OpenPointerHarness } from './openpointer-harness.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '../../../..');
@@ -76,6 +74,15 @@ const CUA_DRIVER_AGENT_TOOLS = [
 ];
 const OP_AGENT_TOOLS = ['read_selected_text', 'insert_text'];
 const CUA_AGENT_TOOLS = [...CUA_DRIVER_AGENT_TOOLS, ...OP_AGENT_TOOLS];
+const openPointerHarness = new OpenPointerHarness({
+  taskManager: cuaTaskManager,
+  cuaBroker,
+  chatHistory,
+  getSettings,
+  bridgeConfig,
+  createOpenPointerTools,
+  allowedCuaTools: CUA_AGENT_TOOLS
+});
 
 const hold = {
   active: false,
@@ -565,11 +572,7 @@ function registerIpc(): void {
     return { status: 'fallback', source: 'active-window', error: 'No active window information available.' };
   });
   ipcMain.handle(OP_CHANNELS.ApproveAgentRequest, async (_event, id: string, decision: ApprovalDecision) => {
-    if (cuaBroker.hasPendingApproval(id)) {
-      cuaBroker.approve(id, decision === 'deny' ? 'deny' : 'approve');
-      return;
-    }
-    await cuaTaskManager.approve(id, decision);
+    await openPointerHarness.approve(id, decision);
   });
 
   ipcMain.handle(OP_CHANNELS.CuaTaskList, () => cuaTaskManager.list());
@@ -608,148 +611,14 @@ function registerIpc(): void {
           selectedText
         );
 
-    const conversationId = req.conversationId || `conv-${Date.now()}`;
-    await chatHistory.appendTurn(conversationId, {
-      id: `turn-${Date.now()}-user`,
-      role: 'user',
+    return openPointerHarness.submit({
       text: req.text,
-      pointerContext: context,
-      timestamp: Date.now()
-    });
-    const conversation = await chatHistory.getConversation(conversationId);
-
-    const initialEnvelope = buildAgentContextEnvelope({
-      instruction: req.text,
       mode: req.mode,
       context,
-      backend: req.backend ?? settings.agentBackend
+      backend: req.backend,
+      conversationId: req.conversationId
     });
-    if (conversation) {
-      initialEnvelope.conversationId = conversationId;
-      initialEnvelope.history = conversation.turns;
-    }
-    const config = bridgeConfig(settings);
-    const backend = resolveBackendForEnvelope(initialEnvelope, config);
-    const backendSessionId = backend === 'claude-agent' ? conversation?.backendSessions?.claudeAgent?.sessionId : undefined;
-    let submittedTaskId: string | undefined;
-    const cuaBrokerSession =
-      context.grounding?.status === 'matched'
-        ? await cuaBroker.ensureStarted({
-            requireApprovalBeforeCua: settings.requireApprovalBeforeCua,
-            allowedTools: CUA_AGENT_TOOLS,
-            localTools: createOpenPointerTools(context),
-            emit: (agentEvent) => {
-              if (submittedTaskId) cuaTaskManager.emitAgentEvent(submittedTaskId, agentEvent);
-            }
-          })
-        : undefined;
-    const envelope: AgentContextEnvelope = {
-      ...initialEnvelope,
-      history: backend === 'claude-agent' ? undefined : initialEnvelope.history,
-      routing: { ...initialEnvelope.routing, backend },
-      toolServers: cuaBrokerSession
-        ? [
-            {
-              id: 'cua',
-              transport: 'local-http',
-              sessionId: cuaBrokerSession.sessionId,
-              endpoint: cuaBrokerSession.endpoint,
-              tools: CUA_AGENT_TOOLS
-            }
-          ]
-        : initialEnvelope.toolServers
-    };
-    submittedTaskId = cuaTaskManager.submit({
-      conversationId,
-      instruction: req.text,
-      windowTitle: context.window?.title || context.window?.app || context.window?.process,
-      bridge: createAgentBridge(backend, config),
-      envelope,
-      brokerSessionId: cuaBrokerSession?.sessionId,
-      backendSessionId,
-      allowLocalFallback: settings.localVlmEnabled && backend !== 'local-vlm',
-      cleanup: cuaBrokerSession ? () => cuaBroker.releaseSession(cuaBrokerSession.sessionId) : undefined,
-      runner: streamBridgeEvents
-    });
-    return { requestId: envelope.requestId, backend, conversationId, taskId: submittedTaskId };
   });
-}
-
-async function streamBridgeEvents(task: CuaTaskRuntime, forward: (event: AgentEvent) => void): Promise<void> {
-  let emittedStarted = false;
-  let sawTerminal = false;
-  let fullAnswer = '';
-
-  const startTime = Date.now();
-  const toolEvents: Array<Extract<AgentEvent, { type: 'tool.started' | 'tool.completed' }>> = [];
-  const events: AgentEvent[] = [];
-
-  const record = (agentEvent: AgentEvent) => {
-    if (task.controller.signal.aborted) return;
-    forward(agentEvent);
-    if (agentEvent.type === 'run.completed' || agentEvent.type === 'run.failed') sawTerminal = true;
-    if (agentEvent.type === 'tool.started' || agentEvent.type === 'tool.completed') toolEvents.push(agentEvent);
-    events.push(agentEvent);
-  };
-
-  try {
-    for await (const agentEvent of task.bridge.run(task.envelope, {
-      signal: task.controller.signal,
-      sessionKey: sessionKeyForContext(task.envelope.pointerContext),
-      backendSessionId: task.backendSessionId
-    })) {
-      if (task.controller.signal.aborted) break;
-      if (agentEvent.type === 'run.failed' && agentEvent.recoverable && task.allowLocalFallback && !emittedStarted) {
-        // Recover silently via the local VLM instead of surfacing the primary failure to the UI.
-        const localEnvelope: AgentContextEnvelope = { ...task.envelope, routing: { ...task.envelope.routing, backend: 'local-vlm' } };
-        record({ type: 'assistant.delta', text: 'Agent backend is unavailable. Falling back to local VLM.' });
-        const localBridge = createAgentBridge('local-vlm', bridgeConfig(getSettings()));
-        for await (const localEvent of localBridge.run(localEnvelope, { signal: task.controller.signal })) {
-          if (task.controller.signal.aborted) break;
-          record(localEvent);
-          if (localEvent.type === 'assistant.delta') fullAnswer += localEvent.text;
-        }
-        break;
-      }
-      record(agentEvent);
-      if (agentEvent.type === 'backend.session' && agentEvent.backend === 'claude-agent' && task.envelope.conversationId) {
-        await chatHistory.setClaudeAgentSession(task.envelope.conversationId, agentEvent.sessionId);
-      }
-      if (agentEvent.type === 'run.started') emittedStarted = true;
-      if (agentEvent.type === 'assistant.delta') fullAnswer += agentEvent.text;
-    }
-
-    // Guarantee the UI leaves the streaming state even if the runtime stream
-    // closed without a terminal (run.completed / run.failed) event.
-    if (!task.controller.signal.aborted && !sawTerminal) {
-      record({ type: 'run.completed', text: fullAnswer || undefined });
-    }
-  } catch (error) {
-    if (!task.controller.signal.aborted && !sawTerminal) {
-      record({
-        type: 'run.failed',
-        error: error instanceof Error ? error.message : String(error),
-        recoverable: true
-      });
-    }
-  }
-
-  if (!task.controller.signal.aborted && task.envelope.conversationId && fullAnswer) {
-    const thinkingTime = Math.round((Date.now() - startTime) / 1000);
-    try {
-      await chatHistory.appendTurn(task.envelope.conversationId, {
-        id: `turn-${Date.now()}-assistant`,
-        role: 'assistant',
-        text: fullAnswer,
-        timestamp: Date.now(),
-        thinkingTime: thinkingTime > 0 ? thinkingTime : undefined,
-        toolEvents: toolEvents.length > 0 ? toolEvents : undefined,
-        events: events.length > 0 ? events : undefined
-      });
-    } catch (error) {
-      console.warn('[omp] failed to persist assistant turn', error);
-    }
-  }
 }
 
 function bridgeConfig(settings = getSettings()): AgentBridgeRegistryConfig {
@@ -1431,7 +1300,7 @@ function normalizeSourceText(value: string | undefined): string {
   return value?.toLowerCase().replace(/\s+/g, ' ').trim() ?? '';
 }
 
-async function captureScreenRegion(
+async function _captureScreenRegion(
   cursor: CursorPayload,
   region: Rect,
   idPrefix: string
@@ -1562,10 +1431,6 @@ function bboxFromPoints(points: Point[]): Rect {
   const minY = Math.min(...ys);
   const maxY = Math.max(...ys);
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
-}
-
-function sessionKeyForContext(context: PointerContext): string {
-  return [context.source, context.window?.app, context.window?.windowId].filter(Boolean).join(':') || 'desktop';
 }
 
 function ensureClaudePermissionHookRegistered(): void {

@@ -565,8 +565,6 @@ function getRealBinaryPath(inputPath: string): string | undefined {
 }
 
 function findClaudeExecutable(config?: ClaudeAgentBridgeConfig): string | undefined {
-  const ext = process.platform === 'win32' ? '.exe' : '';
-
   // 1) User-provided path from settings - ALWAYS evaluate fresh, do not globally cache!
   const userPath = config?.executable?.trim();
   if (userPath) {

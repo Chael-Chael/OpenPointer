@@ -1,9 +1,4 @@
 import { useState } from 'react';
-import type { MouseEvent as ReactMouseEvent } from 'react';
-import type { AgentBackendId } from '@openpointer/core';
-import type { AppSettings } from '@openpointer/storage';
-import type { Conversation } from '@openpointer/core';
-import type { SecretDrafts, ClearSecretFlags, SecretKey } from '../state';
 import type { SettingsTab, SettingsPanelProps } from './settings/types';
 import { GeneralTab } from './settings/GeneralTab';
 import { CustomizationTab } from './settings/CustomizationTab';

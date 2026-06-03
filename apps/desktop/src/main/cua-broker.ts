@@ -45,6 +45,7 @@ export class CuaBroker {
   private endpoint: string | null = null;
   private sessions = new Map<string, BrokerSession>();
   private pendingApprovals = new Map<string, PendingApproval>();
+  private stateChangingTail: Promise<void> = Promise.resolve();
 
   constructor(private readonly sidecar: CuaSidecarManager) {}
 
@@ -153,11 +154,32 @@ export class CuaBroker {
           return;
         }
       }
-      const localTool = session.options.localTools?.[name];
-      const result = localTool ? await localTool(args) : await this.sidecar.callTool(name, args);
+      const result = await this.callAllowedTool(session, name, args);
       sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 500, { error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+
+  private async callAllowedTool(session: BrokerSession, name: string, args: Record<string, unknown>): Promise<CuaToolResult> {
+    const execute = async () => {
+      const localTool = session.options.localTools?.[name];
+      return localTool ? await localTool(args) : await this.sidecar.callTool(name, args);
+    };
+    return STATE_CHANGING_TOOLS.has(name) ? this.withStateChangingLock(execute) : execute();
+  }
+
+  private async withStateChangingLock<T>(work: () => Promise<T>): Promise<T> {
+    const previous = this.stateChangingTail;
+    let release!: () => void;
+    this.stateChangingTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous.catch(() => undefined);
+    try {
+      return await work();
+    } finally {
+      release();
     }
   }
 
