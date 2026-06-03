@@ -4,6 +4,8 @@ import { dirname, join } from 'node:path';
 import { clampNumber } from '@openpointer/core';
 import type { AppSettings } from '@openpointer/storage';
 
+export const DEFAULT_CODEX_ADAPTER_URL = 'http://127.0.0.1:5050/v1';
+
 type StoredSettings = AppSettings & {
   encryptedLocalVlmApiKey?: string;
   encryptedHermesApiKey?: string;
@@ -42,9 +44,11 @@ const DEFAULTS: AppSettings = {
   claudeAgentEffort: 'high',
   hasClaudeAgentApiKey: false,
   hasCodexApiKey: false,
-  codexAppServerUrl: '',
+  codexAppServerUrl: DEFAULT_CODEX_ADAPTER_URL,
   codexExecutablePath: '',
   codexAppServerTransport: 'http-adapter',
+  codexModel: 'gpt-5.4',
+  codexEffort: 'low',
   cuaMode: 'prefer',
   requireApprovalBeforeCua: true,
   cuaDebugOverlayEnabled: false,
@@ -86,11 +90,13 @@ export function getSettings(): AppSettings {
     claudeAgentEnabled: readBoolean(envOverride(['OP_CLAUDE_AGENT_ENABLED']), loaded.claudeAgentEnabled ?? DEFAULTS.claudeAgentEnabled),
     claudeAgentBaseUrl: envOverride(['OP_CLAUDE_AGENT_BASE_URL']) || loaded.claudeAgentBaseUrl || DEFAULTS.claudeAgentBaseUrl,
     claudeAgentExecutable: envOverride(['OP_CLAUDE_EXECUTABLE']) || loaded.claudeAgentExecutable || DEFAULTS.claudeAgentExecutable,
-    codexAppServerUrl: envOverride(['OP_CODEX_APP_SERVER_URL']) || loaded.codexAppServerUrl || '',
+    codexAppServerUrl: envOverride(['OP_CODEX_APP_SERVER_URL']) || loaded.codexAppServerUrl || DEFAULTS.codexAppServerUrl,
     codexExecutablePath: envOverride(['OP_CODEX_EXECUTABLE', 'OP_CODEX_CLI_PATH']) || loaded.codexExecutablePath || detectDefaultCodexExecutable(),
     codexAppServerTransport: normalizeCodexTransport(
       envOverride(['OP_CODEX_APP_SERVER_TRANSPORT', 'OP_CODEX_TRANSPORT']) || loaded.codexAppServerTransport || DEFAULTS.codexAppServerTransport
     ),
+    codexModel: envOverride(['OP_CODEX_MODEL']) || loaded.codexModel || DEFAULTS.codexModel,
+    codexEffort: normalizeEffort(envOverride(['OP_CODEX_EFFORT']) || loaded.codexEffort || DEFAULTS.codexEffort),
     cuaMode: normalizeCuaMode(envOverride(['OP_CUA_MODE']) || loaded.cuaMode || DEFAULTS.cuaMode),
     pillWidth: clampNumber(loaded.pillWidth, 280, 900, DEFAULTS.pillWidth),
     pillHeight: clampNumber(loaded.pillHeight, 24, 96, DEFAULTS.pillHeight),
@@ -268,6 +274,10 @@ function normalizeBackend(value: string): AppSettings['agentBackend'] {
 
 function normalizeCodexTransport(value: string): AppSettings['codexAppServerTransport'] {
   return ['http-adapter', 'websocket', 'stdio'].includes(value) ? (value as AppSettings['codexAppServerTransport']) : 'http-adapter';
+}
+
+function normalizeEffort(value: string): AppSettings['codexEffort'] {
+  return ['low', 'medium', 'high', 'xhigh', 'max'].includes(value) ? (value as AppSettings['codexEffort']) : 'low';
 }
 
 function normalizeCuaMode(value: string): AppSettings['cuaMode'] {

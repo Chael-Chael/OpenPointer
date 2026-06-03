@@ -24,7 +24,7 @@ vi.mock('node:fs', () => ({
   mkdirSync: () => undefined
 }));
 
-const ENV_KEYS = ['OP_AGENT_BACKEND', 'OP_LOCAL_VLM_BASE_URL', 'OP_LOCAL_VLM_MODEL', 'OP_CUA_MODE'];
+const ENV_KEYS = ['OP_AGENT_BACKEND', 'OP_LOCAL_VLM_BASE_URL', 'OP_LOCAL_VLM_MODEL', 'OP_CUA_MODE', 'OP_CODEX_MODEL', 'OP_CODEX_EFFORT'];
 
 let settings: typeof import('./settings.js');
 
@@ -43,9 +43,13 @@ describe('getSettings env vs persisted precedence', () => {
   it('uses env vars to seed config when no settings file exists', () => {
     process.env.OP_LOCAL_VLM_BASE_URL = 'http://env-host/v1';
     process.env.OP_CUA_MODE = 'off';
+    process.env.OP_CODEX_MODEL = 'gpt-5.4';
+    process.env.OP_CODEX_EFFORT = 'low';
     const result = settings.getSettings();
     expect(result.localVlmBaseUrl).toBe('http://env-host/v1');
     expect(result.cuaMode).toBe('off');
+    expect(result.codexModel).toBe('gpt-5.4');
+    expect(result.codexEffort).toBe('low');
   });
 
   it('prefers persisted values over env vars once settings are saved', () => {

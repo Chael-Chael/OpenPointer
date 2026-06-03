@@ -97,6 +97,10 @@ export class CodexBridge implements AgentBridge {
         thread: options.sessionKey,
         input: buildAgentInput(runEnvelope),
         instructions: buildAgentInstructions(runEnvelope),
+        cwd: this.config.cwd ?? process.cwd(),
+        model: this.config.model,
+        effort: this.config.effort,
+        sandbox: this.config.sandbox ?? 'workspace-write',
         metadata: { requestId: runEnvelope.requestId, workflow: 'coding' },
         attachments: runEnvelope.attachments.map((attachment) => ({
           type: attachment.type,

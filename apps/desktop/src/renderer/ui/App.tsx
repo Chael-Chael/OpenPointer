@@ -98,6 +98,7 @@ export function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [backendDropdownOpen, setBackendDropdownOpen] = useState(false);
   const [claudeSubmenuOpen, setClaudeSubmenuOpen] = useState(false);
+  const [codexSubmenuOpen, setCodexSubmenuOpen] = useState(false);
   const [detached, setDetached] = useState(false);
   const [selection, setSelection] = useState<SelectionRect | null>(null);
   const [detachedPos, setDetachedPos] = useState<{ x: number; y: number } | null>(null);
@@ -2034,7 +2035,8 @@ export function App() {
                     {selectableBackends.map((item) => {
                       const isSelected = backend === item;
                       const isClaude = item === 'claude-agent';
-                      const showSubmenu = isClaude && claudeSubmenuOpen;
+                      const isCodex = item === 'codex';
+                      const showSubmenu = (isClaude && claudeSubmenuOpen) || (isCodex && codexSubmenuOpen);
                       return (
                         <div key={item} className="relative">
                           <button
@@ -2045,9 +2047,15 @@ export function App() {
                             onClick={() => {
                               if (isClaude) {
                                 setClaudeSubmenuOpen(!claudeSubmenuOpen);
+                                setCodexSubmenuOpen(false);
+                              } else if (isCodex) {
+                                setCodexSubmenuOpen(!codexSubmenuOpen);
+                                setClaudeSubmenuOpen(false);
                               } else {
                                 setBackend(item);
                                 setBackendDropdownOpen(false);
+                                setClaudeSubmenuOpen(false);
+                                setCodexSubmenuOpen(false);
                                 window.setTimeout(() => focusPromptInput(inputRef.current), 0);
                               }
                             }}
@@ -2058,7 +2066,7 @@ export function App() {
                             </span>
                             <span className="flex items-center gap-1">
                               {isSelected && <span className="text-[9px] font-bold">✓</span>}
-                              {isClaude && <ChevronIcon size={6} isOpen={showSubmenu} />}
+                              {(isClaude || isCodex) && <ChevronIcon size={6} isOpen={showSubmenu} />}
                             </span>
                           </button>
                         </div>
@@ -2080,9 +2088,14 @@ export function App() {
                               ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]'
                               : 'bg-transparent text-white/80 hover:bg-white/10 hover:text-white'
                           }`}
-                          onClick={(e) => {
+                          onClick={async (e) => {
                             e.stopPropagation();
-                            void window.openPointer.saveSettings({ ...settings!, claudeAgentModel: model });
+                            const next = await window.openPointer.saveSettings({ ...settings!, claudeAgentModel: model });
+                            setSettings(next);
+                            setBackend('claude-agent');
+                            setClaudeSubmenuOpen(false);
+                            setBackendDropdownOpen(false);
+                            window.setTimeout(() => focusPromptInput(inputRef.current), 0);
                           }}
                         >
                           {model || 'Default'}
@@ -2105,9 +2118,66 @@ export function App() {
                               ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]'
                               : 'bg-transparent text-white/80 hover:bg-white/10 hover:text-white'
                           }`}
-                          onClick={(e) => {
+                          onClick={async (e) => {
                             e.stopPropagation();
-                            void window.openPointer.saveSettings({ ...settings!, claudeAgentEffort: effort });
+                            const next = await window.openPointer.saveSettings({ ...settings!, claudeAgentEffort: effort });
+                            setSettings(next);
+                          }}
+                        >
+                          {effort.charAt(0).toUpperCase() + effort.slice(1)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Codex model sub-panel */}
+                  {codexSubmenuOpen && (
+                    <div className="relative min-w-[118px] p-1 border border-glass-border rounded-[var(--radius-pill)] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] flex flex-col gap-0.5 animate-dropdown-appear">
+                      <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
+                      <div className="text-[9px] text-white/50 uppercase tracking-wider px-3 pt-1.5 pb-0.5">Model</div>
+                      {['gpt-5.4', 'gpt-5.3', 'gpt-5.2'].map((model) => (
+                        <button
+                          key={model}
+                          type="button"
+                          className={`w-full text-left py-1.5 px-3 border-0 rounded-[var(--radius-pill)] text-[11px] font-semibold cursor-pointer transition-colors ${
+                            (settings?.codexModel || 'gpt-5.4') === model
+                              ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]'
+                              : 'bg-transparent text-white/80 hover:bg-white/10 hover:text-white'
+                          }`}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const next = await window.openPointer.saveSettings({ ...settings!, codexModel: model });
+                            setSettings(next);
+                            setBackend('codex');
+                            setCodexSubmenuOpen(false);
+                            setBackendDropdownOpen(false);
+                            window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+                          }}
+                        >
+                          {model}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Codex effort sub-panel */}
+                  {codexSubmenuOpen && (
+                    <div className="relative min-w-[100px] p-1 border border-glass-border rounded-[var(--radius-pill)] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] flex flex-col gap-0.5 animate-dropdown-appear">
+                      <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
+                      <div className="text-[9px] text-white/50 uppercase tracking-wider px-3 pt-1.5 pb-0.5">Effort</div>
+                      {(['low', 'medium', 'high', 'max'] as const).map((effort) => (
+                        <button
+                          key={effort}
+                          type="button"
+                          className={`w-full text-left py-1.5 px-3 border-0 rounded-[var(--radius-pill)] text-[11px] font-semibold cursor-pointer transition-colors ${
+                            (settings?.codexEffort || 'low') === effort
+                              ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]'
+                              : 'bg-transparent text-white/80 hover:bg-white/10 hover:text-white'
+                          }`}
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const next = await window.openPointer.saveSettings({ ...settings!, codexEffort: effort });
+                            setSettings(next);
                           }}
                         >
                           {effort.charAt(0).toUpperCase() + effort.slice(1)}

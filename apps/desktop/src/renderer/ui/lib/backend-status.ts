@@ -55,6 +55,14 @@ export function backendReadiness(settings: AppSettings | null, backend: AgentBac
       };
     }
     if (!settings.codexAppServerUrl.trim()) return { configured: false, label: 'Missing config', detail: 'Add a Codex app-server URL.', tone: 'missing' };
+    if (settings.codexAppServerTransport === 'http-adapter') {
+      return {
+        configured: true,
+        label: 'Ready',
+        detail: settings.hasCodexApiKey ? 'Python SDK adapter URL and token are configured.' : 'Python SDK adapter URL configured; token optional.',
+        tone: 'ready'
+      };
+    }
     return {
       configured: true,
       label: 'Ready',

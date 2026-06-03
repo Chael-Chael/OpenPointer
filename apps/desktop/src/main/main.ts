@@ -25,6 +25,7 @@ import type {
   SubmitInstructionRequest
 } from '../shared/types.js';
 import { CuaBroker } from './cua-broker.js';
+import { CodexAdapterManager } from './codex-adapter.js';
 import { CuaGroundingProvider } from './cua-grounding.js';
 import { CuaSidecarManager, type CuaToolResult } from './cua-sidecar.js';
 import { CuaTaskManager, type CuaTaskRuntime } from './cua-task-manager.js';
@@ -53,6 +54,7 @@ let lastActivationCursor: CursorPayload | null = null;
 const cuaSidecar = new CuaSidecarManager(repoRoot);
 const cuaGrounding = new CuaGroundingProvider(cuaSidecar);
 const cuaBroker = new CuaBroker(cuaSidecar);
+const codexAdapter = new CodexAdapterManager(repoRoot);
 const cuaTaskManager = new CuaTaskManager(4);
 const chatHistory = new ChatHistoryManager();
 
@@ -504,6 +506,7 @@ function registerIpc(): void {
     // Re-apply runtime settings that are bound at registration time so saved
     // changes (e.g. the activation hotkey) take effect without a restart.
     registerActivationHotkey(next.activationHotkey);
+    void codexAdapter.ensure(next);
     return next;
   });
   ipcMain.handle(OP_CHANNELS.GetConversations, () => chatHistory.getConversations());
@@ -777,7 +780,11 @@ function bridgeConfig(settings = getSettings()): AgentBridgeRegistryConfig {
             baseUrl: settings.codexAppServerUrl,
             apiKey: getCodexApiKey(),
             transport: settings.codexAppServerTransport,
-            executablePath: settings.codexExecutablePath || undefined
+            executablePath: settings.codexExecutablePath || undefined,
+            cwd: repoRoot,
+            model: settings.codexModel || undefined,
+            effort: settings.codexEffort || 'low',
+            sandbox: 'workspace-write'
           }
         : undefined
   };
@@ -1618,6 +1625,7 @@ app.whenReady().then(async () => {
     await createOverlay(display);
   }
   const settings = getSettings();
+  void codexAdapter.ensure(settings);
   registerActivationHotkey(settings.activationHotkey);
   startCursorLoop();
   startGlobalLongPress();
@@ -1637,6 +1645,7 @@ app.on('will-quit', () => {
   if (cursorTimer) clearInterval(cursorTimer);
   cuaTaskManager.cancelAll();
   cuaBroker.stop();
+  codexAdapter.stop();
   cuaSidecar.stop();
   clearHoldTimers();
   try {

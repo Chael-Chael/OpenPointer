@@ -211,7 +211,7 @@ export function GeneralTab({
               value={settings.codexAppServerTransport}
               onChange={(event) => updateSettings({ codexAppServerTransport: event.target.value as AppSettings['codexAppServerTransport'] })}
             >
-              <option value="http-adapter">HTTP adapter</option>
+              <option value="http-adapter">Python SDK adapter</option>
               <option value="websocket">Official app-server WebSocket</option>
               <option value="stdio">Official app-server stdio</option>
             </select>
@@ -228,6 +228,22 @@ export function GeneralTab({
             onChange={(value) => updateSettings({ codexExecutablePath: value })}
             placeholder="Auto-detect if empty"
           />
+          <TextField
+            label="Model"
+            value={settings.codexModel}
+            onChange={(value) => updateSettings({ codexModel: value })}
+            placeholder="gpt-5.4"
+          />
+          <label className="field">
+            <span>Reasoning Effort</span>
+            <select value={settings.codexEffort} onChange={(event) => updateSettings({ codexEffort: event.target.value as AppSettings['codexEffort'] })}>
+              <option value="low">Low - Fastest</option>
+              <option value="medium">Medium - Balanced</option>
+              <option value="high">High - Deeper reasoning</option>
+              <option value="xhigh">XHigh - Deeper than high</option>
+              <option value="max">Max - Maximum effort</option>
+            </select>
+          </label>
           <SecretField
             label="API token"
             value={secretDrafts.codexApiKey}

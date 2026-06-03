@@ -12,6 +12,7 @@
   "scripts": {
     "postinstall": "git -C vendor/cua apply ../../patches/cua/0001-get-window-state-elements-structured-output.patch || exit 0",
     "setup:cua": "node scripts/setup-cua.mjs",
+    "codex:adapter": "python scripts/codex-python-adapter.py --host 127.0.0.1 --port 5050",
     "dev": "npm run dev -w @openpointer/desktop",
     "build": "npm run build -w @openpointer/core && npm run build -w @openpointer/gestures && npm run build -w @openpointer/voice && npm run build -w @openpointer/backends && npm run build -w @openpointer/grounding && npm run build -w @openpointer/storage && npm run build -w @openpointer/agent-bridge && npm run build -w @openpointer/desktop",
     "typecheck": "tsc -b",

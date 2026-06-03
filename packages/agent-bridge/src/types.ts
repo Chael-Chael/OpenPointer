@@ -30,6 +30,10 @@ export type HttpAgentBridgeConfig = {
   apiKey?: string;
   transport?: 'http-adapter' | 'websocket' | 'stdio';
   executablePath?: string;
+  cwd?: string;
+  model?: string;
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
   timeoutMs?: number;
   fetch?: FetchLike;
 };
