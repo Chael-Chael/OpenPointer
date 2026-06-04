@@ -20,6 +20,7 @@ type PendingApproval = {
 };
 
 type BrokerSession = {
+  id: string;
   options: BrokerOptions;
   createdAt: number;
 };
@@ -39,6 +40,18 @@ const STATE_CHANGING_TOOLS = new Set([
   'insert_text'
 ]);
 
+const CURSOR_SESSION_TOOLS = new Set([
+  'click',
+  'double_click',
+  'right_click',
+  'drag',
+  'move_cursor',
+  'set_agent_cursor_enabled',
+  'set_agent_cursor_motion',
+  'set_agent_cursor_style',
+  'get_agent_cursor_state'
+]);
+
 export class CuaBroker {
   private server: Server | null = null;
   private serverPromise: Promise<void> | null = null;
@@ -52,7 +65,8 @@ export class CuaBroker {
   async ensureStarted(options: BrokerOptions): Promise<{ endpoint: string; sessionId: string }> {
     if (!this.server || !this.endpoint) await this.ensureServer();
     const sessionId = randomUUID();
-    this.sessions.set(sessionId, { options, createdAt: Date.now() });
+    this.sessions.set(sessionId, { id: sessionId, options, createdAt: Date.now() });
+    await this.sidecar.startSession?.(sessionId);
     this.pruneSessions();
     return { endpoint: `${this.endpoint}/sessions/${sessionId}/tools/call`, sessionId };
   }
@@ -71,6 +85,7 @@ export class CuaBroker {
 
   releaseSession(sessionId: string): void {
     this.sessions.delete(sessionId);
+    void this.sidecar.endSession?.(sessionId);
   }
 
   stop(): void {
@@ -164,7 +179,7 @@ export class CuaBroker {
   private async callAllowedTool(session: BrokerSession, name: string, args: Record<string, unknown>): Promise<CuaToolResult> {
     const execute = async () => {
       const localTool = session.options.localTools?.[name];
-      return localTool ? await localTool(args) : await this.sidecar.callTool(name, args);
+      return localTool ? await localTool(args) : await this.sidecar.callTool(name, withCuaSessionArg(name, args, session.id));
     };
     return STATE_CHANGING_TOOLS.has(name) ? this.withStateChangingLock(execute) : execute();
   }
@@ -231,4 +246,9 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function withCuaSessionArg(name: string, args: Record<string, unknown>, sessionId: string): Record<string, unknown> {
+  if (!CURSOR_SESSION_TOOLS.has(name) || typeof args.session === 'string') return args;
+  return { ...args, session: sessionId };
 }

@@ -10,7 +10,7 @@
     "packages/*"
   ],
   "scripts": {
-    "postinstall": "git -C vendor/cua apply ../../patches/cua/0001-get-window-state-elements-structured-output.patch || exit 0",
+    "postinstall": "node scripts/setup-cua.mjs --patch-only",
     "setup:cua": "node scripts/setup-cua.mjs",
     "codex:adapter": "python scripts/codex-python-adapter.py --host 127.0.0.1 --port 5050",
     "dev": "npm run dev -w @openpointer/desktop",

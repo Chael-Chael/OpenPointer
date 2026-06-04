@@ -22,6 +22,7 @@ export class CuaSidecarManager {
   private startPromise: Promise<void> | null = null;
   private nextId = 1;
   private pending = new Map<number, PendingCall>();
+  private sessionToolsAvailable: boolean | null = null;
 
   constructor(private readonly repoRoot: string) {}
 
@@ -29,6 +30,14 @@ export class CuaSidecarManager {
     await this.ensureStarted();
     const result = await this.request('tools/call', { name, arguments: args }, 8000);
     return result as CuaToolResult;
+  }
+
+  async startSession(sessionId: string): Promise<void> {
+    await this.callSessionTool('start_session', sessionId);
+  }
+
+  async endSession(sessionId: string): Promise<void> {
+    await this.callSessionTool('end_session', sessionId);
   }
 
   stop(): void {
@@ -59,6 +68,22 @@ export class CuaSidecarManager {
       await this.startPromise;
     } finally {
       this.startPromise = null;
+    }
+  }
+
+  private async callSessionTool(name: 'start_session' | 'end_session', sessionId: string): Promise<void> {
+    if (!sessionId || this.sessionToolsAvailable === false) return;
+    try {
+      const result = await this.callTool(name, { session: sessionId });
+      if (result.isError) {
+        this.sessionToolsAvailable = false;
+        console.debug('[op:cua]', `${name} unavailable; continuing without CUA session lifecycle.`);
+        return;
+      }
+      this.sessionToolsAvailable = true;
+    } catch (error) {
+      this.sessionToolsAvailable = false;
+      console.debug('[op:cua]', `${name} failed; continuing without CUA session lifecycle.`, error);
     }
   }
 

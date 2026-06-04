@@ -113,4 +113,45 @@ describe('CuaBroker', () => {
     await expect(second).resolves.toMatchObject({ status: 200 });
     expect(started).toEqual(['first', 'second']);
   });
+
+  it('declares and reuses a CUA driver session for cursor tools', async () => {
+    const sidecarCall = vi.fn(async () => okResult);
+    const startSession = vi.fn(async () => undefined);
+    const endSession = vi.fn(async () => undefined);
+    const broker = new CuaBroker({ callTool: sidecarCall, startSession, endSession } as never);
+    brokers.push(broker);
+
+    const session = await broker.ensureStarted({
+      requireApprovalBeforeCua: false,
+      allowedTools: ['click', 'list_windows'],
+      emit: vi.fn()
+    });
+
+    expect(startSession).toHaveBeenCalledWith(session.sessionId);
+
+    const clickResponse = await fetch(session.endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ name: 'click', arguments: { pid: 123, window_id: 456, element_index: 7 } })
+    });
+    expect(clickResponse.status).toBe(200);
+    expect(sidecarCall).toHaveBeenCalledWith(
+      'click',
+      expect.objectContaining({
+        pid: 123,
+        window_id: 456,
+        element_index: 7,
+        session: session.sessionId
+      })
+    );
+
+    const listResponse = await fetch(session.endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ name: 'list_windows', arguments: {} })
+    });
+    expect(listResponse.status).toBe(200);
+    expect(sidecarCall).toHaveBeenCalledWith('list_windows', {});
+
+    broker.releaseSession(session.sessionId);
+    expect(endSession).toHaveBeenCalledWith(session.sessionId);
+  });
 });

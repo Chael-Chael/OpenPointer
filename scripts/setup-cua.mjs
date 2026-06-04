@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const wantBuild = process.argv.includes('--build');
+const patchOnly = process.argv.includes('--patch-only');
 
 function log(step, msg) {
   console.log(`\n[setup:cua] ${step}: ${msg}`);
@@ -54,6 +55,11 @@ function applyPatch() {
   const already = runQuiet('git', ['-C', 'vendor/cua', 'apply', '--reverse', '--check', patch]);
   if (already.code === 0) {
     log('patch', 'elements patch already applied.');
+    return;
+  }
+  const canApply = runQuiet('git', ['-C', 'vendor/cua', 'apply', '--check', patch]);
+  if (canApply.code !== 0) {
+    log('patch', `WARNING: elements patch is not applicable (continuing). ${canApply.out.trim()}`);
     return;
   }
   const applied = runQuiet('git', ['-C', 'vendor/cua', 'apply', patch]);
@@ -110,6 +116,10 @@ function main() {
   try {
     ensureSubmodule();
     applyPatch();
+    if (patchOnly) {
+      log('done', 'CUA patch check complete.');
+      return;
+    }
     installDriver();
     if (wantBuild) buildDriver();
     log('done', 'CUA setup complete. Set OP_CUA_MODE=prefer (or use the in-app setting) and run `npm run dev`.');
