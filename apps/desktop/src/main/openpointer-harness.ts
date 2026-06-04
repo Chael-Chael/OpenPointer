@@ -11,10 +11,12 @@ import type { AppSettings } from '@openpointer/storage';
 import type { CuaToolResult } from './cua-sidecar.js';
 import type { CuaBroker } from './cua-broker.js';
 import type { CuaTaskManager, CuaTaskRuntime, CuaTaskRunner } from './cua-task-manager.js';
+import { backendSessionKey } from './history.js';
 
 type ChatHistoryLike = {
   appendTurn(conversationId: string, turn: ChatTurn): Promise<Conversation>;
   getConversation(conversationId: string): Promise<Conversation | null>;
+  setBackendSession(conversationId: string, backend: AgentBackendId, sessionId: string): Promise<Conversation | null>;
   setClaudeAgentSession(conversationId: string, sessionId: string): Promise<Conversation | null>;
 };
 
@@ -29,6 +31,8 @@ export type OpenPointerHarnessOptions = {
   bridgeConfig: (settings?: AppSettings) => AgentBridgeRegistryConfig;
   createOpenPointerTools: (context: PointerContext) => Record<string, (args: Record<string, unknown>) => Promise<CuaToolResult>>;
   allowedCuaTools: string[];
+  withDesktopInteractionHidden?: <T>(work: () => Promise<T>) => Promise<T>;
+  showDesktopInteractionApproval?: () => void | Promise<void>;
   createBridge?: (backend: AgentBackendId, config: AgentBridgeRegistryConfig) => AgentBridge;
   resolveBackend?: (envelope: AgentContextEnvelope, config: AgentBridgeRegistryConfig) => AgentBackendId;
 };
@@ -90,14 +94,20 @@ export class OpenPointerHarness {
 
     const config = this.options.bridgeConfig(settings);
     const backend = this.resolveBackend(initialEnvelope, config);
-    const backendSessionId = backend === 'claude-agent' ? conversation?.backendSessions?.claudeAgent?.sessionId : undefined;
+    const sessionKey = backendSessionKey(backend);
+    const backendSessionId = sessionKey ? conversation?.backendSessions?.[sessionKey]?.sessionId : undefined;
 
     const submittedTask = { id: undefined as string | undefined };
+    const allowedCuaTools = allowedCuaToolsForSettings(this.options.allowedCuaTools, settings);
     const cuaBrokerSession = shouldAttachCuaToolServer(input.context, initialEnvelope, settings)
       ? await this.options.cuaBroker.ensureStarted({
           requireApprovalBeforeCua: settings.requireApprovalBeforeCua,
-          allowedTools: this.options.allowedCuaTools,
+          cuaAgentCursorEnabled: settings.cuaAgentCursorEnabled,
+          cuaPageJavascriptPolicy: settings.cuaPageJavascriptPolicy,
+          allowedTools: allowedCuaTools,
           localTools: this.options.createOpenPointerTools(input.context),
+          withDesktopInteractionHidden: this.options.withDesktopInteractionHidden,
+          showDesktopInteractionApproval: this.options.showDesktopInteractionApproval,
           emit: (agentEvent) => {
             if (submittedTask.id) this.options.taskManager.emitAgentEvent(submittedTask.id, agentEvent);
           }
@@ -115,7 +125,7 @@ export class OpenPointerHarness {
               transport: 'local-http',
               sessionId: cuaBrokerSession.sessionId,
               endpoint: cuaBrokerSession.endpoint,
-              tools: this.options.allowedCuaTools
+              tools: allowedCuaTools
             }
           ]
         : initialEnvelope.toolServers
@@ -174,8 +184,8 @@ export class OpenPointerHarness {
         }
 
         record(agentEvent);
-        if (agentEvent.type === 'backend.session' && agentEvent.backend === 'claude-agent' && task.envelope.conversationId) {
-          await this.options.chatHistory.setClaudeAgentSession(task.envelope.conversationId, agentEvent.sessionId);
+        if (agentEvent.type === 'backend.session' && task.envelope.conversationId) {
+          await this.options.chatHistory.setBackendSession(task.envelope.conversationId, agentEvent.backend, agentEvent.sessionId);
         }
         if (agentEvent.type === 'run.started') emittedStarted = true;
         if (agentEvent.type === 'assistant.delta') fullAnswer += agentEvent.text;
@@ -231,6 +241,10 @@ export function shouldAttachCuaToolServer(context: PointerContext, envelope: Age
       context.entities.some((entity) => entity.groundingRef?.provider === 'cua') ||
       context.nearby.some((entity) => entity.groundingRef?.provider === 'cua')
   );
+}
+
+function allowedCuaToolsForSettings(tools: string[], settings: Pick<AppSettings, 'cuaBrowserPageToolsEnabled'>): string[] {
+  return settings.cuaBrowserPageToolsEnabled ? tools : tools.filter((tool) => tool !== 'page');
 }
 
 function sessionKeyForContext(context: PointerContext): string {

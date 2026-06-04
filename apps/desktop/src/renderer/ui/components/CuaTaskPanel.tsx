@@ -3,7 +3,11 @@ import type { CuaTaskEventPayload, CuaTaskSummary } from '../../../shared/types'
 
 type CuaTaskPanelProps = {
   tasks: CuaTaskSummary[];
+  theme?: string;
   onCancel(taskId: string): void;
+  onStartRecording(taskId: string): void;
+  onStopRecording(taskId: string): void;
+  onReplayRecording(taskId: string): void;
 };
 
 const STATUS_LABELS: Record<CuaTaskSummary['status'], string> = {
@@ -14,34 +18,46 @@ const STATUS_LABELS: Record<CuaTaskSummary['status'], string> = {
   cancelled: 'Cancelled'
 };
 
-export function CuaTaskPanel({ tasks, onCancel }: CuaTaskPanelProps) {
+export function CuaTaskPanel({ tasks, theme = 'blue', onCancel, onStartRecording, onStopRecording, onReplayRecording }: CuaTaskPanelProps) {
   const visibleTasks = useMemo(() => tasks.filter((task) => task.status === 'pending' || task.status === 'running'), [tasks]);
   if (visibleTasks.length === 0) return null;
 
   return (
-    <section className="pointer-events-auto fixed right-5 top-5 z-50 w-[320px] max-w-[calc(100vw-40px)] rounded-[8px] border border-white/12 bg-black/70 p-3 text-white shadow-[0_14px_40px_rgba(0,0,0,0.28)] backdrop-blur-xl">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <h2 className="text-[12px] font-semibold uppercase tracking-[0.04em] text-white/70">CUA Tasks</h2>
-        <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] text-white/65">{visibleTasks.length}</span>
+    <section className="cua-task-panel" data-pill-theme={theme}>
+      <div className="cua-task-panel-header">
+        <h2>CUA Tasks</h2>
+        <span className="cua-task-count">{visibleTasks.length}</span>
       </div>
-      <div className="grid gap-2">
+      <div className="cua-task-list">
         {visibleTasks.map((task) => (
-          <article key={task.id} className="rounded-[6px] border border-white/10 bg-white/[0.06] p-2.5">
-            <div className="flex items-center gap-2">
-              <span className={`h-2 w-2 rounded-full ${task.status === 'running' ? 'bg-cyan-300' : 'bg-white/35'}`} />
-              <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-white/90">{task.instruction}</span>
-              <span className="text-[10px] font-semibold uppercase tracking-[0.04em] text-white/50">{STATUS_LABELS[task.status]}</span>
+          <article key={task.id} className="cua-task-card">
+            <div className="cua-task-row">
+              <span className={`cua-task-dot${task.status === 'running' ? ' is-running' : ''}`} />
+              <span className="cua-task-title">{task.instruction}</span>
+              <span className="cua-task-status">{STATUS_LABELS[task.status]}</span>
             </div>
-            {task.windowTitle && <div className="mt-1 truncate text-[11px] text-white/45">{task.windowTitle}</div>}
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <span className="text-[10px] text-white/35">{task.backend}</span>
-              <button
-                type="button"
-                className="rounded-[6px] border border-white/12 px-2 py-1 text-[11px] font-semibold text-white/70 hover:bg-white/10"
-                onClick={() => onCancel(task.id)}
-              >
-                Cancel
-              </button>
+            {task.windowTitle && <div className="cua-task-window">{task.windowTitle}</div>}
+            <div className="cua-task-actions-row">
+              <span className="cua-task-backend">{task.backend}</span>
+              <div className="cua-task-actions">
+                {task.recording?.status === 'recording' ? (
+                  <button type="button" className="cua-task-button" onClick={() => onStopRecording(task.id)}>
+                    Stop rec
+                  </button>
+                ) : (
+                  <button type="button" className="cua-task-button" onClick={() => onStartRecording(task.id)}>
+                    Rec
+                  </button>
+                )}
+                {task.recording?.status === 'available' && (
+                  <button type="button" className="cua-task-button" onClick={() => onReplayRecording(task.id)}>
+                    Replay
+                  </button>
+                )}
+                <button type="button" className="cua-task-button" onClick={() => onCancel(task.id)}>
+                  Cancel
+                </button>
+              </div>
             </div>
           </article>
         ))}
@@ -74,6 +90,15 @@ export function useCuaTasks() {
     tasks,
     cancelTask: (taskId: string) => {
       void window.openPointer.cancelCuaTask(taskId);
+    },
+    startRecording: (taskId: string) => {
+      void window.openPointer.startCuaTaskRecording(taskId);
+    },
+    stopRecording: (taskId: string) => {
+      void window.openPointer.stopCuaTaskRecording(taskId);
+    },
+    replayRecording: (taskId: string) => {
+      void window.openPointer.replayCuaTaskRecording(taskId);
     }
   };
 }

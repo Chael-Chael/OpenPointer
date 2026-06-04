@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AgentContextEnvelope, AgentEvent, Conversation, PointerContext } from '@openpointer/core';
+import type { AgentBackendId, AgentContextEnvelope, AgentEvent, Conversation, PointerContext } from '@openpointer/core';
 import type { AgentBridge, AgentBridgeRegistryConfig } from '@openpointer/agent-bridge';
 import type { AppSettings } from '@openpointer/storage';
 import { OpenPointerHarness } from './openpointer-harness.js';
@@ -10,6 +10,11 @@ function baseSettings(patch: Partial<AppSettings> = {}): AppSettings {
     localVlmEnabled: true,
     requireApprovalBeforeCua: true,
     cuaMode: 'prefer',
+    cuaAgentCursorEnabled: true,
+    cuaBrowserPageToolsEnabled: true,
+    cuaPageJavascriptPolicy: 'ask',
+    cuaRecordingMode: 'manual',
+    cuaDriverHttpPort: 19771,
     ...patch
   } as AppSettings;
 }
@@ -48,7 +53,7 @@ function createHarness(settings: AppSettings) {
   };
 
   const broker = {
-    ensureStarted: vi.fn(async () => ({ endpoint: 'http://127.0.0.1:9999/sessions/broker-session/tools/call', sessionId: 'broker-session' })),
+    ensureStarted: vi.fn(async () => ({ endpoint: 'http://127.0.0.1:9999/sessions/broker-session/mcp', sessionId: 'broker-session' })),
     releaseSession: (sessionId: string) => {
       released.push(sessionId);
     },
@@ -70,6 +75,11 @@ function createHarness(settings: AppSettings) {
       return conversation;
     }),
     getConversation: vi.fn(async () => conversation),
+    setBackendSession: vi.fn(async (_conversationId: string, backend: AgentBackendId, sessionId: string) => {
+      if (backend === 'claude-agent') conversation.backendSessions = { ...conversation.backendSessions, claudeAgent: { sessionId } };
+      if (backend === 'codex') conversation.backendSessions = { ...conversation.backendSessions, codex: { sessionId } };
+      return conversation;
+    }),
     setClaudeAgentSession: vi.fn(async (_conversationId: string, sessionId: string) => {
       conversation.backendSessions = { claudeAgent: { sessionId } };
       return conversation;
@@ -148,7 +158,7 @@ describe('OpenPointerHarness', () => {
         id: 'cua',
         transport: 'local-http',
         sessionId: 'broker-session',
-        endpoint: 'http://127.0.0.1:9999/sessions/broker-session/tools/call',
+        endpoint: 'http://127.0.0.1:9999/sessions/broker-session/mcp',
         tools: ['list_windows', 'click']
       }
     ]);

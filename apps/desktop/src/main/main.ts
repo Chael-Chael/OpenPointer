@@ -1,6 +1,7 @@
 import { app, BrowserWindow, clipboard, desktopCapturer, globalShortcut, ipcMain, screen, type NativeImage } from 'electron';
 import { activeWindow } from 'get-windows';
 import { uIOhook } from 'uiohook-napi';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -9,7 +10,7 @@ import {
   type AgentBridgeRegistryConfig,
   type ApprovalDecision
 } from '@openpointer/agent-bridge';
-import type { Point, PointerContext, PointerEntity, Rect } from '@openpointer/core';
+import type { AgentBackendId, Conversation, Point, PointerContext, PointerEntity, Rect } from '@openpointer/core';
 import { buildPointerContext } from '@openpointer/grounding';
 import { OP_CHANNELS } from '../shared/ipc.js';
 import type {
@@ -19,6 +20,8 @@ import type {
   InsertTextResponse,
   ReadSelectionRequest,
   ReadSelectionResponse,
+  ContinueConversationRequest,
+  ContinueConversationResponse,
   SubmitInstructionRequest
 } from '../shared/types.js';
 import { CuaBroker } from './cua-broker.js';
@@ -28,7 +31,7 @@ import { CuaSidecarManager, type CuaToolResult } from './cua-sidecar.js';
 import { CuaTaskManager } from './cua-task-manager.js';
 import { loadLocalEnv } from './env.js';
 import { getClaudeAgentApiKey, getCodexApiKey, getHermesApiKey, getLocalVlmApiKey, getOpenCodeApiKey, getSettings, saveSettings } from './settings.js';
-import { ChatHistoryManager } from './history.js';
+import { backendSessionKey, ChatHistoryManager } from './history.js';
 import { OpenPointerHarness } from './openpointer-harness.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -60,7 +63,18 @@ const chatHistory = new ChatHistoryManager();
 // both advertised to the model (envelope.toolServers[].tools) and enforced by
 // the broker as a whitelist, so the agent cannot invoke unlisted driver tools.
 const CUA_DRIVER_AGENT_TOOLS = [
+  'bring_to_front',
+  'check_for_update',
+  'check_permissions',
+  'debug_window_info',
+  'list_apps',
   'list_windows',
+  'get_accessibility_tree',
+  'get_agent_cursor_state',
+  'get_config',
+  'get_cursor_position',
+  'get_recording_state',
+  'get_screen_size',
   'get_window_state',
   'click',
   'double_click',
@@ -70,7 +84,19 @@ const CUA_DRIVER_AGENT_TOOLS = [
   'hotkey',
   'scroll',
   'drag',
-  'set_value'
+  'set_value',
+  'launch_app',
+  'kill_app',
+  'move_cursor',
+  'page',
+  'replay_trajectory',
+  'set_agent_cursor_enabled',
+  'set_agent_cursor_motion',
+  'set_agent_cursor_style',
+  'set_config',
+  'start_recording',
+  'stop_recording',
+  'zoom'
 ];
 const OP_AGENT_TOOLS = ['read_selected_text', 'insert_text'];
 const CUA_AGENT_TOOLS = [...CUA_DRIVER_AGENT_TOOLS, ...OP_AGENT_TOOLS];
@@ -81,7 +107,9 @@ const openPointerHarness = new OpenPointerHarness({
   getSettings,
   bridgeConfig,
   createOpenPointerTools,
-  allowedCuaTools: CUA_AGENT_TOOLS
+  allowedCuaTools: CUA_AGENT_TOOLS,
+  withDesktopInteractionHidden: withOverlayHiddenForCua,
+  showDesktopInteractionApproval: restoreOverlayForCuaApproval
 });
 
 const hold = {
@@ -98,11 +126,13 @@ const HOLD_MS = 650;
 const HOLD_RING_DELAY_MS = 180;
 const HOLD_MOVE_TOLERANCE_PX = 8;
 const OVERLAY_HIDE_SETTLE_MS = 80;
+const CUA_OVERLAY_RESTORE_DELAY_MS = 15000;
 const devUrl = process.env.VITE_DEV_SERVER_URL || 'http://127.0.0.1:5173';
 let overlayHiddenDepth = 0;
 let overlayVisibilitySnapshot = new Map<number, boolean>();
 let overlayRestoreFocusDisplayId: number | null = null;
 let overlayHideReady: Promise<void> | null = null;
+let overlayRestoreTimer: NodeJS.Timeout | null = null;
 
 async function createOverlay(display: Electron.Display): Promise<void> {
   const win = new BrowserWindow({
@@ -216,24 +246,59 @@ function setWindowInteractive(win: BrowserWindow, value: boolean): void {
   }
 }
 
-async function withOverlayHidden<T>(focusDisplayId: number | undefined, task: () => Promise<T>): Promise<T> {
+async function withOverlayHidden<T>(
+  focusDisplayId: number | undefined,
+  task: () => Promise<T>,
+  options: { restoreDelayMs?: number } = {}
+): Promise<T> {
   if (focusDisplayId !== undefined) overlayRestoreFocusDisplayId = focusDisplayId;
-  const firstHiddenRequest = overlayHiddenDepth === 0;
+  if (overlayRestoreTimer) {
+    clearTimeout(overlayRestoreTimer);
+    overlayRestoreTimer = null;
+  }
+  const firstHiddenRequest = overlayHiddenDepth === 0 && overlayVisibilitySnapshot.size === 0;
   overlayHiddenDepth += 1;
   if (firstHiddenRequest) {
     overlayHideReady = hideOverlaysForDesktopRead();
   }
 
   try {
-    await overlayHideReady;
+    await (overlayHideReady ?? Promise.resolve());
     return await task();
   } finally {
     overlayHiddenDepth -= 1;
     if (overlayHiddenDepth === 0) {
-      restoreHiddenOverlays();
-      overlayHideReady = null;
+      scheduleOverlayRestore(options.restoreDelayMs ?? 0);
     }
   }
+}
+
+function scheduleOverlayRestore(delayMs: number): void {
+  if (delayMs <= 0) {
+    restoreHiddenOverlays();
+    overlayHideReady = null;
+    return;
+  }
+  overlayRestoreTimer = setTimeout(() => {
+    overlayRestoreTimer = null;
+    restoreHiddenOverlays();
+    overlayHideReady = null;
+  }, delayMs);
+}
+
+function restoreOverlayForCuaApproval(): void {
+  if (overlayRestoreTimer) {
+    clearTimeout(overlayRestoreTimer);
+    overlayRestoreTimer = null;
+  }
+  if (overlayHiddenDepth === 0 && overlayVisibilitySnapshot.size > 0) {
+    restoreHiddenOverlays();
+    overlayHideReady = null;
+  }
+}
+
+async function withOverlayHiddenForCua<T>(task: () => Promise<T>): Promise<T> {
+  return withOverlayHidden(undefined, task, { restoreDelayMs: CUA_OVERLAY_RESTORE_DELAY_MS });
 }
 
 async function hideOverlaysForDesktopRead(): Promise<void> {
@@ -513,11 +578,17 @@ function registerIpc(): void {
     // Re-apply runtime settings that are bound at registration time so saved
     // changes (e.g. the activation hotkey) take effect without a restart.
     registerActivationHotkey(next.activationHotkey);
+    configureCuaRuntime(next);
     void codexAdapter.ensure(next);
     return next;
   });
+  ipcMain.handle(OP_CHANNELS.CuaHealth, () => {
+    configureCuaRuntime(getSettings());
+    return cuaSidecar.getHealth();
+  });
   ipcMain.handle(OP_CHANNELS.GetConversations, () => chatHistory.getConversations());
   ipcMain.handle(OP_CHANNELS.GetConversation, (_event, id: string) => chatHistory.getConversation(id));
+  ipcMain.handle(OP_CHANNELS.ContinueConversation, (_event, req: ContinueConversationRequest) => continueConversation(req));
   ipcMain.handle(OP_CHANNELS.DeleteConversation, (_event, id: string) => chatHistory.deleteConversation(id));
   ipcMain.handle(OP_CHANNELS.FetchVisionModels, async (_event, req: { baseUrl: string; apiKey: string }) => {
     try {
@@ -541,6 +612,7 @@ function registerIpc(): void {
   });
   ipcMain.handle(OP_CHANNELS.RequestGrounding, async (_event, req: { cursor: CursorPayload }) => {
     const settings = getSettings();
+    configureCuaRuntime(settings);
     if (settings.cuaMode === 'off') return { status: 'fallback', entities: [], error: 'CUA mode is off.' };
     // Live CUA preview is accessibility-tree based; hiding the overlay here
     // makes the composer blink whenever background grounding refreshes.
@@ -554,6 +626,7 @@ function registerIpc(): void {
   });
   ipcMain.handle(OP_CHANNELS.RequestWindowContext, async (_event, req: { cursor: CursorPayload }) => {
     const settings = getSettings();
+    configureCuaRuntime(settings);
     const activeInfo = await activeWindowPreviewInfo();
     if (settings.cuaMode !== 'off') {
       const cuaWindow = await cuaGrounding.previewWindow(req.cursor, activeInfo?.window);
@@ -581,8 +654,53 @@ function registerIpc(): void {
     cuaTaskManager.cancel(taskId);
   });
 
+  ipcMain.handle(OP_CHANNELS.CuaTaskStartRecording, async (_event, taskId: string) => {
+    const task = cuaTaskManager.get(taskId);
+    if (!task?.brokerSessionId) throw new Error('CUA task has no active broker session.');
+    if (getSettings().cuaRecordingMode === 'off') throw new Error('CUA recording is disabled in Settings.');
+    const outputDir = join(app.getPath('userData'), 'cua-recordings', taskId);
+    await cuaBroker.startRecording(task.brokerSessionId, outputDir);
+    cuaTaskManager.markRecording(taskId, { status: 'recording', outputDir });
+  });
+
+  ipcMain.handle(OP_CHANNELS.CuaTaskStopRecording, async (_event, taskId: string) => {
+    const task = cuaTaskManager.get(taskId);
+    if (!task?.brokerSessionId) throw new Error('CUA task has no active broker session.');
+    await cuaBroker.stopRecording(task.brokerSessionId);
+    cuaTaskManager.markRecording(taskId, { status: 'available', outputDir: task.recording?.outputDir });
+  });
+
+  ipcMain.handle(OP_CHANNELS.CuaTaskReplayRecording, async (_event, taskId: string) => {
+    const task = cuaTaskManager.get(taskId);
+    const outputDir = task?.recording?.outputDir;
+    if (!task || !outputDir) throw new Error('CUA task has no replayable recording.');
+    let brokerSessionId = task.brokerSessionId;
+    let releaseTempSession = false;
+    if (!brokerSessionId || !cuaBroker.hasSession(brokerSessionId)) {
+      const settings = getSettings();
+      const session = await cuaBroker.ensureStarted({
+        requireApprovalBeforeCua: settings.requireApprovalBeforeCua,
+        cuaAgentCursorEnabled: settings.cuaAgentCursorEnabled,
+        cuaPageJavascriptPolicy: settings.cuaPageJavascriptPolicy,
+        allowedTools: CUA_AGENT_TOOLS,
+        localTools: {},
+        withDesktopInteractionHidden: withOverlayHiddenForCua,
+        showDesktopInteractionApproval: restoreOverlayForCuaApproval,
+        emit: (agentEvent) => cuaTaskManager.emitAgentEvent(taskId, agentEvent)
+      });
+      brokerSessionId = session.sessionId;
+      releaseTempSession = true;
+    }
+    try {
+      await cuaBroker.replayRecording(brokerSessionId, outputDir);
+    } finally {
+      if (releaseTempSession) cuaBroker.releaseSession(brokerSessionId);
+    }
+  });
+
   ipcMain.handle(OP_CHANNELS.SubmitInstruction, async (event, req: SubmitInstructionRequest) => {
     const settings = getSettings();
+    configureCuaRuntime(settings);
     const cursor = req.cursor ?? lastActivationCursor ?? lastCursor ?? cursorPayload();
     const includeCua = Boolean(req.includeCua) && settings.cuaMode !== 'off';
     const providedCuaEntities = includeCua ? (req.cuaEntities ?? []) : [];
@@ -621,6 +739,126 @@ function registerIpc(): void {
   });
 }
 
+async function continueConversation(req: ContinueConversationRequest): Promise<ContinueConversationResponse> {
+  const conversation = await chatHistory.getConversation(req.conversationId);
+  if (!conversation) {
+    return { ok: false, target: req.target, error: 'Conversation not found.' };
+  }
+
+  const resolved = resolveContinuableBackend(conversation, req.backend);
+  if (!resolved) {
+    return { ok: false, target: req.target, error: 'This conversation has no resumable backend session yet.' };
+  }
+
+  if (req.target === 'app') {
+    return {
+      ok: false,
+      backend: resolved.backend,
+      target: req.target,
+      error: `Continue in app is not available for ${backendDisplayName(resolved.backend)} yet.`
+    };
+  }
+
+  const settings = getSettings();
+  const command = resumeCommandForBackend(resolved.backend, resolved.sessionId, settings);
+  if (!command) {
+    return {
+      ok: false,
+      backend: resolved.backend,
+      target: req.target,
+      error: `${backendDisplayName(resolved.backend)} does not expose a terminal resume command.`
+    };
+  }
+
+  try {
+    openResumeTerminal(command.executable, command.args, command.title);
+    return { ok: true, backend: resolved.backend, target: req.target };
+  } catch (error) {
+    return {
+      ok: false,
+      backend: resolved.backend,
+      target: req.target,
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+function resolveContinuableBackend(conversation: Conversation, requested?: AgentBackendId): { backend: AgentBackendId; sessionId: string } | null {
+  const candidates: AgentBackendId[] =
+    requested && requested !== 'auto' && requested !== 'local-vlm' && requested !== 'mock'
+      ? [requested, 'claude-agent', 'codex', 'hermes', 'opencode']
+      : ['claude-agent', 'codex', 'hermes', 'opencode'];
+  const seen = new Set<AgentBackendId>();
+  for (const backend of candidates) {
+    if (seen.has(backend)) continue;
+    seen.add(backend);
+    const key = backendSessionKey(backend);
+    const sessionId = key ? conversation.backendSessions?.[key]?.sessionId : undefined;
+    if (sessionId) return { backend, sessionId };
+  }
+  return null;
+}
+
+function resumeCommandForBackend(
+  backend: AgentBackendId,
+  sessionId: string,
+  settings: ReturnType<typeof getSettings>
+): { executable: string; args: string[]; title: string } | null {
+  if (backend === 'claude-agent') {
+    const args = ['--resume', sessionId];
+    if (settings.claudeAgentModel) args.push('--model', settings.claudeAgentModel);
+    if (settings.claudeAgentEffort) args.push('--effort', settings.claudeAgentEffort);
+    return {
+      executable: settings.claudeAgentExecutable?.trim() || 'claude',
+      args,
+      title: 'OpenPointer Claude'
+    };
+  }
+
+  if (backend === 'codex') {
+    const args = ['resume', sessionId, '-C', repoRoot];
+    if (settings.codexModel) args.push('-m', settings.codexModel);
+    return {
+      executable: settings.codexExecutablePath?.trim() || 'codex',
+      args,
+      title: 'OpenPointer Codex'
+    };
+  }
+
+  return null;
+}
+
+function openResumeTerminal(executable: string, args: string[], title: string): void {
+  const commandLine = ['cd', '/d', quoteCmdArg(repoRoot), '&&', quoteCmdArg(executable), ...args.map(quoteCmdArg)].join(' ');
+  const child = spawn('cmd.exe', ['/d', '/c', 'start', title, 'cmd.exe', '/k', commandLine], {
+    cwd: repoRoot,
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true
+  });
+  child.unref();
+}
+
+function quoteCmdArg(value: string): string {
+  if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) return value;
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+function backendDisplayName(backend: AgentBackendId): string {
+  switch (backend) {
+    case 'claude-agent':
+      return 'Claude';
+    case 'codex':
+      return 'Codex';
+    case 'hermes':
+      return 'Hermes';
+    case 'opencode':
+      return 'OpenCode';
+    default:
+      return backend;
+  }
+}
+
 function bridgeConfig(settings = getSettings()): AgentBridgeRegistryConfig {
   const localApiKey = getLocalVlmApiKey();
   return {
@@ -657,6 +895,10 @@ function bridgeConfig(settings = getSettings()): AgentBridgeRegistryConfig {
           }
         : undefined
   };
+}
+
+function configureCuaRuntime(settings = getSettings()): void {
+  cuaSidecar.configure({ port: settings.cuaDriverHttpPort });
 }
 
 type ClipboardSnapshot = {
@@ -1490,6 +1732,7 @@ app.whenReady().then(async () => {
     await createOverlay(display);
   }
   const settings = getSettings();
+  configureCuaRuntime(settings);
   void codexAdapter.ensure(settings);
   registerActivationHotkey(settings.activationHotkey);
   startCursorLoop();

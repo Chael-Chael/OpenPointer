@@ -94,7 +94,7 @@ export class CodexBridge implements AgentBridge {
       signal: options.signal,
       path: '/runs',
       body: {
-        thread: options.sessionKey,
+        thread: options.backendSessionId ?? options.sessionKey,
         input: buildAgentInput(runEnvelope),
         instructions: buildAgentInstructions(runEnvelope),
         cwd: this.config.cwd ?? process.cwd(),

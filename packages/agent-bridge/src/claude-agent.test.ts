@@ -282,12 +282,6 @@ describe('ClaudeAgentBridge', () => {
   });
 
   it('injects the local CUA MCP server when the envelope carries CUA context', async () => {
-    const driverDir = mkdtempSync(join(tmpdir(), 'op-cua-driver-'));
-    tempDirs.push(driverDir);
-    const driverPath = join(driverDir, process.platform === 'win32' ? 'cua-driver.exe' : 'cua-driver');
-    writeFileSync(driverPath, '');
-    process.env.OP_CUA_DRIVER_PATH = driverPath;
-
     let capturedOptions: Record<string, unknown> | undefined;
     const bridge = new ClaudeAgentBridge({
       enabled: true,
@@ -299,6 +293,15 @@ describe('ClaudeAgentBridge', () => {
       }
     });
     const envelope = buildAgentContextEnvelope({ instruction: 'click this button', mode: 'text', context, backend: 'claude-agent' });
+    envelope.toolServers = [
+      {
+        id: 'cua',
+        transport: 'local-http',
+        sessionId: 'broker-session',
+        endpoint: 'http://127.0.0.1:9999/sessions/broker-session/mcp',
+        tools: ['list_windows', 'click', 'page']
+      }
+    ];
     const events: unknown[] = [];
     for await (const event of bridge.run(envelope)) events.push(event);
 
@@ -306,9 +309,8 @@ describe('ClaudeAgentBridge', () => {
     expect(capturedOptions?.allowedTools).toBeUndefined();
     expect(capturedOptions?.mcpServers).toMatchObject({
       cua: {
-        type: 'stdio',
-        command: driverPath,
-        args: ['mcp'],
+        type: 'http',
+        url: 'http://127.0.0.1:9999/sessions/broker-session/mcp',
         alwaysLoad: true
       }
     });

@@ -42,6 +42,19 @@ export type SubmitInstructionResponse = {
   taskId?: string;
 };
 
+export type ContinueConversationRequest = {
+  conversationId: string;
+  backend?: AgentBackendId;
+  target: 'terminal' | 'app';
+};
+
+export type ContinueConversationResponse = {
+  ok: boolean;
+  backend?: AgentBackendId;
+  target: 'terminal' | 'app';
+  error?: string;
+};
+
 export type CuaTaskStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export type CuaTaskSummary = {
@@ -57,6 +70,22 @@ export type CuaTaskSummary = {
   requestId: string;
   backend: AgentBackendId;
   eventCount: number;
+  recording?: {
+    status: 'off' | 'recording' | 'available';
+    outputDir?: string;
+  };
+};
+
+export type CuaHealth = {
+  transport: 'http';
+  status: 'ready' | 'starting' | 'stopped' | 'unavailable';
+  endpoint?: string;
+  port: number;
+  pid?: number;
+  driverPath?: string;
+  serverVersion?: string;
+  toolCount?: number;
+  lastError?: string;
 };
 
 export type CuaTaskEventPayload =
@@ -166,8 +195,13 @@ export type DesktopApi = {
   readSelection(req?: ReadSelectionRequest): Promise<ReadSelectionResponse>;
   insertText(req: InsertTextRequest): Promise<InsertTextResponse>;
   submitInstruction(req: SubmitInstructionRequest): Promise<SubmitInstructionResponse>;
+  continueConversation(req: ContinueConversationRequest): Promise<ContinueConversationResponse>;
   listCuaTasks(): Promise<CuaTaskSummary[]>;
   cancelCuaTask(taskId: string): Promise<void>;
+  getCuaHealth(): Promise<CuaHealth>;
+  startCuaTaskRecording(taskId: string): Promise<void>;
+  stopCuaTaskRecording(taskId: string): Promise<void>;
+  replayCuaTaskRecording(taskId: string): Promise<void>;
   approveAgentRequest(id: string, decision: ApprovalDecision): Promise<void>;
   cancelRun(): void;
   getSettings(): Promise<AppSettings>;

@@ -27,8 +27,19 @@ type PermissionStore = {
 };
 
 const CUA_AGENT_TOOLS = [
+  'bring_to_front',
+  'check_for_update',
+  'check_permissions',
+  'debug_window_info',
   'list_windows',
+  'list_apps',
   'get_window_state',
+  'get_accessibility_tree',
+  'get_agent_cursor_state',
+  'get_config',
+  'get_cursor_position',
+  'get_recording_state',
+  'get_screen_size',
   'click',
   'double_click',
   'right_click',
@@ -37,7 +48,19 @@ const CUA_AGENT_TOOLS = [
   'hotkey',
   'scroll',
   'drag',
-  'set_value'
+  'set_value',
+  'launch_app',
+  'kill_app',
+  'move_cursor',
+  'page',
+  'replay_trajectory',
+  'set_agent_cursor_enabled',
+  'set_agent_cursor_motion',
+  'set_agent_cursor_style',
+  'set_config',
+  'start_recording',
+  'stop_recording',
+  'zoom'
 ];
 
 class EventQueue<T> {
@@ -648,18 +671,17 @@ function allowedToolsForEnvelope(envelope: AgentContextEnvelope): string[] | und
 
 function mcpServersForEnvelope(envelope: AgentContextEnvelope): Record<string, unknown> | undefined {
   if (!hasCuaContext(envelope)) return undefined;
-  const command = findCuaDriverExecutable();
-  if (!command) return undefined;
+  const cuaServer = envelope.toolServers?.find((server) => server.id === 'cua' && server.transport === 'local-http' && server.endpoint);
+  if (!cuaServer?.endpoint) return undefined;
   return {
     cua: {
-      type: 'stdio',
-      command,
-      args: ['mcp'],
+      type: 'http',
+      url: cuaServer.endpoint,
       timeout: 20000,
       alwaysLoad: true,
-      tools: CUA_AGENT_TOOLS.map((name) => ({
+      tools: (cuaServer.tools.length > 0 ? cuaServer.tools : CUA_AGENT_TOOLS).map((name) => ({
         name,
-        permission_policy: 'always_ask'
+        permission_policy: 'always_allow'
       }))
     }
   };
@@ -674,33 +696,6 @@ function hasCuaContext(envelope: AgentContextEnvelope): boolean {
       envelope.pointerContext.entities.some((entity) => entity.groundingRef?.provider === 'cua') ||
       envelope.pointerContext.nearby.some((entity) => entity.groundingRef?.provider === 'cua')
   );
-}
-
-function findCuaDriverExecutable(): string | undefined {
-  const exe = process.platform === 'win32' ? 'cua-driver.exe' : 'cua-driver';
-  const maybeProcess = process as NodeJS.Process & { resourcesPath?: string };
-  const override = process.env.OP_CUA_DRIVER_PATH?.trim() || process.env.CUA_DRIVER_PATH?.trim();
-  const cwd = process.cwd();
-  const candidates = [
-    override,
-    join(cwd, 'vendor', 'cua', 'libs', 'cua-driver', 'rust', 'target', 'release', exe),
-    join(cwd, 'vendor', 'cua', 'libs', 'cua-driver', 'rust', 'target', 'debug', exe),
-    join(cwd, '..', '..', 'vendor', 'cua', 'libs', 'cua-driver', 'rust', 'target', 'release', exe),
-    join(cwd, '..', '..', 'vendor', 'cua', 'libs', 'cua-driver', 'rust', 'target', 'debug', exe),
-    maybeProcess.resourcesPath ? join(maybeProcess.resourcesPath, exe) : undefined,
-    process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Programs', 'Cua', 'cua-driver', 'bin', exe) : undefined,
-    process.env.HOME ? join(process.env.HOME, '.cua-driver', 'packages', 'current', exe) : undefined
-  ].filter((candidate): candidate is string => Boolean(candidate));
-  const direct = candidates.find((candidate) => existsSync(candidate));
-  if (direct) return direct;
-  try {
-    const cmd = process.platform === 'win32' ? 'where cua-driver' : 'which cua-driver';
-    const found = execSync(cmd, { encoding: 'utf-8', timeout: 5000 }).trim().split(/\r?\n/)[0];
-    if (found && existsSync(found)) return found;
-  } catch {
-    /* ignore missing cua-driver on PATH */
-  }
-  return undefined;
 }
 
 function mapClaudeMessage(raw: unknown): AgentEvent {

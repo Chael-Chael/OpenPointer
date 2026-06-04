@@ -1,5 +1,5 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from 'react';
-import { clampNumber, type AgentBackendId, type AgentEvent, type PointerEntity } from '@openpointer/core';
+import { clampNumber, type AgentBackendId, type AgentEvent, type BackendSessionKey, type Conversation, type PointerEntity } from '@openpointer/core';
 import type { ApprovalDecision } from '@openpointer/agent-bridge';
 import type { AppSettings } from '@openpointer/storage';
 import { parseVoiceCommand } from '@openpointer/voice';
@@ -57,6 +57,43 @@ import { CuaTaskPanel, useCuaTasks } from './components/CuaTaskPanel';
 export type { DialogueBlock, HistoryToolEvent };
 
 const initialCursor: CursorPayload = { x: 300, y: 300, localX: 300, localY: 300, displayId: 0, dpr: 1 };
+
+type ContinuableBackend = {
+  backend: AgentBackendId;
+  sessionId: string;
+};
+
+function resolveContinuableBackend(conversation: Conversation | null, preferred: AgentBackendId): ContinuableBackend | null {
+  if (!conversation?.backendSessions) return null;
+  const candidates: AgentBackendId[] =
+    preferred !== 'auto' && preferred !== 'local-vlm' && preferred !== 'mock'
+      ? [preferred, 'claude-agent', 'codex', 'hermes', 'opencode']
+      : ['claude-agent', 'codex', 'hermes', 'opencode'];
+  const seen = new Set<AgentBackendId>();
+  for (const backend of candidates) {
+    if (seen.has(backend)) continue;
+    seen.add(backend);
+    const key = backendSessionKey(backend);
+    const sessionId = key ? conversation.backendSessions[key]?.sessionId : undefined;
+    if (sessionId) return { backend, sessionId };
+  }
+  return null;
+}
+
+function backendSessionKey(backend: AgentBackendId): BackendSessionKey | undefined {
+  switch (backend) {
+    case 'claude-agent':
+      return 'claudeAgent';
+    case 'codex':
+      return 'codex';
+    case 'hermes':
+      return 'hermes';
+    case 'opencode':
+      return 'opencode';
+    default:
+      return undefined;
+  }
+}
 
 export function App() {
   const overlayDisplayId = useMemo(() => {
@@ -139,8 +176,10 @@ export function App() {
   // Submit-time screenshot signal from the main process (see CaptureActivity IPC).
   const [captureActivity, setCaptureActivity] = useState<{ active: boolean; withCua: boolean }>({ active: false, withCua: false });
   const [historyTurns, setHistoryTurns] = useState<import('@openpointer/core').ChatTurn[]>([]);
+  const [conversationMeta, setConversationMeta] = useState<Conversation | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [conversationsList, setConversationsList] = useState<import('@openpointer/core').Conversation[]>([]);
+  const [continueError, setContinueError] = useState<string | null>(null);
   const [pillDrag, setPillDrag] = useState<{ startX: number; startY: number; initialPos: { x: number; y: number } } | null>(null);
   const [pillWidthDrag, setPillWidthDrag] = useState<{
     side: 'left' | 'right';
@@ -155,7 +194,13 @@ export function App() {
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [fetchModelsError, setFetchModelsError] = useState<string | null>(null);
   const [hoveredAttachment, setHoveredAttachment] = useState<'window' | 'selection' | 'entity' | 'cua' | null>(null);
-  const { tasks: cuaTasks, cancelTask: cancelCuaTask } = useCuaTasks();
+  const {
+    tasks: cuaTasks,
+    cancelTask: cancelCuaTask,
+    startRecording: startCuaTaskRecording,
+    stopRecording: stopCuaTaskRecording,
+    replayRecording: replayCuaTaskRecording
+  } = useCuaTasks();
 
   const showFullContext = detached && (historyTurns.length > 0 || state !== 'composing');
 
@@ -272,6 +317,8 @@ export function App() {
       // Always start a new conversation on wake-up
       setConversationId(null);
       setHistoryTurns([]);
+      setConversationMeta(null);
+      setContinueError(null);
 
       window.openPointer.getSettings().then(async (currentSettings) => {
         setSettings(currentSettings);
@@ -299,6 +346,8 @@ export function App() {
       setBackendDropdownOpen(false);
       setConversationId(null);
       setHistoryTurns([]);
+      setConversationMeta(null);
+      setContinueError(null);
       setHistoryOpen(false);
       setDetached(false);
       setSelection(null);
@@ -362,7 +411,10 @@ export function App() {
       window.openPointer
         .getConversation(conversationId)
         .then((conv) => {
-          if (!cancelled && conversationIdRef.current === conversationId && conv) setHistoryTurns(conv.turns);
+          if (!cancelled && conversationIdRef.current === conversationId && conv) {
+            setHistoryTurns(conv.turns);
+            setConversationMeta(conv);
+          }
         })
         .catch(() => {
           /* transient IPC failure; history simply isn't refreshed */
@@ -889,6 +941,7 @@ export function App() {
   const approval = latestEvent(events, 'approval.requested');
   const activeApproval = approval && !settledApprovalIds.has(approval.id) ? approval : undefined;
   const latestFailure = latestEvent(events, 'run.failed');
+  const continuableBackend = useMemo(() => resolveContinuableBackend(conversationMeta, backend), [backend, conversationMeta]);
   useEffect(() => {
     if (state === 'completed' || state === 'failed') {
       if (thinkingTimerRef.current) {
@@ -999,6 +1052,29 @@ export function App() {
     await window.openPointer.approveAgentRequest(id, decision);
   }
 
+  async function continueConversation(target: 'terminal' | 'app') {
+    if (!conversationId) return;
+    setContinueError(null);
+    try {
+      const res = await window.openPointer.continueConversation({
+        conversationId,
+        backend: continuableBackend?.backend ?? backend,
+        target
+      });
+      if (!res.ok) {
+        const error = res.error || 'Failed to continue this conversation.';
+        setContinueError(error);
+        setEvents([{ type: 'run.failed', error, recoverable: true }]);
+        setState('failed');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to continue this conversation.';
+      setContinueError(message);
+      setEvents([{ type: 'run.failed', error: message, recoverable: true }]);
+      setState('failed');
+    }
+  }
+
   async function submit(mode: 'text' | 'voice' = 'text', overrideText = prompt) {
     const text = overrideText.trim();
     const submittedCuaEntities = selectedCuaEntities;
@@ -1020,6 +1096,7 @@ export function App() {
     streamPanelStreamingResponseRef.current = false;
     streamPanelStickToBottomRef.current = true;
     setEvents([]);
+    setContinueError(null);
     setState('submitting');
     setMenuOpen(false);
 
@@ -1073,7 +1150,10 @@ export function App() {
       lastDeactivatedAtRef.current = Date.now();
       setConversationId(res.conversationId);
       const conv = await window.openPointer.getConversation(res.conversationId);
-      if (conversationIdRef.current === res.conversationId && conv) setHistoryTurns(conv.turns);
+      if (conversationIdRef.current === res.conversationId && conv) {
+        setHistoryTurns(conv.turns);
+        setConversationMeta(conv);
+      }
     } catch (error) {
       // Without this the UI is stuck in the submitting state forever (no agent
       // events arrive when the submit IPC itself fails) and the thinking timer
@@ -1217,6 +1297,8 @@ export function App() {
     setMenuOpen(false);
     setConversationId(null);
     setHistoryTurns([]);
+    setConversationMeta(null);
+    setContinueError(null);
     setEvents([]);
     streamPanelStreamingResponseRef.current = false;
     streamPanelStickToBottomRef.current = true;
@@ -1244,6 +1326,8 @@ export function App() {
       lastDeactivatedAtRef.current = conv.updatedAt;
       setConversationId(conv.id);
       setHistoryTurns(conv.turns);
+      setConversationMeta(conv);
+      setContinueError(null);
       setEvents([]);
       setPrompt('');
       setState('composing');
@@ -1268,6 +1352,8 @@ export function App() {
       lastDeactivatedAtRef.current = 0;
       setConversationId(null);
       setHistoryTurns([]);
+      setConversationMeta(null);
+      setContinueError(null);
     }
   }
 
@@ -1627,7 +1713,14 @@ export function App() {
         } as CSSProperties
       }
     >
-      <CuaTaskPanel tasks={cuaTasks} onCancel={cancelCuaTask} />
+      <CuaTaskPanel
+        tasks={cuaTasks}
+        theme={settings?.modalTheme ?? 'blue'}
+        onCancel={cancelCuaTask}
+        onStartRecording={startCuaTaskRecording}
+        onStopRecording={stopCuaTaskRecording}
+        onReplayRecording={replayCuaTaskRecording}
+      />
 
       {hold?.state === 'holding' && <HoldRing cursor={hold.cursor} progress={hold.progress} />}
 
@@ -2365,7 +2458,8 @@ export function App() {
                         <span>{statusLabel(state)}</span>
                       </div>
                       <div className="flex flex-col gap-4 mt-2.5 w-full">
-                        {historyTurns.map((turn) => {
+                        {historyTurns.map((turn, index) => {
+                          const showContinueActions = turn.role === 'assistant' && index === historyTurns.length - 1 && Boolean(continuableBackend);
                           if (turn.role === 'user') {
                             return (
                               <div key={turn.id} className="flex flex-col w-full items-end">
@@ -2380,6 +2474,13 @@ export function App() {
                               return (
                                 <div key={turn.id} className="flex flex-col w-full items-start">
                                   <DialogueBlocksRenderer blocks={groupEventsToBlocks(turn.events)} />
+                                  {showContinueActions && (
+                                    <ConversationContinueActions
+                                      backend={continuableBackend!.backend}
+                                      error={continueError}
+                                      continueConversation={(target) => void continueConversation(target)}
+                                    />
+                                  )}
                                 </div>
                               );
                             }
@@ -2389,6 +2490,13 @@ export function App() {
                                 <article className="agent-text text-sm markdown-body w-full">
                                   <MarkdownRenderer value={turn.text} />
                                 </article>
+                                {showContinueActions && (
+                                  <ConversationContinueActions
+                                    backend={continuableBackend!.backend}
+                                    error={continueError}
+                                    continueConversation={(target) => void continueConversation(target)}
+                                  />
+                                )}
                               </div>
                             );
                           }
@@ -2555,3 +2663,36 @@ export function App() {
   );
 }
 
+function ConversationContinueActions({
+  backend,
+  error,
+  continueConversation
+}: {
+  backend: AgentBackendId;
+  error: string | null;
+  continueConversation: (target: 'terminal' | 'app') => void;
+}) {
+  return (
+    <div className="mt-3 flex flex-col items-start gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          className="rounded-full border border-white/12 bg-white/8 px-3 py-1.5 text-[11px] font-bold text-white/82 transition-all duration-150 hover:bg-white/14 active:scale-95"
+          title={`Resume this ${backendLabel(backend)} session in a terminal`}
+          onClick={() => continueConversation('terminal')}
+        >
+          Continue in Terminal
+        </button>
+        <button
+          type="button"
+          className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-[11px] font-bold text-white/60 transition-all duration-150 hover:bg-white/10 active:scale-95"
+          title={`Try to resume this ${backendLabel(backend)} session in its app`}
+          onClick={() => continueConversation('app')}
+        >
+          Continue in App
+        </button>
+      </div>
+      {error && <p className="m-0 max-w-full text-[11.5px] font-semibold leading-snug text-danger">{error}</p>}
+    </div>
+  );
+}

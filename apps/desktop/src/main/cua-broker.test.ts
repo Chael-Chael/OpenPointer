@@ -3,6 +3,11 @@ import { CuaBroker } from './cua-broker.js';
 import type { CuaToolResult } from './cua-sidecar.js';
 
 const okResult: CuaToolResult = { content: [{ type: 'text', text: 'ok' }] };
+const brokerDefaults = {
+  cuaAgentCursorEnabled: true,
+  cuaPageJavascriptPolicy: 'ask' as const
+};
+type SidecarCall = (name: string, args?: Record<string, unknown>) => Promise<CuaToolResult>;
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -29,7 +34,7 @@ describe('CuaBroker', () => {
     for (const broker of brokers.splice(0)) broker.stop();
   });
 
-  function createBroker(sidecarCall = vi.fn(async () => okResult)) {
+  function createBroker(sidecarCall: SidecarCall = vi.fn(async () => okResult) as SidecarCall) {
     const broker = new CuaBroker({ callTool: sidecarCall } as never);
     brokers.push(broker);
     return { broker, sidecarCall };
@@ -38,6 +43,7 @@ describe('CuaBroker', () => {
   it('rejects tools outside the session allowlist', async () => {
     const { broker, sidecarCall } = createBroker();
     const session = await broker.ensureStarted({
+      ...brokerDefaults,
       requireApprovalBeforeCua: false,
       allowedTools: ['list_windows'],
       emit: vi.fn()
@@ -45,11 +51,11 @@ describe('CuaBroker', () => {
 
     const response = await fetch(session.endpoint, {
       method: 'POST',
-      body: JSON.stringify({ name: 'click', arguments: {} })
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'click', arguments: {} } })
     });
 
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ error: 'CUA tool "click" is not allowed.' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ result: { isError: true, content: [{ text: 'CUA tool "click" is not allowed.' }] } });
     expect(sidecarCall).not.toHaveBeenCalled();
   });
 
@@ -57,6 +63,7 @@ describe('CuaBroker', () => {
     const { broker, sidecarCall } = createBroker();
     let approvalId = '';
     const session = await broker.ensureStarted({
+      ...brokerDefaults,
       requireApprovalBeforeCua: true,
       allowedTools: ['click'],
       emit: (event) => {
@@ -66,14 +73,45 @@ describe('CuaBroker', () => {
 
     const request = fetch(session.endpoint, {
       method: 'POST',
-      body: JSON.stringify({ name: 'click', arguments: {} })
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'click', arguments: {} } })
     });
     await waitFor(() => Boolean(approvalId));
     broker.approve(approvalId, 'deny');
     const response = await request;
 
-    expect(response.status).toBe(403);
-    expect(await response.json()).toEqual({ error: 'CUA tool call denied by user.' });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ result: { isError: true } });
+    expect(sidecarCall).not.toHaveBeenCalled();
+  });
+
+  it('restores the overlay before emitting CUA approval requests', async () => {
+    const { broker, sidecarCall } = createBroker();
+    const events: string[] = [];
+    let approvalId = '';
+    const session = await broker.ensureStarted({
+      ...brokerDefaults,
+      requireApprovalBeforeCua: true,
+      allowedTools: ['click'],
+      showDesktopInteractionApproval: () => {
+        events.push('show');
+      },
+      emit: (event) => {
+        if (event.type === 'approval.requested') {
+          approvalId = event.id;
+          events.push('approval');
+        }
+      }
+    });
+
+    const request = fetch(session.endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'click', arguments: {} } })
+    });
+    await waitFor(() => Boolean(approvalId));
+
+    expect(events).toEqual(['show', 'approval']);
+    broker.approve(approvalId, 'deny');
+    await expect(request).resolves.toMatchObject({ status: 200 });
     expect(sidecarCall).not.toHaveBeenCalled();
   });
 
@@ -82,6 +120,7 @@ describe('CuaBroker', () => {
     const firstRelease = deferred<void>();
     const started: string[] = [];
     const session = await broker.ensureStarted({
+      ...brokerDefaults,
       requireApprovalBeforeCua: false,
       allowedTools: ['click'],
       localTools: {
@@ -97,13 +136,13 @@ describe('CuaBroker', () => {
 
     const first = fetch(session.endpoint, {
       method: 'POST',
-      body: JSON.stringify({ name: 'click', arguments: { label: 'first' } })
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'click', arguments: { label: 'first' } } })
     });
     await waitFor(() => started.includes('first'));
 
     const second = fetch(session.endpoint, {
       method: 'POST',
-      body: JSON.stringify({ name: 'click', arguments: { label: 'second' } })
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'click', arguments: { label: 'second' } } })
     });
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(started).toEqual(['first']);
@@ -114,6 +153,103 @@ describe('CuaBroker', () => {
     expect(started).toEqual(['first', 'second']);
   });
 
+  it('hides the overlay around state-changing desktop tool execution', async () => {
+    const events: string[] = [];
+    const { broker } = createBroker(async (name) => {
+      events.push(`tool:${name}`);
+      return okResult;
+    });
+    const session = await broker.ensureStarted({
+      ...brokerDefaults,
+      requireApprovalBeforeCua: false,
+      allowedTools: ['click'],
+      withDesktopInteractionHidden: async (work) => {
+        events.push('hide');
+        try {
+          return await work();
+        } finally {
+          events.push('restore');
+        }
+      },
+      emit: vi.fn()
+    });
+
+    const response = await fetch(session.endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'click', arguments: {} } })
+    });
+
+    expect(response.status).toBe(200);
+    expect(events).toEqual(['hide', 'tool:click', 'restore']);
+  });
+
+  it('hides the overlay around CUA window observation but not driver metadata reads', async () => {
+    const events: string[] = [];
+    const { broker } = createBroker(async (name) => {
+      events.push(`tool:${name}`);
+      return okResult;
+    });
+    const session = await broker.ensureStarted({
+      ...brokerDefaults,
+      requireApprovalBeforeCua: false,
+      allowedTools: ['get_window_state', 'list_windows'],
+      withDesktopInteractionHidden: async (work) => {
+        events.push('hide');
+        try {
+          return await work();
+        } finally {
+          events.push('restore');
+        }
+      },
+      emit: vi.fn()
+    });
+
+    const windowState = await fetch(session.endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'get_window_state', arguments: {} } })
+    });
+    const listWindows = await fetch(session.endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_windows', arguments: {} } })
+    });
+
+    expect(windowState.status).toBe(200);
+    expect(listWindows.status).toBe(200);
+    expect(events).toEqual(['hide', 'tool:get_window_state', 'restore', 'tool:list_windows']);
+  });
+
+  it('hides the overlay around replayed CUA recordings', async () => {
+    const events: string[] = [];
+    const { broker } = createBroker(async (name) => {
+      events.push(`tool:${name}`);
+      return okResult;
+    });
+    let approvalId = '';
+    const session = await broker.ensureStarted({
+      ...brokerDefaults,
+      requireApprovalBeforeCua: true,
+      allowedTools: ['replay_trajectory'],
+      withDesktopInteractionHidden: async (work) => {
+        events.push('hide');
+        try {
+          return await work();
+        } finally {
+          events.push('restore');
+        }
+      },
+      emit: (event) => {
+        if (event.type === 'approval.requested') approvalId = event.id;
+      }
+    });
+
+    const replay = broker.replayRecording(session.sessionId, 'recording-dir');
+    await waitFor(() => Boolean(approvalId));
+    broker.approve(approvalId, 'approve');
+    await expect(replay).resolves.toEqual(okResult);
+
+    expect(events).toEqual(['hide', 'tool:replay_trajectory', 'restore']);
+  });
+
   it('declares and reuses a CUA driver session for cursor tools', async () => {
     const sidecarCall = vi.fn(async () => okResult);
     const startSession = vi.fn(async () => undefined);
@@ -122,6 +258,7 @@ describe('CuaBroker', () => {
     brokers.push(broker);
 
     const session = await broker.ensureStarted({
+      ...brokerDefaults,
       requireApprovalBeforeCua: false,
       allowedTools: ['click', 'list_windows'],
       emit: vi.fn()
@@ -131,7 +268,12 @@ describe('CuaBroker', () => {
 
     const clickResponse = await fetch(session.endpoint, {
       method: 'POST',
-      body: JSON.stringify({ name: 'click', arguments: { pid: 123, window_id: 456, element_index: 7 } })
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'click', arguments: { pid: 123, window_id: 456, element_index: 7 } }
+      })
     });
     expect(clickResponse.status).toBe(200);
     expect(sidecarCall).toHaveBeenCalledWith(
@@ -146,10 +288,10 @@ describe('CuaBroker', () => {
 
     const listResponse = await fetch(session.endpoint, {
       method: 'POST',
-      body: JSON.stringify({ name: 'list_windows', arguments: {} })
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'list_windows', arguments: {} } })
     });
     expect(listResponse.status).toBe(200);
-    expect(sidecarCall).toHaveBeenCalledWith('list_windows', {});
+    expect(sidecarCall).toHaveBeenCalledWith('list_windows', { session: session.sessionId });
 
     broker.releaseSession(session.sessionId);
     expect(endSession).toHaveBeenCalledWith(session.sessionId);

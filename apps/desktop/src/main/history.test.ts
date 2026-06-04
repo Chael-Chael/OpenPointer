@@ -52,6 +52,26 @@ describe('ChatHistoryManager backend sessions', () => {
     expect(persisted[0].backendSessions.claudeAgent.sessionId).toBe('550e8400-e29b-41d4-a716-446655440000');
   });
 
+  it('persists a Codex session id on an existing conversation', async () => {
+    const { ChatHistoryManager } = await import('./history.js');
+    const history = new ChatHistoryManager();
+
+    await history.appendTurn('conv-1', {
+      id: 'turn-1',
+      role: 'user',
+      text: 'hello',
+      pointerContext: context,
+      timestamp: 1
+    });
+    await history.setBackendSession('conv-1', 'codex', 'thr_123');
+
+    const conversation = await history.getConversation('conv-1');
+    expect(conversation?.backendSessions?.codex?.sessionId).toBe('thr_123');
+
+    const persisted = JSON.parse(readFileSync(join(userDataDir, 'chat_history.json'), 'utf8'));
+    expect(persisted[0].backendSessions.codex.sessionId).toBe('thr_123');
+  });
+
   it('returns null when asked to store a Claude session for a missing conversation', async () => {
     const { ChatHistoryManager } = await import('./history.js');
     const history = new ChatHistoryManager();

@@ -18,12 +18,17 @@ export const OP_CHANNELS = {
   CuaTaskList: 'op:cua-task:list',
   CuaTaskCancel: 'op:cua-task:cancel',
   CuaTaskEvent: 'op:cua-task:event',
+  CuaHealth: 'op:cua:health',
+  CuaTaskStartRecording: 'op:cua-task:recording:start',
+  CuaTaskStopRecording: 'op:cua-task:recording:stop',
+  CuaTaskReplayRecording: 'op:cua-task:recording:replay',
   ApproveAgentRequest: 'op:agent:approve',
   CancelRun: 'op:agent:cancel',
   GetSettings: 'op:settings:get',
   SaveSettings: 'op:settings:save',
   GetConversations: 'op:history:list',
   GetConversation: 'op:history:get',
+  ContinueConversation: 'op:history:continue',
   DeleteConversation: 'op:history:delete',
   FetchVisionModels: 'op:models:fetch-vision'
 } as const;

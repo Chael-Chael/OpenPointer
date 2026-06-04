@@ -136,6 +136,7 @@ export type PointerContext = {
 };
 
 export type AgentBackendId = 'auto' | 'local-vlm' | 'hermes' | 'opencode' | 'claude-agent' | 'codex' | 'mock';
+export type BackendSessionKey = 'claudeAgent' | 'codex' | 'hermes' | 'opencode';
 
 export type AgentInputMode = 'text' | 'voice';
 
@@ -185,11 +186,7 @@ export type ChatTurn = {
 export type Conversation = {
   id: string;
   title?: string;
-  backendSessions?: {
-    claudeAgent?: {
-      sessionId: string;
-    };
-  };
+  backendSessions?: Partial<Record<BackendSessionKey, { sessionId: string }>>;
   turns: ChatTurn[];
   createdAt: number;
   updatedAt: number;

@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react';
 import type { AgentBackendId } from '@openpointer/core';
 import type { AppSettings } from '@openpointer/storage';
+import type { CuaHealth } from '../../../../shared/types';
 import type { SecretDrafts, ClearSecretFlags, SecretKey } from '../../state';
 import { selectableBackends } from '../../state';
 import { backendReadiness, backendLabel, secretConfigured } from '../../lib/backend-status';
@@ -36,6 +38,18 @@ export function GeneralTab({
   clearSecret,
   fetchModels,
 }: GeneralTabProps) {
+  const [cuaHealth, setCuaHealth] = useState<CuaHealth | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    void window.openPointer.getCuaHealth().then((health) => {
+      if (mounted) setCuaHealth(health);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [settings.cuaDriverHttpPort]);
+
   return (
     <>
       <section className="settings-section">
@@ -280,6 +294,52 @@ export function GeneralTab({
           />
           <span>Show CUA debug boxes</span>
         </label>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={settings.cuaAgentCursorEnabled}
+            onChange={(event) => updateSettings({ cuaAgentCursorEnabled: event.target.checked })}
+          />
+          <span>Show CUA agent cursor</span>
+        </label>
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={settings.cuaBrowserPageToolsEnabled}
+            onChange={(event) => updateSettings({ cuaBrowserPageToolsEnabled: event.target.checked })}
+          />
+          <span>Enable browser page tools</span>
+        </label>
+        <label className="field">
+          <span>CUA HTTP port</span>
+          <input
+            type="number"
+            min={1}
+            max={65535}
+            value={settings.cuaDriverHttpPort}
+            onChange={(event) => updateSettings({ cuaDriverHttpPort: Number(event.target.value) })}
+          />
+        </label>
+        <label className="field">
+          <span>CUA recording</span>
+          <select value={settings.cuaRecordingMode} onChange={(event) => updateSettings({ cuaRecordingMode: event.target.value as AppSettings['cuaRecordingMode'] })}>
+            <option value="manual">Manual</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Page JavaScript</span>
+          <select
+            value={settings.cuaPageJavascriptPolicy}
+            onChange={(event) => updateSettings({ cuaPageJavascriptPolicy: event.target.value as AppSettings['cuaPageJavascriptPolicy'] })}
+          >
+            <option value="ask">Ask</option>
+            <option value="off">Off</option>
+          </select>
+        </label>
+        <div className="min-w-0 text-[11px] text-white/50">
+          CUA HTTP: {cuaHealth ? `${cuaHealth.status}${cuaHealth.serverVersion ? ` · ${cuaHealth.serverVersion}` : ''}${cuaHealth.endpoint ? ` · ${cuaHealth.endpoint}` : ''}` : 'checking'}
+        </div>
         <label className="toggle-row">
           <input type="checkbox" checked={settings.longPressEnabled} onChange={(event) => updateSettings({ longPressEnabled: event.target.checked })} />
           <span>Long press activation</span>

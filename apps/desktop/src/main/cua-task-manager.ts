@@ -20,6 +20,10 @@ export type CuaTaskRuntime = {
   allowLocalFallback: boolean;
   cleanup?: () => void;
   events: AgentEvent[];
+  recording?: {
+    status: 'off' | 'recording' | 'available';
+    outputDir?: string;
+  };
 };
 
 export type CuaTaskRunner = (task: CuaTaskRuntime, emitAgentEvent: (event: AgentEvent) => void) => Promise<void>;
@@ -118,6 +122,13 @@ export class CuaTaskManager extends EventEmitter {
     return this.tasks.get(taskId);
   }
 
+  markRecording(taskId: string, recording: NonNullable<CuaTaskRuntime['recording']>): void {
+    const task = this.tasks.get(taskId);
+    if (!task) return;
+    task.recording = recording;
+    this.emitTask(task);
+  }
+
   emitAgentEvent(taskId: string, event: AgentEvent): void {
     const task = this.tasks.get(taskId);
     if (!task) return;
@@ -179,8 +190,8 @@ export class CuaTaskManager extends EventEmitter {
   private recordAgentEvent(task: QueuedTask, event: AgentEvent): void {
     task.events.push(event);
     if (event.type === 'run.failed') {
-      task.status = 'failed';
-      task.error = event.error;
+        task.status = 'failed';
+        task.error = event.error;
     } else if (event.type === 'run.completed') {
       task.status = 'completed';
     }
@@ -201,7 +212,8 @@ export class CuaTaskManager extends EventEmitter {
       error: task.error,
       requestId: task.envelope.requestId,
       backend: task.envelope.routing.backend,
-      eventCount: task.events.length
+      eventCount: task.events.length,
+      recording: task.recording
     };
   }
 }

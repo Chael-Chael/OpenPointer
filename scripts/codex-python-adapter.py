@@ -185,6 +185,14 @@ def _thread_for_record(codex: Any, record: RunRecord, *, cwd: str, model: str | 
         except Exception:
             pass
 
+    try:
+        thread = codex.thread_resume(record.session_key, cwd=cwd, model=model, sandbox=sandbox)
+        with STATE.lock:
+            STATE.sessions[record.session_key] = thread.id
+        return thread
+    except Exception:
+        pass
+
     thread = codex.thread_start(cwd=cwd, model=model, sandbox=sandbox)
     with STATE.lock:
         STATE.sessions[record.session_key] = thread.id

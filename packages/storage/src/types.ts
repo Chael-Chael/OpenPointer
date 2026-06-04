@@ -25,6 +25,11 @@ export type AppSettings = {
   cuaMode: 'off' | 'prefer' | 'require-on-explicit-command';
   requireApprovalBeforeCua: boolean;
   cuaDebugOverlayEnabled: boolean;
+  cuaDriverHttpPort: number;
+  cuaAgentCursorEnabled: boolean;
+  cuaRecordingMode: 'off' | 'manual';
+  cuaBrowserPageToolsEnabled: boolean;
+  cuaPageJavascriptPolicy: 'ask' | 'off';
   activationHotkey: string;
   longPressEnabled: boolean;
   voiceEnabled: boolean;

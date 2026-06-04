@@ -52,6 +52,11 @@ const DEFAULTS: AppSettings = {
   cuaMode: 'prefer',
   requireApprovalBeforeCua: true,
   cuaDebugOverlayEnabled: false,
+  cuaDriverHttpPort: 19771,
+  cuaAgentCursorEnabled: true,
+  cuaRecordingMode: 'manual',
+  cuaBrowserPageToolsEnabled: true,
+  cuaPageJavascriptPolicy: 'ask',
   activationHotkey: 'CommandOrControl+Shift+Space',
   longPressEnabled: true,
   voiceEnabled: true,
@@ -98,6 +103,9 @@ export function getSettings(): AppSettings {
     codexModel: envOverride(['OP_CODEX_MODEL']) || loaded.codexModel || DEFAULTS.codexModel,
     codexEffort: normalizeEffort(envOverride(['OP_CODEX_EFFORT']) || loaded.codexEffort || DEFAULTS.codexEffort),
     cuaMode: normalizeCuaMode(envOverride(['OP_CUA_MODE']) || loaded.cuaMode || DEFAULTS.cuaMode),
+    cuaDriverHttpPort: clampNumber(Number(envOverride(['OP_CUA_HTTP_PORT']) || loaded.cuaDriverHttpPort), 1, 65535, DEFAULTS.cuaDriverHttpPort),
+    cuaRecordingMode: normalizeCuaRecordingMode(loaded.cuaRecordingMode || DEFAULTS.cuaRecordingMode),
+    cuaPageJavascriptPolicy: normalizeCuaPageJavascriptPolicy(loaded.cuaPageJavascriptPolicy || DEFAULTS.cuaPageJavascriptPolicy),
     pillWidth: clampNumber(loaded.pillWidth, 280, 900, DEFAULTS.pillWidth),
     pillHeight: clampNumber(loaded.pillHeight, 24, 96, DEFAULTS.pillHeight),
     newDialogBehavior: normalizeNewDialogBehavior(loaded.newDialogBehavior || DEFAULTS.newDialogBehavior),
@@ -282,6 +290,14 @@ function normalizeEffort(value: string): AppSettings['codexEffort'] {
 
 function normalizeCuaMode(value: string): AppSettings['cuaMode'] {
   return ['off', 'prefer', 'require-on-explicit-command'].includes(value) ? (value as AppSettings['cuaMode']) : 'prefer';
+}
+
+function normalizeCuaRecordingMode(value: string): AppSettings['cuaRecordingMode'] {
+  return ['off', 'manual'].includes(value) ? (value as AppSettings['cuaRecordingMode']) : 'manual';
+}
+
+function normalizeCuaPageJavascriptPolicy(value: string): AppSettings['cuaPageJavascriptPolicy'] {
+  return ['ask', 'off'].includes(value) ? (value as AppSettings['cuaPageJavascriptPolicy']) : 'ask';
 }
 
 function normalizeNewDialogBehavior(value: string): AppSettings['newDialogBehavior'] {

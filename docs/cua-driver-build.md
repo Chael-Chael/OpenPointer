@@ -2,9 +2,10 @@
 
 OpenPointer's desktop element grounding relies on the **CUA driver** — a
 Rust binary from the vendored [`trycua/cua`](https://github.com/trycua/cua)
-submodule. The driver exposes Windows UI Automation (UIA/MSAA) data over an MCP
-(`stdio`) interface, which the Electron main process spawns as a sidecar
-(`cua-driver mcp`).
+submodule. OpenPointer requires `cua-driver >= 0.5.0` and talks to the driver's
+Streamable HTTP MCP endpoint. The Electron main process starts `cua-driver serve`
+with `CUA_DRIVER_RS_MCP_HTTP_PORT` and exposes only the OpenPointer broker MCP
+server to agent backends.
 
 This document covers building that binary so element selection works in
 development and production.
@@ -63,12 +64,15 @@ The resulting binary is written to one of:
 
 1. The `OP_CUA_DRIVER_PATH` environment variable, if it points to an existing
    file. Use this to run a driver built somewhere else.
-2. `cua-driver.exe` next to the packaged app resources (`process.resourcesPath`).
-3. `%LOCALAPPDATA%\Programs\Cua\cua-driver\bin\cua-driver.exe`.
-4. The Cargo `debug` then `release` target directories listed above.
+2. The vendored Cargo `release` then `debug` target directories listed above.
+3. `cua-driver.exe` next to the packaged app resources (`process.resourcesPath`).
+4. `%LOCALAPPDATA%\Programs\Cua\cua-driver\bin\cua-driver.exe`.
 
 On non-Windows platforms the binary name is `cua-driver` (no `.exe`), though the
 accessibility features themselves are Windows-only.
+
+OpenPointer does not use `cua-driver mcp` stdio. If HTTP startup fails, CUA is
+reported unavailable instead of falling back to stdio.
 
 ### Overriding the path
 
@@ -80,15 +84,17 @@ npm run dev
 ## Verifying the driver
 
 With a build in place, start the app (`npm run dev`) and hover the pointer over
-a native window. When grounding succeeds you will see element highlights. If
-grounding falls back, check the Electron main-process console for
-`[op:cua]`-prefixed stderr output from the sidecar.
+a native window. When grounding succeeds you will see element highlights. The
+Settings panel shows the CUA HTTP status, endpoint, driver version, and tool
+count. If grounding falls back, check the Electron main-process console for
+`[op:cua]`-prefixed output from `cua-driver serve`.
 
 Common failure modes:
 
 | Symptom | Likely cause |
 | --- | --- |
 | `CUA driver binary not found` | Binary not built, or `OP_CUA_DRIVER_PATH` not set. |
+| `CUA HTTP driver requires cua-driver >= 0.5.0` | Installed driver is too old for HTTP MCP. |
 | `No confident CUA window match` | The window under the cursor scored below the match threshold (e.g. the overlay or a background window). |
 | `CUA matched a window but returned no usable elements` | The patch is not applied, so `get_window_state` returns no `elements` array. |
 | `get_window_state reported an error` | The driver returned an MCP error; see the sidecar stderr for details. |
@@ -102,3 +108,6 @@ resolver finds it without an environment variable:
 cargo build --release --manifest-path vendor/cua/libs/cua-driver/rust/Cargo.toml
 # Then include target/release/cua-driver.exe in the packaged resources directory.
 ```
+
+The packaged app must include a driver new enough to support `cua-driver serve`
+with `CUA_DRIVER_RS_MCP_HTTP_PORT`.

@@ -103,4 +103,42 @@ describe('CodexBridge', () => {
     expect(postedBody?.sandbox).toBe('workspace-write');
     expect(events.map((event) => event.type)).toEqual(['tool.discovery', 'run.started', 'backend.session', 'run.completed']);
   });
+
+  it('uses a saved backend session id as the Codex thread when resuming', async () => {
+    let requestBody: Record<string, unknown> | null = null;
+    const server = createServer((req, res) => {
+      if (req.method === 'POST' && req.url === '/v1/runs') {
+        const chunks: Buffer[] = [];
+        req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        req.on('end', () => {
+          requestBody = JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ id: 'codex-run-1', events_url: '/v1/runs/codex-run-1/events' }));
+        });
+        return;
+      }
+      if (req.method === 'GET' && req.url === '/v1/runs/codex-run-1/events') {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.end(['data: {"type":"run.completed","text":"done"}', '', ''].join('\n'));
+        return;
+      }
+      res.statusCode = 404;
+      res.end();
+    });
+    servers.push(server);
+    const port = await new Promise<number>((resolve) => {
+      server.listen(0, () => {
+        const address = server.address();
+        resolve(typeof address === 'object' && address ? address.port : 0);
+      });
+    });
+    const bridge = new CodexBridge({ baseUrl: `http://127.0.0.1:${port}/v1` });
+    const envelope = buildAgentContextEnvelope({ instruction: 'continue the fix', mode: 'text', context, backend: 'codex' });
+    const events = [];
+    for await (const event of bridge.run(envelope, { sessionKey: 'openpointer-session', backendSessionId: 'thr_saved' })) events.push(event);
+
+    const postedBody = requestBody as Record<string, unknown> | null;
+    expect(postedBody?.thread).toBe('thr_saved');
+    expect(events.map((event) => event.type)).toEqual(['tool.discovery', 'run.started', 'run.completed']);
+  });
 });

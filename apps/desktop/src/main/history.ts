@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { Conversation, ChatTurn } from '@openpointer/core';
+import type { AgentBackendId, BackendSessionKey, Conversation, ChatTurn } from '@openpointer/core';
 
 export class ChatHistoryManager {
   private filePath: string;
@@ -81,16 +81,37 @@ export class ChatHistoryManager {
     return conv;
   }
 
-  async setClaudeAgentSession(conversationId: string, sessionId: string): Promise<Conversation | null> {
+  async setBackendSession(conversationId: string, backend: AgentBackendId, sessionId: string): Promise<Conversation | null> {
     await this.load();
     const conv = this.conversations.get(conversationId);
     if (!conv) return null;
+    const key = backendSessionKey(backend);
+    if (!key) return null;
     conv.backendSessions = {
       ...conv.backendSessions,
-      claudeAgent: { sessionId }
+      [key]: { sessionId }
     };
     conv.updatedAt = Date.now();
     await this.save();
     return conv;
+  }
+
+  async setClaudeAgentSession(conversationId: string, sessionId: string): Promise<Conversation | null> {
+    return this.setBackendSession(conversationId, 'claude-agent', sessionId);
+  }
+}
+
+export function backendSessionKey(backend: AgentBackendId): BackendSessionKey | undefined {
+  switch (backend) {
+    case 'claude-agent':
+      return 'claudeAgent';
+    case 'codex':
+      return 'codex';
+    case 'hermes':
+      return 'hermes';
+    case 'opencode':
+      return 'opencode';
+    default:
+      return undefined;
   }
 }
