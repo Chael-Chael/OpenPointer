@@ -345,6 +345,26 @@ export function GeneralTab({
           <span>Long press activation</span>
         </label>
         <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={settings.mouseShakeActivationEnabled}
+            onChange={(event) => updateSettings({ mouseShakeActivationEnabled: event.target.checked })}
+          />
+          <span>Shake activation</span>
+        </label>
+        <label className="field">
+          <span>Shake sensitivity</span>
+          <select
+            value={settings.mouseShakeSensitivity}
+            disabled={!settings.mouseShakeActivationEnabled}
+            onChange={(event) => updateSettings({ mouseShakeSensitivity: event.target.value as AppSettings['mouseShakeSensitivity'] })}
+          >
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </label>
+        <label className="toggle-row">
           <input type="checkbox" checked={settings.voiceEnabled} onChange={(event) => updateSettings({ voiceEnabled: event.target.checked })} />
           <span>Voice input</span>
         </label>

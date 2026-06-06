@@ -109,7 +109,8 @@ function summarizePointerContext(context: PointerContext) {
         }
       : undefined,
     nearby: context.nearby,
-    grounding: context.grounding
+    grounding: context.grounding,
+    contextChips: summarizeContextChips(context)
   };
 }
 
@@ -141,6 +142,7 @@ function summarizeConversationContextHistory(envelope: AgentContextEnvelope) {
               error: context.windowSnapshot.error
             }
           : undefined,
+        contextChips: summarizeContextChips(context),
         cua:
           context.grounding || cuaEntities.length > 0
             ? {
@@ -191,6 +193,10 @@ function summarizeMultimodalContext(envelope: AgentContextEnvelope) {
           error: context.windowSnapshot.error
         }
       : undefined,
+    contextChips: summarizeContextChips(context).map((chip, index) => ({
+      ...chip,
+      attachment: contextAttachmentLabel(envelope, chip.id, index)
+    })),
     cua:
       context.grounding || cuaEntities.length > 0
         ? {
@@ -234,10 +240,52 @@ function summarizeMultimodalContext(envelope: AgentContextEnvelope) {
   };
 }
 
+function summarizeContextChips(context: PointerContext) {
+  return (context.contextChips ?? []).map((chip) => ({
+    id: chip.id,
+    kind: chip.kind,
+    role: chip.role,
+    label: chip.label,
+    subtitle: chip.subtitle,
+    windowRef: chip.windowRef,
+    entityRefs: chip.entityRefs?.slice(0, 8).map((entity) => ({
+      kind: entity.kind,
+      text: entity.text,
+      name: entity.name,
+      role: entity.role,
+      bbox: entity.bbox,
+      state: entity.state,
+      groundingRef: entity.groundingRef
+    })),
+    region: chip.region,
+    selectionText: chip.selectionText,
+    windowSnapshot: chip.windowSnapshot
+      ? {
+          screenshotId: chip.windowSnapshot.screenshotId,
+          source: chip.windowSnapshot.source,
+          bounds: chip.windowSnapshot.bounds,
+          mimeType: chip.windowSnapshot.mimeType,
+          hasImageBase64: Boolean(chip.windowSnapshot.imageBase64),
+          error: chip.windowSnapshot.error
+        }
+      : undefined,
+    error: chip.error,
+    createdAt: chip.createdAt,
+    lastSeenAt: chip.lastSeenAt
+  }));
+}
+
 function attachmentLabel(envelope: AgentContextEnvelope, scope: 'pointer' | 'window'): string | undefined {
   const attachment = envelope.attachments.find((item) => item.scope === scope);
   return attachment
     ? `${attachment.scope ?? 'context'}:${attachment.type}:${attachment.mimeType}${attachment.tempPath ? `:${attachment.tempPath}` : ''}`
+    : undefined;
+}
+
+function contextAttachmentLabel(envelope: AgentContextEnvelope, chipId: string, index: number): string | undefined {
+  const attachment = envelope.attachments.find((item) => item.contextChipId === chipId);
+  return attachment
+    ? `${attachment.label ?? `Context ${index + 1}`}:${attachment.type}:${attachment.mimeType}${attachment.tempPath ? `:${attachment.tempPath}` : ''}`
     : undefined;
 }
 

@@ -84,6 +84,43 @@ export type PointerEntity = {
   };
 };
 
+export type ContextChipKind = 'window' | 'entity' | 'selection' | 'region';
+export type ContextChipStatus = 'candidate' | 'pinned';
+export type ContextChipRole = 'source' | 'target' | 'compare';
+
+export type ContextWindowRef = {
+  title?: string;
+  process?: string;
+  app?: string;
+  windowId?: string;
+  pid?: number;
+  bounds?: Rect;
+};
+
+export type ContextChip = {
+  id: string;
+  kind: ContextChipKind;
+  status: ContextChipStatus;
+  role?: ContextChipRole;
+  label: string;
+  subtitle?: string;
+  windowRef?: ContextWindowRef;
+  entityRefs?: PointerEntity[];
+  region?: Rect;
+  selectionText?: string;
+  windowSnapshot?: {
+    screenshotId?: string;
+    source?: 'cua-window' | 'electron-window';
+    bounds?: Rect;
+    imageBase64?: string;
+    mimeType?: 'image/png' | 'image/jpeg';
+    error?: string;
+  };
+  error?: string;
+  createdAt: number;
+  lastSeenAt: number;
+};
+
 export type PointerContext = {
   id: string;
   source: PointerSource;
@@ -132,6 +169,7 @@ export type PointerContext = {
     elementCount?: number;
     error?: string;
   };
+  contextChips?: ContextChip[];
   createdAt: number;
 };
 
@@ -144,8 +182,9 @@ export type AgentToolPolicy = 'agent_decides' | 'prefer' | 'require';
 
 export type AgentAttachment = {
   type: 'screenshot';
-  scope?: 'pointer' | 'window';
+  scope?: 'pointer' | 'window' | 'context';
   label?: string;
+  contextChipId?: string;
   mimeType: 'image/jpeg' | 'image/png';
   dataUrl?: string;
   tempPath?: string;

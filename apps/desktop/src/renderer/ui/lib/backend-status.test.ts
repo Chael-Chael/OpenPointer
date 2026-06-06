@@ -35,6 +35,8 @@ function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
     cuaPageJavascriptPolicy: 'ask',
     activationHotkey: '',
     longPressEnabled: false,
+    mouseShakeActivationEnabled: true,
+    mouseShakeSensitivity: 'low',
     voiceEnabled: false,
     pillWidth: 520,
     pillHeight: 24,
@@ -42,6 +44,7 @@ function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
     newDialogInterval: 300,
     localVlmContextWindow: 32768,
     modalTheme: 'blue',
+    backgroundProcessCorner: 'bottom-left',
     ...overrides
   };
 }

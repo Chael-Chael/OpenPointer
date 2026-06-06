@@ -59,13 +59,16 @@ const DEFAULTS: AppSettings = {
   cuaPageJavascriptPolicy: 'ask',
   activationHotkey: 'CommandOrControl+Shift+Space',
   longPressEnabled: true,
+  mouseShakeActivationEnabled: true,
+  mouseShakeSensitivity: 'low',
   voiceEnabled: true,
   pillWidth: 240,
   pillHeight: 24,
   newDialogBehavior: 'continue',
   newDialogInterval: 300,
   localVlmContextWindow: 32768,
-  modalTheme: 'blue'
+  modalTheme: 'blue',
+  backgroundProcessCorner: 'bottom-left'
 };
 
 function settingsPath(): string {
@@ -106,12 +109,15 @@ export function getSettings(): AppSettings {
     cuaDriverHttpPort: clampNumber(Number(envOverride(['OP_CUA_HTTP_PORT']) || loaded.cuaDriverHttpPort), 1, 65535, DEFAULTS.cuaDriverHttpPort),
     cuaRecordingMode: normalizeCuaRecordingMode(loaded.cuaRecordingMode || DEFAULTS.cuaRecordingMode),
     cuaPageJavascriptPolicy: normalizeCuaPageJavascriptPolicy(loaded.cuaPageJavascriptPolicy || DEFAULTS.cuaPageJavascriptPolicy),
+    mouseShakeActivationEnabled: readBoolean(envOverride(['OP_MOUSE_SHAKE_ACTIVATION_ENABLED']), loaded.mouseShakeActivationEnabled ?? DEFAULTS.mouseShakeActivationEnabled),
+    mouseShakeSensitivity: normalizeMouseShakeSensitivity(envOverride(['OP_MOUSE_SHAKE_SENSITIVITY']) || loaded.mouseShakeSensitivity || DEFAULTS.mouseShakeSensitivity),
     pillWidth: clampNumber(loaded.pillWidth, 280, 900, DEFAULTS.pillWidth),
     pillHeight: clampNumber(loaded.pillHeight, 24, 96, DEFAULTS.pillHeight),
     newDialogBehavior: normalizeNewDialogBehavior(loaded.newDialogBehavior || DEFAULTS.newDialogBehavior),
     newDialogInterval: clampNumber(loaded.newDialogInterval, 10, 86400, DEFAULTS.newDialogInterval),
     localVlmContextWindow: clampNumber(loaded.localVlmContextWindow, 4096, 2000000, DEFAULTS.localVlmContextWindow),
     modalTheme: normalizeModalTheme(loaded.modalTheme || DEFAULTS.modalTheme),
+    backgroundProcessCorner: normalizeBackgroundProcessCorner(loaded.backgroundProcessCorner || DEFAULTS.backgroundProcessCorner),
     hasLocalVlmApiKey: Boolean(firstEnv(localVlmSecretEnvKeys) || loaded.encryptedLocalVlmApiKey),
     hasHermesApiKey: Boolean(firstEnv(hermesSecretEnvKeys) || loaded.encryptedHermesApiKey),
     hasOpenCodeApiKey: Boolean(firstEnv(opencodeSecretEnvKeys) || loaded.encryptedOpenCodeApiKey),
@@ -300,12 +306,20 @@ function normalizeCuaPageJavascriptPolicy(value: string): AppSettings['cuaPageJa
   return ['ask', 'off'].includes(value) ? (value as AppSettings['cuaPageJavascriptPolicy']) : 'ask';
 }
 
+function normalizeMouseShakeSensitivity(value: string): AppSettings['mouseShakeSensitivity'] {
+  return ['low', 'medium', 'high'].includes(value) ? (value as AppSettings['mouseShakeSensitivity']) : 'low';
+}
+
 function normalizeNewDialogBehavior(value: string): AppSettings['newDialogBehavior'] {
   return ['new', 'continue', 'interval'].includes(value) ? (value as AppSettings['newDialogBehavior']) : 'continue';
 }
 
 function normalizeModalTheme(value: string): AppSettings['modalTheme'] {
   return ['blue', 'white', 'black'].includes(value) ? (value as AppSettings['modalTheme']) : 'blue';
+}
+
+function normalizeBackgroundProcessCorner(value: string): AppSettings['backgroundProcessCorner'] {
+  return ['bottom-left', 'bottom-right', 'top-left', 'top-right'].includes(value) ? (value as AppSettings['backgroundProcessCorner']) : 'bottom-left';
 }
 
 function detectDefaultCodexExecutable(): string {

@@ -10,8 +10,9 @@ import {
   type AgentBridgeRegistryConfig,
   type ApprovalDecision
 } from '@openpointer/agent-bridge';
-import type { AgentBackendId, Conversation, Point, PointerContext, PointerEntity, Rect } from '@openpointer/core';
+import type { AgentBackendId, ContextChip, Conversation, Point, PointerContext, PointerEntity, Rect } from '@openpointer/core';
 import { buildPointerContext } from '@openpointer/grounding';
+import type { AppSettings } from '@openpointer/storage';
 import { OP_CHANNELS } from '../shared/ipc.js';
 import type {
   CursorPayload,
@@ -22,6 +23,7 @@ import type {
   ReadSelectionResponse,
   ContinueConversationRequest,
   ContinueConversationResponse,
+  DeactivatePayload,
   SubmitInstructionRequest
 } from '../shared/types.js';
 import { CuaBroker } from './cua-broker.js';
@@ -32,6 +34,7 @@ import { CuaTaskManager } from './cua-task-manager.js';
 import { loadLocalEnv } from './env.js';
 import { getClaudeAgentApiKey, getCodexApiKey, getHermesApiKey, getLocalVlmApiKey, getOpenCodeApiKey, getSettings, saveSettings } from './settings.js';
 import { backendSessionKey, ChatHistoryManager } from './history.js';
+import { MouseShakeActivationController } from './mouse-shake-activation.js';
 import { OpenPointerHarness } from './openpointer-harness.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -52,12 +55,14 @@ let active = false;
 let activeDisplayId: number | null = null;
 let lastCursor: CursorPayload | null = null;
 let lastActivationCursor: CursorPayload | null = null;
+let cachedSettings: AppSettings | null = null;
 const cuaSidecar = new CuaSidecarManager(repoRoot);
 const cuaGrounding = new CuaGroundingProvider(cuaSidecar);
 const cuaBroker = new CuaBroker(cuaSidecar);
 const codexAdapter = new CodexAdapterManager(repoRoot);
 const cuaTaskManager = new CuaTaskManager(4);
 const chatHistory = new ChatHistoryManager();
+const mouseShakeActivation = new MouseShakeActivationController();
 
 // Single source of truth for the CUA tools exposed to the agent. This list is
 // both advertised to the model (envelope.toolServers[].tools) and enforced by
@@ -337,6 +342,11 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function currentSettings(): AppSettings {
+  cachedSettings ??= getSettings();
+  return cachedSettings;
+}
+
 // Escape closes the overlay. We register it as a global shortcut only while
 // active so Electron exclusively captures the key (via RegisterHotKey on
 // Windows) and it never leaks through to the focused app's own Esc shortcuts.
@@ -347,7 +357,7 @@ function registerEscapeShortcut(): void {
   if (escRegistered) return;
   try {
     escRegistered = globalShortcut.register('Escape', () => {
-      if (active) deactivate();
+      if (active) deactivate({ startNewConversationOnNextActivate: true });
     });
   } catch (error) {
     console.warn('[omp] failed to register Escape shortcut', error);
@@ -401,11 +411,11 @@ function focusActiveOverlayWithoutActivate(cursor: CursorPayload): void {
   }
 }
 
-function deactivate(): void {
+function deactivate(options: DeactivatePayload = {}): void {
   active = false;
   activeDisplayId = null;
   unregisterEscapeShortcut();
-  broadcast(OP_CHANNELS.Deactivate);
+  broadcast(OP_CHANNELS.Deactivate, options);
   for (const [displayId, win] of windows) {
     if (!win.isDestroyed()) setOverlayInteractive(displayId, false);
   }
@@ -421,7 +431,7 @@ function registerActivationHotkey(hotkey: string): boolean {
   if (!hotkey) return false;
   let registered = false;
   try {
-    registered = globalShortcut.register(hotkey, () => (active ? deactivate() : activate()));
+    registered = globalShortcut.register(hotkey, () => (active ? focusActiveOverlayWithoutActivate(cursorPayload()) : activate()));
   } catch (error) {
     console.error('[omp] global shortcut error', hotkey, error);
     return false;
@@ -443,6 +453,7 @@ function startCursorLoop(): void {
 function startGlobalLongPress(): void {
   try {
     uIOhook.on('mousedown', (event) => {
+      mouseShakeActivation.handleMouseDown(event.button, { emitFeedback: broadcastHold });
       if (isSecondaryMouseButton(event.button)) {
         handleGlobalContextMouseDown();
         return;
@@ -450,7 +461,7 @@ function startGlobalLongPress(): void {
       if (isPrimaryMouseButton(event.button)) {
         handleGlobalPrimaryMouseDown();
       }
-      if (!getSettings().longPressEnabled || !isPrimaryMouseButton(event.button)) return;
+      if (!currentSettings().longPressEnabled || !isPrimaryMouseButton(event.button)) return;
       const cursor = cursorPayload();
       hold.active = true;
       hold.completed = false;
@@ -468,12 +479,15 @@ function startGlobalLongPress(): void {
     });
 
     uIOhook.on('mousemove', (event) => {
-      if (!hold.active || !hold.start || hold.completed) return;
-      const distance = Math.hypot(event.x - hold.start.x, event.y - hold.start.y);
-      if (distance > HOLD_MOVE_TOLERANCE_PX) cancelHold();
+      if (hold.active && hold.start && !hold.completed) {
+        const distance = Math.hypot(event.x - hold.start.x, event.y - hold.start.y);
+        if (distance > HOLD_MOVE_TOLERANCE_PX) cancelHold();
+      }
+      handleGlobalMouseShakeMove(event);
     });
 
     uIOhook.on('mouseup', (event) => {
+      mouseShakeActivation.handleMouseUp(event.button, { emitFeedback: broadcastHold });
       if (!isPrimaryMouseButton(event.button)) return;
       if (hold.active && !hold.completed) cancelHold();
     });
@@ -519,6 +533,19 @@ function broadcastHold(payload: HoldProgressPayload): void {
   sendToDisplay(payload.cursor.displayId, OP_CHANNELS.HoldProgress, payload);
 }
 
+function handleGlobalMouseShakeMove(event: { x: number; y: number }): void {
+  const cursor = cursorPayload();
+  mouseShakeActivation.handleMouseMove(event, {
+    settings: currentSettings(),
+    active,
+    holdActive: hold.active,
+    overlayHidden: overlayHiddenDepth > 0 || overlayVisibilitySnapshot.size > 0 || Boolean(overlayHideReady),
+    cursor,
+    activate,
+    emitFeedback: broadcastHold
+  });
+}
+
 function isPrimaryMouseButton(button: unknown): boolean {
   return button === 1 || button === 0 || button === 'left';
 }
@@ -558,7 +585,7 @@ function registerIpc(): void {
     if (win) setWindowInteractive(win, value);
   });
 
-  ipcMain.on(OP_CHANNELS.RequestDeactivate, () => deactivate());
+  ipcMain.on(OP_CHANNELS.RequestDeactivate, (_event, options?: DeactivatePayload) => deactivate(options));
   ipcMain.on(OP_CHANNELS.CancelRun, () => cuaTaskManager.cancelForeground());
 
   ipcMain.on(OP_CHANNELS.RendererReady, (event) => {
@@ -575,9 +602,11 @@ function registerIpc(): void {
   ipcMain.handle(OP_CHANNELS.GetSettings, () => getSettings());
   ipcMain.handle(OP_CHANNELS.SaveSettings, (_event, patch) => {
     const next = saveSettings(patch);
+    cachedSettings = next;
     // Re-apply runtime settings that are bound at registration time so saved
     // changes (e.g. the activation hotkey) take effect without a restart.
     registerActivationHotkey(next.activationHotkey);
+    mouseShakeActivation.reset({ emitFeedback: broadcastHold });
     configureCuaRuntime(next);
     void codexAdapter.ensure(next);
     return next;
@@ -728,6 +757,7 @@ function registerIpc(): void {
           req.windowBounds,
           selectedText
         );
+    context.contextChips = await refreshSubmittedContextChips(req.contextChips ?? [], cursor);
 
     return openPointerHarness.submit({
       text: req.text,
@@ -737,6 +767,29 @@ function registerIpc(): void {
       conversationId: req.conversationId
     });
   });
+}
+
+async function refreshSubmittedContextChips(chips: ContextChip[], cursor: CursorPayload): Promise<ContextChip[]> {
+  const pinned = chips.filter((chip) => chip.status === 'pinned').slice(0, 4);
+  if (pinned.length === 0) return [];
+  return Promise.all(
+    pinned.map(async (chip) => {
+      if (chip.kind !== 'window' || !chip.windowRef) return chip;
+      const windowInfo: PointerContext['window'] = {
+        title: chip.windowRef.title,
+        app: chip.windowRef.app,
+        process: chip.windowRef.process,
+        windowId: chip.windowRef.windowId
+      };
+      const windowSnapshot = await captureWindowSnapshot(cursor, windowInfo, chip.windowRef.pid, chip.windowRef.bounds);
+      return {
+        ...chip,
+        windowSnapshot,
+        error: windowSnapshot?.error,
+        lastSeenAt: Date.now()
+      };
+    })
+  );
 }
 
 async function continueConversation(req: ContinueConversationRequest): Promise<ContinueConversationResponse> {
@@ -1732,6 +1785,7 @@ app.whenReady().then(async () => {
     await createOverlay(display);
   }
   const settings = getSettings();
+  cachedSettings = settings;
   configureCuaRuntime(settings);
   void codexAdapter.ensure(settings);
   registerActivationHotkey(settings.activationHotkey);
@@ -1756,6 +1810,7 @@ app.on('will-quit', () => {
   codexAdapter.stop();
   cuaSidecar.stop();
   clearHoldTimers();
+  mouseShakeActivation.destroy();
   try {
     uIOhook.stop();
   } catch {

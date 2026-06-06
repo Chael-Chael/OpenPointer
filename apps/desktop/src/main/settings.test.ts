@@ -52,6 +52,10 @@ describe('getSettings env vs persisted precedence', () => {
     expect(result.codexEffort).toBe('low');
   });
 
+  it('defaults the background process dock to the bottom-left corner', () => {
+    expect(settings.getSettings().backgroundProcessCorner).toBe('bottom-left');
+  });
+
   it('prefers persisted values over env vars once settings are saved', () => {
     settings.saveSettings({ localVlmBaseUrl: 'http://saved-host/v1', cuaMode: 'require-on-explicit-command' });
     // Env now disagrees with what the user saved; saved values must win.
@@ -67,6 +71,16 @@ describe('saveSettings', () => {
   it('round-trips a saved value through getSettings', () => {
     settings.saveSettings({ localVlmModel: 'mimo-2.5' });
     expect(settings.getSettings().localVlmModel).toBe('mimo-2.5');
+  });
+
+  it('round-trips the background process corner', () => {
+    settings.saveSettings({ backgroundProcessCorner: 'top-right' });
+    expect(settings.getSettings().backgroundProcessCorner).toBe('top-right');
+  });
+
+  it('falls back to bottom-left for an invalid background process corner', () => {
+    fileContent = JSON.stringify({ backgroundProcessCorner: 'center' });
+    expect(settings.getSettings().backgroundProcessCorner).toBe('bottom-left');
   });
 
   it('encrypts and decrypts secrets, and clears them on request', () => {

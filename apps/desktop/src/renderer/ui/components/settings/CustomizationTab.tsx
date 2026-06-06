@@ -27,6 +27,21 @@ export function CustomizationTab({ settings, pillWidth, pillHeight, updateSettin
 
       <section className="settings-section">
         <label className="field">
+          <span>Background process corner</span>
+          <select
+            value={settings.backgroundProcessCorner ?? 'bottom-left'}
+            onChange={(event) => updateSettings({ backgroundProcessCorner: event.target.value as AppSettings['backgroundProcessCorner'] })}
+          >
+            <option value="bottom-left">Bottom left</option>
+            <option value="bottom-right">Bottom right</option>
+            <option value="top-left">Top left</option>
+            <option value="top-right">Top right</option>
+          </select>
+        </label>
+      </section>
+
+      <section className="settings-section">
+        <label className="field">
           <span>New dialog behavior</span>
           <select
             value={settings?.newDialogBehavior ?? 'continue'}

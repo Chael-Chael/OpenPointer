@@ -129,6 +129,12 @@ function dataUrlsFromPointerContext(context: import('@openpointer/core').Pointer
   if (context.windowSnapshot?.imageBase64) {
     urls.push(`data:${context.windowSnapshot.mimeType || 'image/jpeg'};base64,${context.windowSnapshot.imageBase64}`);
   }
+  for (const chip of context.contextChips ?? []) {
+    const snapshot = chip.windowSnapshot;
+    if (snapshot?.imageBase64) {
+      urls.push(`data:${snapshot.mimeType || 'image/jpeg'};base64,${snapshot.imageBase64}`);
+    }
+  }
   return urls;
 }
 

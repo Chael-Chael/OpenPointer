@@ -62,6 +62,19 @@ function contextAttachments(context: PointerContext): AgentContextEnvelope['atta
       crop: context.windowSnapshot.bounds
     });
   }
+  for (const [index, chip] of (context.contextChips ?? []).entries()) {
+    const snapshot = chip.windowSnapshot;
+    if (!snapshot?.imageBase64 || !snapshot.mimeType) continue;
+    attachments.push({
+      type: 'screenshot',
+      scope: 'context',
+      label: `Context ${index + 1}: ${chip.label}`,
+      contextChipId: chip.id,
+      mimeType: snapshot.mimeType,
+      dataUrl: `data:${snapshot.mimeType};base64,${snapshot.imageBase64}`,
+      crop: snapshot.bounds
+    });
+  }
   return attachments;
 }
 
@@ -87,9 +100,20 @@ function buildCuaDirective(instruction: string, context: PointerContext, mode: '
     },
     allowedActions: ['screenshot', 'click', 'doubleClick', 'type', 'scroll', 'drag', 'hotkey'],
     constraints: {
-      appAllowlist: context.window?.app ? [context.window.app] : context.window?.process ? [context.window.process] : undefined,
+      appAllowlist: appAllowlistForContext(context),
       requireApprovalBeforeStateChange: true,
       stopWhen: 'The requested task is complete or user approval is needed.'
     }
   };
+}
+
+function appAllowlistForContext(context: PointerContext): string[] | undefined {
+  const apps = new Set<string>();
+  const primary = context.window?.app ?? context.window?.process;
+  if (primary) apps.add(primary);
+  for (const chip of context.contextChips ?? []) {
+    const app = chip.windowRef?.app ?? chip.windowRef?.process;
+    if (app) apps.add(app);
+  }
+  return apps.size > 0 ? [...apps] : undefined;
 }

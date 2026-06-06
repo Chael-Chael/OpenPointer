@@ -1,5 +1,5 @@
 import type { ApprovalDecision } from '@openpointer/agent-bridge';
-import type { AgentBackendId, AgentEvent, AgentInputMode, Point, PointerContext, PointerEntity, Rect } from '@openpointer/core';
+import type { AgentBackendId, AgentEvent, AgentInputMode, ContextChip, Point, PointerContext, PointerEntity, Rect } from '@openpointer/core';
 import type { AppSettings } from '@openpointer/storage';
 
 export type CursorPayload = {
@@ -16,6 +16,7 @@ export type HoldProgressPayload = {
   progress: number;
   state: 'holding' | 'completed' | 'canceled';
   startedWhileActive: boolean;
+  source?: 'long-press' | 'mouse-shake';
 };
 
 export type SubmitInstructionRequest = {
@@ -32,6 +33,7 @@ export type SubmitInstructionRequest = {
   includeScreenshot?: boolean;
   includeCua?: boolean;
   cuaEntities?: PointerEntity[];
+  contextChips?: ContextChip[];
   conversationId?: string;
 };
 
@@ -179,7 +181,7 @@ export type GroundingPreviewResponse = {
 
 export type DesktopApi = {
   onActivate(cb: (cursor: CursorPayload) => void): () => void;
-  onDeactivate(cb: () => void): () => void;
+  onDeactivate(cb: (payload?: DeactivatePayload) => void): () => void;
   onCursor(cb: (cursor: CursorPayload) => void): () => void;
   onGlobalContextMenu(cb: (cursor: CursorPayload) => void): () => void;
   onGlobalMouseDown(cb: (cursor: CursorPayload) => void): () => void;
@@ -187,7 +189,7 @@ export type DesktopApi = {
   onAgentEvent(cb: (event: AgentEvent) => void): () => void;
   onCuaTaskEvent(cb: (payload: CuaTaskEventPayload) => void): () => void;
   onCaptureActivity(cb: (payload: CaptureActivityPayload) => void): () => void;
-  deactivate(): void;
+  deactivate(options?: DeactivatePayload): void;
   ready(): void;
   setInteractive(value: boolean): void;
   requestWindowContext(req: WindowPreviewRequest): Promise<WindowPreviewResponse>;
@@ -210,4 +212,8 @@ export type DesktopApi = {
   getConversation(id: string): Promise<import('@openpointer/core').Conversation | null>;
   deleteConversation(id: string): Promise<void>;
   fetchVisionModels(req: { baseUrl: string; apiKey: string }): Promise<{ success: boolean; models?: string[]; error?: string }>;
+};
+
+export type DeactivatePayload = {
+  startNewConversationOnNextActivate?: boolean;
 };

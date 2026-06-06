@@ -1,5 +1,5 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from 'react';
-import { clampNumber, type AgentBackendId, type AgentEvent, type BackendSessionKey, type Conversation, type PointerEntity } from '@openpointer/core';
+import { clampNumber, type AgentBackendId, type AgentEvent, type BackendSessionKey, type ContextChip, type Conversation, type PointerEntity } from '@openpointer/core';
 import type { ApprovalDecision } from '@openpointer/agent-bridge';
 import type { AppSettings } from '@openpointer/storage';
 import { parseVoiceCommand } from '@openpointer/voice';
@@ -18,6 +18,7 @@ import {
   type UiState
 } from './state';
 import { backendLabel, backendReadiness, latestEvent, placeholderForState, secretConfigured, statusLabel } from './lib/backend-status';
+import { parkBackgroundConversation, removeBackgroundConversation, resolveBackgroundConversations } from './lib/background-processes';
 import { availablePanelHeight, computeShellPosition, focusPromptInput, normalizeSelection, resolvedPanelHeight, selectionFromDrag } from './lib/geometry';
 import { selectedCuaAttachmentTitle, selectedListItemsForContext } from './lib/cua-selection';
 import {
@@ -43,6 +44,13 @@ import {
   rectsIntersect
 } from './lib/cua-geometry';
 import { entityDebugDetails, entityKindTitle, entityLabel, windowPreviewLabel } from './lib/entity-helpers';
+import {
+  contextChipFromEntity,
+  contextChipFromWindowPreview,
+  contextChipTitle,
+  pinContextChip,
+  removeContextChip
+} from './lib/context-chips';
 import { groupEventsToBlocks, type DialogueBlock, type HistoryToolEvent } from './lib/dialogue-parser';
 import { HoldRing } from './components/fields';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -53,10 +61,13 @@ import { PointerContextPreview } from './components/PointerContextPreview';
 import { HistoryThinkingBlock } from './components/HistoryThinkingBlock';
 import { DialogueBlocksRenderer } from './components/DialogueBlocks';
 import { CuaTaskPanel, useCuaTasks } from './components/CuaTaskPanel';
+import { BackgroundProcessDock } from './components/BackgroundProcessDock';
 
 export type { DialogueBlock, HistoryToolEvent };
 
 const initialCursor: CursorPayload = { x: 300, y: 300, localX: 300, localY: 300, displayId: 0, dpr: 1 };
+const CONTEXT_CHIP_HOVER_DELAY_MS = 380;
+const CONTEXT_TRANSFER_PATTERN = /\b(copy|move|insert|paste|send|put|into|to)\b|放到|整理到|插入到|复制到|粘贴到|移到/u;
 
 type ContinuableBackend = {
   backend: AgentBackendId;
@@ -170,7 +181,6 @@ export function App() {
   const streamPanelStreamingResponseRef = useRef(false);
   const groundingRequestSeqRef = useRef(0);
   const windowRequestSeqRef = useRef(0);
-  const lastCuaSelectEventRef = useRef<{ id: string; at: number; type: string } | null>(null);
   const cuaHoverLockSuppressedUntilRef = useRef(0);
   const cuaPickerInteractiveRef = useRef(false);
   // Submit-time screenshot signal from the main process (see CaptureActivity IPC).
@@ -179,6 +189,8 @@ export function App() {
   const [conversationMeta, setConversationMeta] = useState<Conversation | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [conversationsList, setConversationsList] = useState<import('@openpointer/core').Conversation[]>([]);
+  const [backgroundConversationIds, setBackgroundConversationIds] = useState<string[]>([]);
+  const [backgroundTerminalErrors, setBackgroundTerminalErrors] = useState<Record<string, string>>({});
   const [continueError, setContinueError] = useState<string | null>(null);
   const [pillDrag, setPillDrag] = useState<{ startX: number; startY: number; initialPos: { x: number; y: number } } | null>(null);
   const [pillWidthDrag, setPillWidthDrag] = useState<{
@@ -188,6 +200,16 @@ export function App() {
     startXPos: number;
   } | null>(null);
   const [windowPreview, setWindowPreview] = useState<WindowPreviewResponse | null>(null);
+  const [candidateContextChip, setCandidateContextChip] = useState<ContextChip | null>(null);
+  const [pinnedContextChips, setPinnedContextChips] = useState<ContextChip[]>([]);
+  const [draggingContextChip, setDraggingContextChip] = useState<{
+    chip: ContextChip;
+    x: number;
+    y: number;
+    offsetX: number;
+    offsetY: number;
+    overShelf: boolean;
+  } | null>(null);
   const [settledApprovalIds, setSettledApprovalIds] = useState<Set<string>>(() => new Set());
 
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
@@ -227,6 +249,9 @@ export function App() {
     }
   }
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const contextShelfRef = useRef<HTMLDivElement | null>(null);
+  const draggingContextChipRef = useRef<typeof draggingContextChip>(null);
+  draggingContextChipRef.current = draggingContextChip;
   const cursorRef = useRef(cursor);
   cursorRef.current = cursor;
   const activeRef = useRef(false);
@@ -248,6 +273,10 @@ export function App() {
     !captureActivity.active &&
     !cuaPickerLocked &&
     selectedCuaEntities.length === 0;
+  const backgroundConversations = useMemo(
+    () => resolveBackgroundConversations(backgroundConversationIds, conversationsList),
+    [backgroundConversationIds, conversationsList]
+  );
 
   const releaseOverlayPointerCapture = useCallback(() => {
     cuaPickerInteractiveRef.current = false;
@@ -256,6 +285,34 @@ export function App() {
       window.openPointer.setInteractive(false);
     }
   }, []);
+
+  async function refreshConversationsList() {
+    const list = await window.openPointer.getConversations();
+    setConversationsList(list);
+    return list;
+  }
+
+  function clearBackgroundTerminalError(id: string) {
+    setBackgroundTerminalErrors((current) => {
+      if (!current[id]) return current;
+      const { [id]: _removed, ...next } = current;
+      return next;
+    });
+  }
+
+  function parkConversationInBackground(id: string | null | undefined) {
+    if (!id) return;
+    setBackgroundConversationIds((current) => parkBackgroundConversation(current, id));
+    clearBackgroundTerminalError(id);
+    void refreshConversationsList().catch(() => {
+      /* transient IPC failure; dock will refresh on the next history read */
+    });
+  }
+
+  function removeConversationFromBackground(id: string) {
+    setBackgroundConversationIds((current) => removeBackgroundConversation(current, id));
+    clearBackgroundTerminalError(id);
+  }
 
   useEffect(() => {
     void window.openPointer.getSettings().then((value) => {
@@ -305,20 +362,16 @@ export function App() {
       setCursor(payload);
       setCuaPickerAnchor(payload);
       setWindowPreview(null);
+      setCandidateContextChip(null);
+      setDraggingContextChip(null);
       setCuaPickerLocked(false);
       setCuaPickerPosition(null);
       setActive(true);
 
-      // Wake-up is a transparent preview/discovery state. Right-click is the
-      // explicit transition into the focused chat box that captures the screen.
+      // Wake-up stays parked at the activation point. The shell can still be
+      // clicked, while the rest of the desktop remains pass-through.
       setDetached(false);
-      setDetachedPos(null);
-
-      // Always start a new conversation on wake-up
-      setConversationId(null);
-      setHistoryTurns([]);
-      setConversationMeta(null);
-      setContinueError(null);
+      setDetachedPos(computeShellPosition(payload.localX, payload.localY, pillWidth, pillHeight, false));
 
       window.openPointer.getSettings().then(async (currentSettings) => {
         setSettings(currentSettings);
@@ -326,11 +379,17 @@ export function App() {
 
       setState('composing');
     });
-    const offDeactivate = window.openPointer.onDeactivate(() => {
+    const offDeactivate = window.openPointer.onDeactivate((payload) => {
       lastInteractiveRef.current = false;
       groundingRequestSeqRef.current += 1;
-      if (conversationIdRef.current) {
-        lastConversationIdRef.current = conversationIdRef.current;
+      const currentConversationId = conversationIdRef.current;
+      parkConversationInBackground(currentConversationId);
+      if (payload?.startNewConversationOnNextActivate) {
+        lastConversationIdRef.current = null;
+        lastDeactivatedAtRef.current = 0;
+        newConversationRequestedRef.current = true;
+      } else if (currentConversationId) {
+        lastConversationIdRef.current = currentConversationId;
         lastDeactivatedAtRef.current = Date.now();
       } else if (newConversationRequestedRef.current) {
         lastConversationIdRef.current = null;
@@ -353,6 +412,9 @@ export function App() {
       setSelection(null);
       setCuaEntities([]);
       setWindowPreview(null);
+      setCandidateContextChip(null);
+      setPinnedContextChips([]);
+      setDraggingContextChip(null);
       setCuaPickerAnchor(initialCursor);
       setCuaPickerLocked(false);
       setCuaPickerPosition(null);
@@ -442,13 +504,15 @@ export function App() {
         selecting ||
         Boolean(selectionDrag) ||
         Boolean(panelResizeDrag) ||
-        Boolean(cuaPickerResizeDrag));
+        Boolean(cuaPickerResizeDrag) ||
+        Boolean(draggingContextChip));
 
     function checkTarget(target: EventTarget | null) {
       if (forceInteractive) return true;
       if (!target) return false;
       const el = target as Element;
-      if (!detached) return Boolean(el.closest('.cua-picker-panel'));
+      if (el.closest('.background-process-dock')) return true;
+      if (!detached) return Boolean(el.closest('.openpointer-shell, .cua-picker-panel, .context-candidate-chip, .context-chip-ghost'));
       // If the mouse is over the main container or body, pass clicks through
       if (el.tagName === 'HTML' || el.tagName === 'BODY' || el.classList.contains('app-container')) {
         return false;
@@ -462,7 +526,7 @@ export function App() {
       // from toggling setIgnoreMouseEvents repeatedly, which would
       // interfere with uIOhook's global long-press detection and cause
       // the pill to pop up unexpectedly when the user just moves the mouse.
-      if (shouldCapture && !active) return;
+      if (shouldCapture && !active && backgroundConversations.length === 0) return;
       if (shouldCapture !== lastInteractiveRef.current) {
         lastInteractiveRef.current = shouldCapture;
         window.openPointer.setInteractive(shouldCapture);
@@ -493,6 +557,7 @@ export function App() {
     active,
     menuOpen,
     detached,
+    backgroundConversations.length,
     backendDropdownOpen,
     settingsOpen,
     historyOpen,
@@ -503,12 +568,14 @@ export function App() {
     selectionDrag,
     panelResizeDrag,
     cuaPickerResizeDrag,
+    candidateContextChip,
+    draggingContextChip,
     state
   ]);
 
-  // Esc = deactivate; Right-click = toggle detach/reattach (enter/exit edit) or cancel local selection.
+  // Esc = close this session; Right-click = restore follow mode or cancel local selection.
   useEffect(() => {
-    function toggleEditDialog(contextCursor = cursorRef.current) {
+    function restoreFollowMode() {
       setCuaPickerLocked(false);
       setCuaPickerPosition(null);
       if (menuOpen) {
@@ -526,19 +593,13 @@ export function App() {
         return;
       }
       if (!activeRef.current) return;
-      setDetached((d) => {
-        if (d) {
-          // Reattach shell position (exit edit).
-          setDetachedPos(null);
-          setSelection(null);
-          window.setTimeout(() => releaseOverlayPointerCapture(), 0);
-          return false;
-        }
-        // Detach shell position (enter edit).
-        setDetachedPos(computeShellPosition(contextCursor.localX, contextCursor.localY, pillWidth, pillHeight, true));
+      setDetachedPos(null);
+      setSelection(null);
+      if (detached) {
         window.setTimeout(() => focusPromptInput(inputRef.current), 0);
-        return true;
-      });
+      } else {
+        window.setTimeout(() => releaseOverlayPointerCapture(), 0);
+      }
     }
 
     function onKeyDown(event: KeyboardEvent) {
@@ -546,22 +607,22 @@ export function App() {
       event.preventDefault();
       setSettingsOpen(false);
       window.openPointer.cancelRun();
-      window.openPointer.deactivate();
+      window.openPointer.deactivate({ startNewConversationOnNextActivate: true });
     }
-    // Toggle the edit dialog with the right mouse button. This is a pure
-    // toggle, so it can be triggered to enter/exit any number of times.
+    // Right click is a one-way return to follow mode; it does not close the
+    // active conversation panel.
     function onContextMenu(event: MouseEvent) {
       // Always suppress the native right-click menu on the overlay.
       event.preventDefault();
       if (Date.now() - lastGlobalContextMenuAtRef.current < 300) return;
-      toggleEditDialog();
+      restoreFollowMode();
     }
     const offGlobalContextMenu = window.openPointer.onGlobalContextMenu((payload) => {
       if (!isCursorOnThisOverlay(payload)) return;
       lastGlobalContextMenuAtRef.current = Date.now();
       setCursor(payload);
       setCuaPickerAnchor(payload);
-      toggleEditDialog(payload);
+      restoreFollowMode();
     });
     const offGlobalMouseDown = window.openPointer.onGlobalMouseDown((payload) => {
       if (!isCursorOnThisOverlay(payload)) return;
@@ -577,7 +638,7 @@ export function App() {
       window.removeEventListener('keydown', onKeyDown, { capture: true });
       window.removeEventListener('contextmenu', onContextMenu, { capture: true });
     };
-  }, [isCursorOnThisOverlay, menuOpen, selecting, selectionDrag, detached, pillWidth, pillHeight, releaseOverlayPointerCapture]);
+  }, [isCursorOnThisOverlay, menuOpen, selecting, selectionDrag, detached, releaseOverlayPointerCapture]);
 
   // Live-update selection rectangle while selecting (cursor comes via IPC)
   useEffect(() => {
@@ -1052,26 +1113,44 @@ export function App() {
     await window.openPointer.approveAgentRequest(id, decision);
   }
 
-  async function continueConversation(target: 'terminal' | 'app') {
-    if (!conversationId) return;
+  async function continueConversation(target: 'terminal' | 'app', targetConversationId = conversationId) {
+    if (!targetConversationId) return;
+    if (target === 'app') {
+      await loadConversation(targetConversationId);
+      return;
+    }
     setContinueError(null);
+    clearBackgroundTerminalError(targetConversationId);
+    const targetConversation =
+      targetConversationId === conversationMeta?.id
+        ? conversationMeta
+        : backgroundConversations.find((item) => item.id === targetConversationId) ?? conversationsList.find((item) => item.id === targetConversationId) ?? null;
+    const targetContinuableBackend = resolveContinuableBackend(targetConversation, backend);
     try {
       const res = await window.openPointer.continueConversation({
-        conversationId,
-        backend: continuableBackend?.backend ?? backend,
+        conversationId: targetConversationId,
+        backend: targetContinuableBackend?.backend ?? continuableBackend?.backend ?? backend,
         target
       });
       if (!res.ok) {
         const error = res.error || 'Failed to continue this conversation.';
-        setContinueError(error);
-        setEvents([{ type: 'run.failed', error, recoverable: true }]);
-        setState('failed');
+        if (targetConversationId === conversationIdRef.current) {
+          setContinueError(error);
+          setEvents([{ type: 'run.failed', error, recoverable: true }]);
+          setState('failed');
+        } else {
+          setBackgroundTerminalErrors((current) => ({ ...current, [targetConversationId]: error }));
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to continue this conversation.';
-      setContinueError(message);
-      setEvents([{ type: 'run.failed', error: message, recoverable: true }]);
-      setState('failed');
+      if (targetConversationId === conversationIdRef.current) {
+        setContinueError(message);
+        setEvents([{ type: 'run.failed', error: message, recoverable: true }]);
+        setState('failed');
+      } else {
+        setBackgroundTerminalErrors((current) => ({ ...current, [targetConversationId]: message }));
+      }
     }
   }
 
@@ -1082,12 +1161,14 @@ export function App() {
     const hasSelectionContext = Boolean(selection);
     const cuaEnabled = settings?.cuaMode !== 'off';
     const hasCuaContext = submittedCuaEntities.length > 0;
+    const submittedContextChips = pinnedContextChips;
+    const hasPinnedContext = submittedContextChips.length > 0;
     const submittedWindowContext = windowPreview?.window;
     const submittedWindowPid = windowPreview?.pid;
     const submittedWindowBounds = windowPreview?.bounds;
     const hasWindowContext = Boolean(submittedWindowContext);
-    const instructionText = text || defaultContextInstruction(hasSelectionContext, hasCuaContext, hasWindowContext);
-    if ((!text && !hasSelectionContext && !hasCuaContext && !hasWindowContext) || state === 'submitting') return;
+    const instructionText = text || defaultContextInstruction(hasSelectionContext, hasCuaContext || hasPinnedContext, hasWindowContext || hasPinnedContext);
+    if ((!text && !hasSelectionContext && !hasCuaContext && !hasWindowContext && !hasPinnedContext) || state === 'submitting') return;
     if (!readiness.configured) {
       setEvents([{ type: 'run.failed', error: readiness.detail, recoverable: true }]);
       setState('failed');
@@ -1120,6 +1201,9 @@ export function App() {
     setSelection(null);
     setDraftCuaEntities([]);
     setSelectedCuaEntities([]);
+    setPinnedContextChips([]);
+    setCandidateContextChip(null);
+    setDraggingContextChip(null);
     setCuaPickerLocked(false);
     setCuaPickerPosition(null);
     setHoveredCuaEntityId(null);
@@ -1142,6 +1226,7 @@ export function App() {
         includeScreenshot: hasSelectionContext,
         includeCua: cuaEnabled,
         cuaEntities: submittedCuaEntities,
+        contextChips: submittedContextChips,
         conversationId: currentConversationId ?? undefined
       });
       newConversationRequestedRef.current = false;
@@ -1253,7 +1338,7 @@ export function App() {
       event.preventDefault();
       event.stopPropagation();
       setDetached(true);
-      setDetachedPos(computeShellPosition(cursor.localX, cursor.localY, pillWidth, pillHeight, true));
+      setDetachedPos((current) => current ?? computeShellPosition(cursor.localX, cursor.localY, pillWidth, pillHeight, true));
       window.setTimeout(() => focusPromptInput(inputRef.current), 0);
       return;
     }
@@ -1284,6 +1369,7 @@ export function App() {
   }
 
   function startNewConversation() {
+    parkConversationInBackground(conversationIdRef.current);
     conversationRestoreEpochRef.current += 1;
     newConversationRequestedRef.current = true;
     conversationIdRef.current = null;
@@ -1319,6 +1405,7 @@ export function App() {
   async function loadConversation(id: string) {
     const conv = await window.openPointer.getConversation(id);
     if (conv) {
+      removeConversationFromBackground(conv.id);
       conversationRestoreEpochRef.current += 1;
       newConversationRequestedRef.current = false;
       conversationIdRef.current = conv.id;
@@ -1330,22 +1417,29 @@ export function App() {
       setContinueError(null);
       setEvents([]);
       setPrompt('');
+      setPinnedContextChips([]);
+      setCandidateContextChip(null);
+      setDraggingContextChip(null);
+      setActive(true);
+      setDetached(true);
+      setDetachedPos((current) => current ?? computeShellPosition(cursorRef.current.localX, cursorRef.current.localY, pillWidth, pillHeight, true));
       setState('composing');
       setDraftCuaEntities([]);
       setSelectedCuaEntities([]);
       setCuaPickerLocked(false);
       setCuaPickerPosition(null);
       setHoveredCuaEntityId(null);
+      setMenuOpen(false);
+      setSettingsOpen(false);
       setHistoryOpen(false);
       window.setTimeout(() => focusPromptInput(inputRef.current), 0);
     }
   }
 
-  async function handleDeleteConversation(id: string, event: ReactMouseEvent) {
-    event.stopPropagation();
+  async function deleteConversation(id: string) {
     await window.openPointer.deleteConversation(id);
-    const list = await window.openPointer.getConversations();
-    setConversationsList(list);
+    removeConversationFromBackground(id);
+    await refreshConversationsList();
     if (conversationId === id) {
       conversationIdRef.current = null;
       lastConversationIdRef.current = null;
@@ -1355,6 +1449,11 @@ export function App() {
       setConversationMeta(null);
       setContinueError(null);
     }
+  }
+
+  async function handleDeleteConversation(id: string, event: ReactMouseEvent) {
+    event.stopPropagation();
+    await deleteConversation(id);
   }
 
   function beginSelectionMove(event: ReactMouseEvent<HTMLDivElement>) {
@@ -1381,64 +1480,63 @@ export function App() {
     window.setTimeout(() => focusPromptInput(inputRef.current), 0);
   }
 
-  function selectCuaEntity(entity: PointerEntity, event: ReactMouseEvent<HTMLElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-    const now = Date.now();
-    const last = lastCuaSelectEventRef.current;
-    if (event.type === 'click' && last?.id === entity.id && now - last.at < 300) return;
-    lastCuaSelectEventRef.current = { id: entity.id, at: now, type: event.type };
-    if (!cuaPickerLocked) lockCuaPickerAtCurrentPosition();
-    setDraftCuaEntities((current) =>
-      current.some((selected) => selected.id === entity.id)
-        ? current.filter((selected) => selected.id !== entity.id)
-        : [...current.filter((selected) => selected.id !== entity.id), entity]
-    );
-    setHoveredCuaEntityId(entity.id);
-    setSelection(null);
+  function commitContextChip(chip: ContextChip) {
+    setPinnedContextChips((current) => pinContextChip(current, chip));
+    setCandidateContextChip(null);
     window.setTimeout(() => focusPromptInput(inputRef.current), 0);
   }
 
-  function confirmCuaSelection(event: ReactMouseEvent<HTMLButtonElement>) {
+  function beginContextChipDrag(chip: ContextChip, event: ReactMouseEvent<HTMLElement>) {
     event.preventDefault();
     event.stopPropagation();
-    if (draftCuaEntities.length === 0) return;
-    setSelectedCuaEntities(draftCuaEntities);
-    setDraftCuaEntities([]);
-    setCuaEntities([]);
-    setCuaPickerLocked(false);
-    setCuaPickerPosition(null);
-    setCuaPickerResizeDrag(null);
-    setHoveredCuaEntityId(null);
-    window.setTimeout(() => {
-      focusPromptInput(inputRef.current);
-      releaseOverlayPointerCapture();
-    }, 0);
+    const rect = event.currentTarget.getBoundingClientRect();
+    setDraggingContextChip({
+      chip,
+      x: event.clientX,
+      y: event.clientY,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+      overShelf: isPointOverContextShelf(event.clientX, event.clientY)
+    });
+    setCandidateContextChip(null);
+    if (!lastInteractiveRef.current) {
+      lastInteractiveRef.current = true;
+      window.openPointer.setInteractive(true);
+    }
   }
 
-  function exitCuaSelection(event: ReactMouseEvent<HTMLButtonElement>) {
-    event.preventDefault();
-    event.stopPropagation();
-    cuaHoverLockSuppressedUntilRef.current = Date.now() + CUA_PICKER_HOVER_LOCK_MS;
-    groundingRequestSeqRef.current += 1;
-    setDraftCuaEntities([]);
-    setCuaPickerLocked(false);
-    setCuaPickerPosition(null);
-    setCuaPickerResizeDrag(null);
-    setHoveredCuaEntityId(null);
-    window.setTimeout(() => {
-      focusPromptInput(inputRef.current);
-      releaseOverlayPointerCapture();
-    }, 0);
+  function isPointOverContextShelf(x: number, y: number): boolean {
+    const rect = contextShelfRef.current?.getBoundingClientRect();
+    if (!rect) return false;
+    return x >= rect.left - 28 && x <= rect.right + 28 && y >= rect.top - 24 && y <= rect.bottom + 24;
   }
 
-  const draftCuaEntityIds = useMemo(() => new Set(draftCuaEntities.map((entity) => entity.id)), [draftCuaEntities]);
+  function clearPinnedContextChip(chipId: string) {
+    setPinnedContextChips((current) => removeContextChip(current, chipId));
+    setHoveredAttachment(null);
+    window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+  }
+
+  function swapContextTransferChips() {
+    setPinnedContextChips((current) => {
+      const source = current[0];
+      const target = current[1];
+      if (!source || !target) return current;
+      return [target, source, ...current.slice(2)];
+    });
+    window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+  }
+
   const highlightedSelectedCuaEntities = draftCuaEntities;
 
   const selectedEntity = useMemo(() => {
     return selectedCuaEntities[0];
   }, [selectedCuaEntities]);
   const selectedCuaListItems = useMemo(() => selectedListItemsForContext(selectedCuaEntities), [selectedCuaEntities]);
+  const pinnedContextChipIds = useMemo(() => new Set(pinnedContextChips.map((chip) => chip.id)), [pinnedContextChips]);
+  const showContextRolePreview = pinnedContextChips.length >= 2 && CONTEXT_TRANSFER_PATTERN.test(prompt);
+  const sourceContextChip = showContextRolePreview ? pinnedContextChips[0] : undefined;
+  const targetContextChip = showContextRolePreview ? pinnedContextChips[1] : undefined;
 
   const cuaCandidateCursor = liveCuaPreview ? cursor : cuaPickerAnchor;
   const cuaHighlightRegion = useMemo(() => contextRegionAroundCursor(cuaCandidateCursor), [cuaCandidateCursor]);
@@ -1526,6 +1624,7 @@ export function App() {
   const showCuaPicker =
     active &&
     state === 'composing' &&
+    settings?.cuaDebugOverlayEnabled === true &&
     settings?.cuaMode !== 'off' &&
     !selecting &&
     !selectionDrag &&
@@ -1596,6 +1695,93 @@ export function App() {
         }
       : undefined;
 
+  useEffect(() => {
+    const shouldHideCandidate =
+      !active ||
+      state !== 'composing' ||
+      captureActivity.active ||
+      settingsOpen ||
+      historyOpen ||
+      menuOpen ||
+      selecting ||
+      Boolean(selectionDrag) ||
+      Boolean(selection) ||
+      Boolean(draggingContextChip);
+
+    if (shouldHideCandidate) {
+      setCandidateContextChip(null);
+      return;
+    }
+
+    const candidate = hoveredCuaEntity
+      ? contextChipFromEntity(hoveredCuaEntity)
+      : windowPreview
+        ? contextChipFromWindowPreview(windowPreview)
+        : undefined;
+
+    if (!candidate || pinnedContextChipIds.has(candidate.id)) {
+      setCandidateContextChip(null);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setCandidateContextChip(candidate);
+    }, CONTEXT_CHIP_HOVER_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [
+    active,
+    captureActivity.active,
+    draggingContextChip,
+    historyOpen,
+    hoveredCuaEntity,
+    menuOpen,
+    pinnedContextChipIds,
+    selecting,
+    selection,
+    selectionDrag,
+    settingsOpen,
+    state,
+    windowPreview
+  ]);
+
+  useEffect(() => {
+    if (!draggingContextChip) return;
+
+    function onMouseMove(event: MouseEvent) {
+      const overShelf = isPointOverContextShelf(event.clientX, event.clientY);
+      setDraggingContextChip((current) =>
+        current
+          ? {
+              ...current,
+              x: event.clientX,
+              y: event.clientY,
+              overShelf
+            }
+          : current
+      );
+    }
+
+    function onMouseUp(event: MouseEvent) {
+      const current = draggingContextChipRef.current;
+      if (current && isPointOverContextShelf(event.clientX, event.clientY)) {
+        commitContextChip(current.chip);
+      }
+      setDraggingContextChip(null);
+      if (!detached) {
+        window.setTimeout(() => releaseOverlayPointerCapture(), 0);
+      } else {
+        window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+      }
+    }
+
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [detached, draggingContextChip?.chip.id, releaseOverlayPointerCapture]);
+
   const lockCuaPickerAtCurrentPosition = useCallback(() => {
     groundingRequestSeqRef.current += 1;
     setCuaPickerAnchor(cursorRef.current);
@@ -1636,7 +1822,8 @@ export function App() {
       selecting ||
       Boolean(selectionDrag) ||
       Boolean(panelResizeDrag) ||
-      Boolean(cuaPickerResizeDrag);
+      Boolean(cuaPickerResizeDrag) ||
+      Boolean(draggingContextChip);
 
     if (cursorInsideCuaPicker || cursorInsideCuaDebugBox) {
       cuaPickerInteractiveRef.current = true;
@@ -1668,6 +1855,7 @@ export function App() {
     selecting,
     selection,
     selectionDrag,
+    draggingContextChip,
     settingsOpen
   ]);
 
@@ -1683,6 +1871,7 @@ export function App() {
     modalOpen ||
     Boolean(pillDrag) ||
     Boolean(pillWidthDrag) ||
+    Boolean(draggingContextChip) ||
     selecting ||
     Boolean(selection) ||
     Boolean(panelResizeDrag) ||
@@ -1721,6 +1910,15 @@ export function App() {
         onStopRecording={stopCuaTaskRecording}
         onReplayRecording={replayCuaTaskRecording}
       />
+      <BackgroundProcessDock
+        conversations={backgroundConversations}
+        corner={settings?.backgroundProcessCorner ?? 'bottom-left'}
+        theme={settings?.modalTheme ?? 'blue'}
+        terminalErrors={backgroundTerminalErrors}
+        onOpen={(id) => void loadConversation(id)}
+        onTerminal={(id) => void continueConversation('terminal', id)}
+        onDelete={(id) => void deleteConversation(id)}
+      />
 
       {hold?.state === 'holding' && <HoldRing cursor={hold.cursor} progress={hold.progress} />}
 
@@ -1751,16 +1949,63 @@ export function App() {
             </defs>
           </svg>
 
+          {candidateContextChip && !draggingContextChip && (
+            <div
+              className="context-candidate-chip"
+              style={{
+                left: clampNumber(cursor.localX + 18, 12, Math.max(12, window.innerWidth - 260), 12),
+                top: clampNumber(cursor.localY - 18, 12, Math.max(12, window.innerHeight - 54), 12)
+              }}
+              onMouseDown={(event) => beginContextChipDrag(candidateContextChip, event)}
+              title={contextChipTitle(candidateContextChip)}
+            >
+              <ContextChipGlyph chip={candidateContextChip} />
+              <span className="context-candidate-chip-text">
+                <span>{candidateContextChip.label}</span>
+                {candidateContextChip.subtitle && <small>{candidateContextChip.subtitle}</small>}
+              </span>
+              <button
+                type="button"
+                className="context-candidate-chip-add"
+                onMouseDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  commitContextChip(candidateContextChip);
+                }}
+                aria-label="Pin context"
+                title="Pin context"
+              >
+                +
+              </button>
+            </div>
+          )}
+
+          {draggingContextChip && (
+            <div
+              className={`context-chip-ghost${draggingContextChip.overShelf ? ' is-over-shelf' : ''}`}
+              style={{
+                left: draggingContextChip.x - draggingContextChip.offsetX,
+                top: draggingContextChip.y - draggingContextChip.offsetY
+              }}
+              title={contextChipTitle(draggingContextChip.chip)}
+            >
+              <ContextChipGlyph chip={draggingContextChip.chip} />
+              <span className="context-candidate-chip-text">
+                <span>{draggingContextChip.chip.label}</span>
+                {draggingContextChip.chip.subtitle && <small>{draggingContextChip.chip.subtitle}</small>}
+              </span>
+            </div>
+          )}
+
           {showCuaDebugOverlay &&
             debugCuaBoxEntities.map((entity) => {
               const rect = highlightRectForEntity(entity);
               if (!rect) return null;
-              const isSelected = draftCuaEntityIds.has(entity.id);
               const isHovered = hoveredCuaEntityId === entity.id;
               return (
                 <div
                   key={entity.id}
-                  className={`cua-element-highlight cua-element-candidate${isSelected ? ' is-selected' : ''}${isHovered ? ' is-hovered' : ''}`}
+                  className={`cua-element-highlight cua-element-candidate${isHovered ? ' is-hovered' : ''}`}
                   style={{
                     left: rect.x,
                     top: rect.y,
@@ -1769,8 +2014,6 @@ export function App() {
                   }}
                   onMouseEnter={() => setHoveredCuaEntityId(entity.id)}
                   onMouseLeave={() => setHoveredCuaEntityId(null)}
-                  onMouseDown={(event) => selectCuaEntity(entity, event)}
-                  onClick={(event) => selectCuaEntity(entity, event)}
                   title={entityDebugDetails(entity).join('\n')}
                 />
               );
@@ -1790,25 +2033,18 @@ export function App() {
             <div className="cua-picker-panel" style={cuaPickerStyle}>
               <div className="cua-picker-header">
                 <span>CUA</span>
-                <span>
-                  {draftCuaEntities.length > 0 ? `${draftCuaEntities.length} selected / ` : ''}
-                  {cuaPickerCandidates.length} elements
-                </span>
+                <span>{cuaPickerCandidates.length} debug elements</span>
               </div>
               <div className="cua-picker-list">
                 {cuaPickerCandidates.map((entity) => {
-                  const isSelected = draftCuaEntityIds.has(entity.id);
                   const isHovered = hoveredCuaEntityId === entity.id;
                   const hasRect = hasPreciseCuaRect(entity);
                   return (
-                    <button
+                    <div
                       key={entity.id}
-                      type="button"
-                      className={`cua-picker-row${isSelected ? ' is-selected' : ''}${isHovered ? ' is-hovered' : ''}`}
+                      className={`cua-picker-row${isHovered ? ' is-hovered' : ''}`}
                       onMouseEnter={() => setHoveredCuaEntityId(entity.id)}
                       onMouseLeave={() => setHoveredCuaEntityId(null)}
-                      onMouseDown={(event) => selectCuaEntity(entity, event)}
-                      onClick={(event) => selectCuaEntity(entity, event)}
                       title={entity.text ?? entity.name ?? entity.role ?? entity.kind}
                     >
                       <span className="cua-picker-icon">
@@ -1822,23 +2058,9 @@ export function App() {
                         </span>
                       </span>
                       <span className="cua-picker-kind">{entity.kind}</span>
-                    </button>
+                    </div>
                   );
                 })}
-              </div>
-              <div className="cua-picker-actions">
-                <button type="button" className="cua-picker-action is-secondary" onMouseDown={(event) => event.stopPropagation()} onClick={exitCuaSelection}>
-                  Back
-                </button>
-                <button
-                  type="button"
-                  className="cua-picker-action is-primary"
-                  disabled={draftCuaEntities.length === 0}
-                  onMouseDown={(event) => event.stopPropagation()}
-                  onClick={confirmCuaSelection}
-                >
-                  Confirm
-                </button>
               </div>
               <div className="cua-picker-resize-handle" onMouseDown={onCuaPickerResizeMouseDown} />
             </div>
@@ -1890,7 +2112,7 @@ export function App() {
 
           {!shellHiddenForContextCapture && (
             <section
-              className={`absolute left-0 top-0 pointer-events-auto will-change-transform w-[min(var(--pill-width,520px),calc(100vw-32px))] state-${state}${selecting ? ' is-selecting' : ''}`}
+              className={`openpointer-shell absolute left-0 top-0 pointer-events-auto will-change-transform w-[min(var(--pill-width,520px),calc(100vw-32px))] state-${state}${selecting ? ' is-selecting' : ''}`}
               data-pill-theme={settings?.modalTheme ?? 'blue'}
               style={
                 {
@@ -2297,6 +2519,58 @@ export function App() {
                 {/* Inner Shadow Layer covering the ENTIRE capsule, inheriting border-radius */}
                 <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
 
+                {showContextRolePreview && (
+                  <div className="context-role-preview">
+                    <span>From</span>
+                    <strong>{sourceContextChip?.label}</strong>
+                    {sourceContextChip && (
+                      <button
+                        type="button"
+                        className="context-role-preview-button"
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          clearPinnedContextChip(sourceContextChip.id);
+                        }}
+                        aria-label={`Remove ${sourceContextChip.label}`}
+                        title="Remove source"
+                      >
+                        x
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="context-role-preview-button"
+                      onMouseDown={(event) => event.stopPropagation()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        swapContextTransferChips();
+                      }}
+                      aria-label="Swap source and target"
+                      title="Swap source and target"
+                    >
+                      {'<>'}
+                    </button>
+                    <span>To</span>
+                    <strong>{targetContextChip?.label}</strong>
+                    {targetContextChip && (
+                      <button
+                        type="button"
+                        className="context-role-preview-button"
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          clearPinnedContextChip(targetContextChip.id);
+                        }}
+                        aria-label={`Remove ${targetContextChip.label}`}
+                        title="Remove target"
+                      >
+                        x
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 <div
                   className="flex items-center w-full relative z-1"
                   style={{
@@ -2309,6 +2583,34 @@ export function App() {
                   }}
                   onMouseDown={onPillMouseDown}
                 >
+                  {(pinnedContextChips.length > 0 || draggingContextChip) && (
+                    <div
+                      ref={contextShelfRef}
+                      className={`context-chip-shelf${draggingContextChip?.overShelf ? ' is-drop-target' : ''}${pinnedContextChips.length === 0 ? ' is-empty' : ''}`}
+                    >
+                      {pinnedContextChips.length === 0 && <span className="context-chip-shelf-empty">Drop context</span>}
+                      {pinnedContextChips.map((chip) => (
+                        <div key={chip.id} className="context-chip-token" title={contextChipTitle(chip)}>
+                          <ContextChipGlyph chip={chip} />
+                          <span className="context-chip-token-label">{chip.label}</span>
+                          <button
+                            type="button"
+                            className="context-chip-token-remove"
+                            onMouseDown={(event) => event.stopPropagation()}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              clearPinnedContextChip(chip.id);
+                            }}
+                            aria-label={`Remove ${chip.label}`}
+                            title="Remove context"
+                          >
+                            x
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Context Attachments Indicators */}
                   {(windowPreview?.window || selection || selectedCuaEntities.length > 0) && (
                     <div className="flex items-center gap-1.5 shrink-0 select-none">
@@ -2416,7 +2718,7 @@ export function App() {
                         event.stopPropagation();
                         setSettingsOpen(false);
                         window.openPointer.cancelRun();
-                        window.openPointer.deactivate();
+                        window.openPointer.deactivate({ startNewConversationOnNextActivate: true });
                         return;
                       }
                       if (event.key === 'Enter' && !event.shiftKey) {
@@ -2605,7 +2907,7 @@ export function App() {
                 onClick={() => {
                   setMenuOpen(false);
                   setHistoryOpen(true);
-                  window.openPointer.getConversations().then(setConversationsList);
+                  void refreshConversationsList();
                 }}
               >
                 <span className="bubble-dropdown-icon">H</span>
@@ -2661,6 +2963,12 @@ export function App() {
       )}
     </div>
   );
+}
+
+function ContextChipGlyph({ chip }: { chip: ContextChip }) {
+  if (chip.kind === 'window') return <WindowGlyph size={13} />;
+  if (chip.kind === 'entity') return <EntityKindGlyph kind={chip.entityRefs?.[0]?.kind ?? 'unknown'} size={13} />;
+  return <span className="context-chip-glyph-fallback">{chip.kind === 'selection' ? 'T' : 'R'}</span>;
 }
 
 function ConversationContinueActions({

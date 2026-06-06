@@ -10,8 +10,9 @@ export function PointerContextPreview({ context }: { context: PointerContext }) 
   const targetLabel = target ? entityLabel(target) : undefined;
   const targetRect = formatRect(target?.bbox);
   const windowLabel = context.window?.title || context.window?.app || context.window?.process;
+  const contextChips = context.contextChips ?? [];
 
-  if (!imageSrc && !context.grounding && !target && cuaEntities.length === 0 && !context.windowSnapshot) return null;
+  if (!imageSrc && !context.grounding && !target && cuaEntities.length === 0 && !context.windowSnapshot && contextChips.length === 0) return null;
 
   return (
     <div className="pointer-context-card mt-2 max-w-[85%] self-end overflow-hidden rounded-[var(--radius-pill)] border border-white/12 bg-white/[0.08] text-white/[0.86] shadow-[0_6px_18px_rgba(0,0,0,0.08)]">
@@ -21,6 +22,7 @@ export function PointerContextPreview({ context }: { context: PointerContext }) 
           <span className="context-chip">Text</span>
           {context.visual && <span className="context-chip">Screenshot{cropLabel ? ` ${cropLabel}` : ''}</span>}
           {context.windowSnapshot && <span className="context-chip">Window shot{windowSnapshotLabel ? ` ${windowSnapshotLabel}` : ''}</span>}
+          {contextChips.length > 0 && <span className="context-chip">Contexts ({contextChips.length})</span>}
           {context.grounding && (
             <span className={`context-chip ${context.grounding.status === 'matched' ? 'context-chip-cua' : ''}`}>
               CUA {context.grounding.status}
@@ -71,6 +73,18 @@ export function PointerContextPreview({ context }: { context: PointerContext }) 
               </div>
             ))}
             {cuaEntities.length > 5 && <div className="text-white/[0.48]">+{cuaEntities.length - 5} more CUA elements</div>}
+          </div>
+        )}
+
+        {contextChips.length > 0 && (
+          <div className="grid gap-1">
+            <div className="text-white/[0.52] font-semibold uppercase tracking-[0.03em]">Pinned Context</div>
+            {contextChips.slice(0, 4).map((chip) => (
+              <div key={chip.id} className="context-entity-row">
+                <span className="truncate">{chip.label}</span>
+                <span className="context-entity-meta">{chip.subtitle || chip.kind}</span>
+              </div>
+            ))}
           </div>
         )}
       </div>

@@ -59,6 +59,42 @@ describe('buildAgentContextEnvelope', () => {
     expect(envelope.attachments[1]?.crop).toEqual({ x: 20, y: 40, width: 900, height: 700 });
   });
 
+  it('attaches pinned context chip window screenshots with stable labels', () => {
+    const envelope = buildAgentContextEnvelope({
+      instruction: 'Compare these contexts',
+      mode: 'text',
+      context: {
+        ...context,
+        contextChips: [
+          {
+            id: 'window:123:456',
+            kind: 'window',
+            status: 'pinned',
+            label: 'Notes',
+            subtitle: 'Word',
+            windowRef: { pid: 123, windowId: '456', title: 'Notes', app: 'Word' },
+            windowSnapshot: {
+              screenshotId: 'ctx-window-1',
+              bounds: { x: 0, y: 0, width: 700, height: 500 },
+              imageBase64: 'ctx-abc',
+              mimeType: 'image/png'
+            },
+            createdAt: 1,
+            lastSeenAt: 2
+          }
+        ]
+      }
+    });
+
+    expect(envelope.attachments.map((attachment) => attachment.label)).toEqual(['Pointer context screenshot', 'Context 1: Notes']);
+    expect(envelope.attachments[1]).toMatchObject({
+      scope: 'context',
+      contextChipId: 'window:123:456',
+      crop: { x: 0, y: 0, width: 700, height: 500 }
+    });
+    expect(envelope.attachments[1]?.dataUrl).toContain('data:image/png;base64,ctx-abc');
+  });
+
   it('adds a CUA directive for explicit desktop operation intent', () => {
     const envelope = buildAgentContextEnvelope({
       instruction: 'merge these selected items',
@@ -68,6 +104,29 @@ describe('buildAgentContextEnvelope', () => {
     expect(envelope.routing.toolPolicy).toBe('prefer');
     expect(envelope.cuaDirective?.mode).toBe('prefer');
     expect(envelope.cuaDirective?.target?.bbox).toEqual(context.target?.bbox);
+  });
+
+  it('includes pinned context windows in the CUA app allowlist', () => {
+    const envelope = buildAgentContextEnvelope({
+      instruction: 'copy this to the notes window',
+      mode: 'text',
+      context: {
+        ...context,
+        contextChips: [
+          {
+            id: 'window:99:77',
+            kind: 'window',
+            status: 'pinned',
+            label: 'Draft',
+            windowRef: { pid: 99, windowId: '77', app: 'Word' },
+            createdAt: 1,
+            lastSeenAt: 1
+          }
+        ]
+      }
+    });
+
+    expect(envelope.cuaDirective?.constraints.appAllowlist).toEqual(['PaperApp', 'Word']);
   });
 
   it('adds a CUA directive for Chinese desktop operation intent', () => {

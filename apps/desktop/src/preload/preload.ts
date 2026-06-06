@@ -30,7 +30,7 @@ function on<T>(channel: string, cb: (payload: T) => void): () => void {
 
 const api: DesktopApi = {
   onActivate: (cb) => on<CursorPayload>(OP_CHANNELS.Activate, cb),
-  onDeactivate: (cb) => on<void>(OP_CHANNELS.Deactivate, () => cb()),
+  onDeactivate: (cb) => on(OP_CHANNELS.Deactivate, cb),
   onCursor: (cb) => on<CursorPayload>(OP_CHANNELS.Cursor, cb),
   onGlobalContextMenu: (cb) => on<CursorPayload>(OP_CHANNELS.GlobalContextMenu, cb),
   onGlobalMouseDown: (cb) => on<CursorPayload>(OP_CHANNELS.GlobalMouseDown, cb),
@@ -38,7 +38,7 @@ const api: DesktopApi = {
   onAgentEvent: (cb) => on<AgentEvent>(OP_CHANNELS.AgentEvent, cb),
   onCuaTaskEvent: (cb) => on<CuaTaskEventPayload>(OP_CHANNELS.CuaTaskEvent, cb),
   onCaptureActivity: (cb) => on<CaptureActivityPayload>(OP_CHANNELS.CaptureActivity, cb),
-  deactivate: () => ipcRenderer.send(OP_CHANNELS.RequestDeactivate),
+  deactivate: (options) => ipcRenderer.send(OP_CHANNELS.RequestDeactivate, options),
   ready: () => ipcRenderer.send(OP_CHANNELS.RendererReady),
   setInteractive: (value) => ipcRenderer.send(OP_CHANNELS.SetInteractive, value),
   requestWindowContext: (req) => ipcRenderer.invoke(OP_CHANNELS.RequestWindowContext, req) as Promise<WindowPreviewResponse>,

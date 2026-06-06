@@ -32,6 +32,8 @@ export type AppSettings = {
   cuaPageJavascriptPolicy: 'ask' | 'off';
   activationHotkey: string;
   longPressEnabled: boolean;
+  mouseShakeActivationEnabled: boolean;
+  mouseShakeSensitivity: 'low' | 'medium' | 'high';
   voiceEnabled: boolean;
   pillWidth: number;
   pillHeight: number;
@@ -39,6 +41,7 @@ export type AppSettings = {
   newDialogInterval: number;
   localVlmContextWindow: number;
   modalTheme: 'blue' | 'white' | 'black';
+  backgroundProcessCorner: 'bottom-left' | 'bottom-right' | 'top-left' | 'top-right';
 };
 
 export type HistoryEntry = {
