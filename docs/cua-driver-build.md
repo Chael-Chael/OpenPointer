@@ -2,10 +2,20 @@
 
 OpenPointer's desktop element grounding relies on the **CUA driver** — a
 Rust binary from the vendored [`trycua/cua`](https://github.com/trycua/cua)
-submodule. OpenPointer requires `cua-driver >= 0.5.0` and talks to the driver's
+submodule. OpenPointer pins setup to the `cua-driver-rs-v0.5.2` release and
+talks to the driver's
 Streamable HTTP MCP endpoint. The Electron main process starts `cua-driver serve`
 with `CUA_DRIVER_RS_MCP_HTTP_PORT` and exposes only the OpenPointer broker MCP
 server to agent backends.
+
+The 0.5.2 baseline keeps the 0.5.x HTTP/session model and picks up the Windows
+background-input fixes, including no-z-raise click/type behavior and DPI
+awareness for the shipped binary.
+
+Note: the official Windows 0.5.2 package currently reports `serverVersion` /
+`cua-driver --version` as `0.5.1` because its Rust workspace metadata was not
+bumped. OpenPointer's setup script checks the installed release directory so it
+does not repeatedly reinstall the same 0.5.2 package.
 
 This document covers building that binary so element selection works in
 development and production.
@@ -94,7 +104,7 @@ Common failure modes:
 | Symptom | Likely cause |
 | --- | --- |
 | `CUA driver binary not found` | Binary not built, or `OP_CUA_DRIVER_PATH` not set. |
-| `CUA HTTP driver requires cua-driver >= 0.5.0` | Installed driver is too old for HTTP MCP. |
+| `CUA HTTP driver requires cua-driver serverVersion >= 0.5.1` | Installed driver is too old for OpenPointer's HTTP/session baseline. Run `npm run setup:cua` to install the pinned 0.5.2 release. |
 | `No confident CUA window match` | The window under the cursor scored below the match threshold (e.g. the overlay or a background window). |
 | `CUA matched a window but returned no usable elements` | The patch is not applied, so `get_window_state` returns no `elements` array. |
 | `get_window_state reported an error` | The driver returned an MCP error; see the sidecar stderr for details. |
@@ -109,5 +119,5 @@ cargo build --release --manifest-path vendor/cua/libs/cua-driver/rust/Cargo.toml
 # Then include target/release/cua-driver.exe in the packaged resources directory.
 ```
 
-The packaged app must include a driver new enough to support `cua-driver serve`
-with `CUA_DRIVER_RS_MCP_HTTP_PORT`.
+The packaged app must include `cua-driver >= 0.5.2` so `cua-driver serve` works
+with `CUA_DRIVER_RS_MCP_HTTP_PORT` and the Windows no-z-raise input path.

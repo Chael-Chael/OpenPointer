@@ -21,6 +21,10 @@ export type CuaHealth = {
   lastError?: string;
 };
 
+// The cua-driver-rs-v0.5.2 Windows package still reports serverVersion 0.5.1
+// from its Cargo metadata, so runtime gating must accept that reported version.
+const REQUIRED_CUA_DRIVER_SERVER_VERSION = '0.5.1';
+
 export class CuaSidecarManager {
   private proc: ChildProcess | null = null;
   private startPromise: Promise<void> | null = null;
@@ -122,12 +126,15 @@ export class CuaSidecarManager {
   private async startProcess(): Promise<void> {
     const binary = resolveCuaDriverPath(this.repoRoot);
     if (!binary) {
-      this.lastError = 'CUA driver binary not found. Install cua-driver >= 0.5.0 or set OP_CUA_DRIVER_PATH.';
+      this.lastError = 'CUA driver binary not found. Install cua-driver release 0.5.2 or set OP_CUA_DRIVER_PATH.';
       throw new Error(this.lastError);
     }
     this.driverPath = binary;
 
-    const pipeName = process.platform === 'win32' ? `\\\\.\\pipe\\openpointer-cua-${process.pid}-${this.port}` : join(app.getPath('userData'), `openpointer-cua-${process.pid}-${this.port}.sock`);
+    const pipeName =
+      process.platform === 'win32'
+        ? `\\\\.\\pipe\\openpointer-cua-${process.pid}-${this.port}`
+        : join(app.getPath('userData'), `openpointer-cua-${process.pid}-${this.port}.sock`);
     const proc = spawn(binary, ['serve', '--socket', pipeName], {
       cwd: this.repoRoot,
       windowsHide: true,
@@ -164,8 +171,10 @@ export class CuaSidecarManager {
         120
       )) as { serverInfo?: { version?: string } };
       this.serverVersion = initialized.serverInfo?.version ?? '';
-      if (!isAtLeastVersion(this.serverVersion, '0.5.0')) {
-        throw new Error(`CUA HTTP driver requires cua-driver >= 0.5.0; found ${this.serverVersion || 'unknown'}.`);
+      if (!isAtLeastVersion(this.serverVersion, REQUIRED_CUA_DRIVER_SERVER_VERSION)) {
+        throw new Error(
+          `CUA HTTP driver requires cua-driver serverVersion >= ${REQUIRED_CUA_DRIVER_SERVER_VERSION}; found ${this.serverVersion || 'unknown'}. Install cua-driver release 0.5.2.`
+        );
       }
       const listed = (await this.request('tools/list', {}, 8000)) as { tools?: unknown[] };
       this.toolCount = listed.tools?.length ?? 0;

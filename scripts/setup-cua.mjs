@@ -6,7 +6,7 @@
 // It is idempotent and safe to re-run. Steps:
 //   1. Ensure the vendor/cua submodule is initialised.
 //   2. Apply the get_window_state elements patch (skipped if already applied).
-//   3. Download the prebuilt cua-driver release binary (Windows/macOS/Linux).
+//   3. Download the pinned prebuilt cua-driver release binary (Windows/macOS/Linux).
 //
 // The downloaded release driver works with OpenPointer's release-compat
 // grounding path (tree_markdown parsing). For pixel-precise element bounds you
@@ -14,11 +14,12 @@
 // pass --build to attempt that when cargo is available.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
+const CUA_DRIVER_TARGET_VERSION = '0.5.2';
 const wantBuild = process.argv.includes('--build');
 const patchOnly = process.argv.includes('--patch-only');
 
@@ -71,30 +72,68 @@ function applyPatch() {
 }
 
 // Step 3: download the prebuilt cua-driver release binary.
-function driverInstalled() {
+function installedDriverPath() {
   if (process.platform === 'win32') {
     const local = process.env.LOCALAPPDATA;
-    return Boolean(local && existsSync(join(local, 'Programs', 'Cua', 'cua-driver', 'bin', 'cua-driver.exe')));
+    const driver = local ? join(local, 'Programs', 'Cua', 'cua-driver', 'bin', 'cua-driver.exe') : '';
+    return driver && existsSync(driver) ? driver : undefined;
   }
   const home = process.env.HOME || '';
-  return existsSync(join(home, '.cua-driver', 'packages', 'current', 'cua-driver'));
+  const driver = join(home, '.cua-driver', 'packages', 'current', 'cua-driver');
+  return existsSync(driver) ? driver : undefined;
+}
+
+function installedDriverVersion(driverPath) {
+  if (!driverPath) return undefined;
+  const version = runQuiet(driverPath, ['--version']);
+  if (version.code !== 0) return undefined;
+  return /cua-driver\s+(\d+\.\d+\.\d+)/.exec(version.out)?.[1];
+}
+
+function installedDriverReleaseVersion(driverPath) {
+  if (!driverPath) return undefined;
+  try {
+    const resolved = realpathSync(driverPath);
+    return /[\\/]releases[\\/](\d+\.\d+\.\d+)-/.exec(resolved)?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+function isAtLeastVersion(actual, required) {
+  const a = actual.split('.').map((part) => Number.parseInt(part, 10));
+  const r = required.split('.').map((part) => Number.parseInt(part, 10));
+  for (let index = 0; index < Math.max(a.length, r.length); index += 1) {
+    const av = Number.isFinite(a[index]) ? a[index] : 0;
+    const rv = Number.isFinite(r[index]) ? r[index] : 0;
+    if (av > rv) return true;
+    if (av < rv) return false;
+  }
+  return true;
 }
 
 function installDriver() {
-  if (driverInstalled()) {
-    log('driver', 'cua-driver already installed.');
+  const currentDriver = installedDriverPath();
+  const currentVersion = installedDriverVersion(currentDriver);
+  const currentReleaseVersion = installedDriverReleaseVersion(currentDriver);
+  if (
+    (currentVersion && isAtLeastVersion(currentVersion, CUA_DRIVER_TARGET_VERSION)) ||
+    (currentReleaseVersion && isAtLeastVersion(currentReleaseVersion, CUA_DRIVER_TARGET_VERSION))
+  ) {
+    const suffix = currentReleaseVersion && currentVersion !== currentReleaseVersion ? ` (binary reports ${currentVersion ?? 'unknown'})` : '';
+    log('driver', `cua-driver release ${currentReleaseVersion ?? currentVersion} already installed${suffix}.`);
     return;
   }
   const scriptsDir = join(repoRoot, 'vendor', 'cua', 'libs', 'cua-driver', 'scripts');
   if (process.platform === 'win32') {
     const ps1 = join(scriptsDir, 'install.ps1');
-    log('driver', 'downloading prebuilt cua-driver (Windows) ...');
-    const code = run('powershell', ['-ExecutionPolicy', 'Bypass', '-File', ps1, '-NoAutoStart', '-NoPathUpdate']);
+    log('driver', `installing prebuilt cua-driver ${CUA_DRIVER_TARGET_VERSION} (Windows) ...`);
+    const code = run('powershell', ['-ExecutionPolicy', 'Bypass', '-File', ps1, '-Release', CUA_DRIVER_TARGET_VERSION, '-NoAutoStart', '-NoPathUpdate']);
     if (code !== 0) log('driver', 'WARNING: install.ps1 exited non-zero; check output above.');
   } else {
     const sh = join(scriptsDir, 'install.sh');
-    log('driver', 'downloading prebuilt cua-driver (Unix) ...');
-    const code = run('bash', [sh]);
+    log('driver', `installing prebuilt cua-driver ${CUA_DRIVER_TARGET_VERSION} (Unix) ...`);
+    const code = run('bash', [sh], { env: { ...process.env, CUA_DRIVER_RS_VERSION: CUA_DRIVER_TARGET_VERSION } });
     if (code !== 0) log('driver', 'WARNING: install.sh exited non-zero; check output above.');
   }
 }
@@ -122,7 +161,7 @@ function main() {
     }
     installDriver();
     if (wantBuild) buildDriver();
-    log('done', 'CUA setup complete. Set OP_CUA_MODE=prefer (or use the in-app setting) and run `npm run dev`.');
+    log('done', `CUA setup complete with cua-driver ${CUA_DRIVER_TARGET_VERSION}. Set OP_CUA_MODE=prefer (or use the in-app setting) and run \`npm run dev\`.`);
   } catch (error) {
     console.error(`\n[setup:cua] FAILED: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
