@@ -22,7 +22,7 @@ export type BackendReadiness = {
   tone: StatusTone;
 };
 
-export const selectableBackends: AgentBackendId[] = ['auto', 'local-vlm', 'hermes', 'opencode', 'claude-agent', 'codex'];
+export const selectableBackends: AgentBackendId[] = ['auto', 'local-vlm', 'hermes', 'opencode', 'openclaw', 'claude-agent', 'codex'];
 
 export const emptySecretDrafts: SecretDrafts = {
   localVlmApiKey: '',

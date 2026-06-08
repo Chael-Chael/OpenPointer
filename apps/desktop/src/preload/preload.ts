@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { AgentEvent } from '@openpointer/core';
+import type { AgentEvent, CapabilitySnapshot } from '@openpointer/core';
 import type { AppSettings } from '@openpointer/storage';
 import { OP_CHANNELS } from '../shared/ipc.js';
 import type {
@@ -36,6 +36,7 @@ const api: DesktopApi = {
   onGlobalMouseDown: (cb) => on<CursorPayload>(OP_CHANNELS.GlobalMouseDown, cb),
   onHoldProgress: (cb) => on<HoldProgressPayload>(OP_CHANNELS.HoldProgress, cb),
   onAgentEvent: (cb) => on<AgentEvent>(OP_CHANNELS.AgentEvent, cb),
+  onCapabilitySnapshotChanged: (cb) => on<CapabilitySnapshot>(OP_CHANNELS.CapabilitySnapshotChanged, cb),
   onCuaTaskEvent: (cb) => on<CuaTaskEventPayload>(OP_CHANNELS.CuaTaskEvent, cb),
   onCaptureActivity: (cb) => on<CaptureActivityPayload>(OP_CHANNELS.CaptureActivity, cb),
   deactivate: (options) => ipcRenderer.send(OP_CHANNELS.RequestDeactivate, options),
@@ -57,6 +58,8 @@ const api: DesktopApi = {
   cancelRun: () => ipcRenderer.send(OP_CHANNELS.CancelRun),
   getSettings: () => ipcRenderer.invoke(OP_CHANNELS.GetSettings) as Promise<AppSettings>,
   saveSettings: (patch: SaveSettingsPatch) => ipcRenderer.invoke(OP_CHANNELS.SaveSettings, patch) as Promise<AppSettings>,
+  getCapabilitySnapshot: () => ipcRenderer.invoke(OP_CHANNELS.GetCapabilitySnapshot) as Promise<CapabilitySnapshot>,
+  refreshCapabilities: () => ipcRenderer.invoke(OP_CHANNELS.RefreshCapabilities) as Promise<CapabilitySnapshot>,
   getConversations: () => ipcRenderer.invoke(OP_CHANNELS.GetConversations),
   getConversation: (id) => ipcRenderer.invoke(OP_CHANNELS.GetConversation, id),
   deleteConversation: (id) => ipcRenderer.invoke(OP_CHANNELS.DeleteConversation, id),

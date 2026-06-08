@@ -6,7 +6,7 @@ import {
   type AgentBridgeRegistryConfig,
   type ApprovalDecision
 } from '@openpointer/agent-bridge';
-import type { AgentBackendId, AgentContextEnvelope, AgentEvent, ChatTurn, Conversation, PointerContext } from '@openpointer/core';
+import type { AgentBackendId, AgentContextEnvelope, AgentEvent, CapabilityHints, ChatTurn, Conversation, PointerContext } from '@openpointer/core';
 import type { AppSettings } from '@openpointer/storage';
 import type { CuaToolResult } from './cua-sidecar.js';
 import type { CuaBroker } from './cua-broker.js';
@@ -42,6 +42,7 @@ export type SubmitHarnessInput = {
   mode: AgentContextEnvelope['instruction']['mode'];
   context: PointerContext;
   backend?: AgentBackendId;
+  capabilityHints?: CapabilityHints;
   conversationId?: string;
 };
 
@@ -118,6 +119,7 @@ export class OpenPointerHarness {
       ...initialEnvelope,
       history: backend === 'claude-agent' ? undefined : initialEnvelope.history,
       routing: { ...initialEnvelope.routing, backend },
+      capabilityHints: input.capabilityHints,
       toolServers: cuaBrokerSession
         ? [
             {

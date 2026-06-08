@@ -138,7 +138,14 @@ export class CuaSidecarManager {
     const proc = spawn(binary, ['serve', '--socket', pipeName], {
       cwd: this.repoRoot,
       windowsHide: true,
-      env: { ...process.env, CUA_DRIVER_RS_MCP_HTTP_PORT: String(this.port) },
+      env: {
+        ...process.env,
+        CUA_DRIVER_RS_MCP_HTTP_PORT: String(this.port),
+        // The official cua-driver-rs-v0.5.2 Windows package still reports
+        // CARGO_PKG_VERSION=0.5.1, so its startup update check repeatedly
+        // announces 0.5.2 while we are already running the 0.5.2 release.
+        CUA_DRIVER_RS_UPDATE_CHECK: 'false'
+      },
       stdio: ['ignore', 'pipe', 'pipe']
     });
     this.proc = proc;

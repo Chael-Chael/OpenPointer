@@ -1,0 +1,164 @@
+diff --git a/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs b/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs
+index 21322fdb..96068882 100644
+--- a/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs
++++ b/libs/cua-driver/rust/crates/platform-windows/src/tools/impl_.rs
+@@ -5424,6 +5424,151 @@ impl Tool for DebugWindowInfoTool {
+     }
+ }
+ 
++pub struct GetSelectedTextTool;
++static GET_SELECTED_TEXT_DEF: std::sync::OnceLock<ToolDef> = std::sync::OnceLock::new();
++
++#[async_trait]
++impl Tool for GetSelectedTextTool {
++    fn def(&self) -> &ToolDef {
++        GET_SELECTED_TEXT_DEF.get_or_init(|| ToolDef {
++            name: "get_selected_text".into(),
++            description: "Read the current text selection from the focused UIA element in the target window via `IUIAutomationTextPattern::GetSelection()`. This is a clipboard-free path. If the target exposes TextPattern but there is no highlighted text, the tool returns an empty result instead of falling back to copy shortcuts.".into(),
++            input_schema: json!({"type":"object","required":["pid","window_id"],"properties":{
++                "pid":{"type":"integer","description":"Target process ID."},
++                "window_id":{"type":"integer","description":"Target top-level HWND."}
++            },"additionalProperties":false}),
++            read_only: true,
++            destructive: false,
++            idempotent: true,
++            open_world: false,
++        })
++    }
++
++    async fn invoke(&self, args: Value) -> ToolResult {
++        let pid_v: u32 = match args.get("pid").and_then(|v| v.as_u64()) {
++            Some(p) if p > 0 && p <= u32::MAX as u64 => p as u32,
++            _ => return ToolResult::error("get_selected_text: missing or invalid `pid`".to_string()),
++        };
++        let hwnd_v: u64 = match args.get("window_id").and_then(|v| v.as_u64()) {
++            Some(h) if h > 0 => h,
++            _ => return ToolResult::error("get_selected_text: missing or invalid `window_id`".to_string()),
++        };
++
++        let outcome = tokio::task::spawn_blocking(move || -> anyhow::Result<serde_json::Value> {
++            use windows::core::Interface;
++            use windows::Win32::Foundation::HWND;
++            use windows::Win32::System::Com::{
++                CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
++                COINIT_APARTMENTTHREADED,
++            };
++            use windows::Win32::UI::Accessibility::{
++                CUIAutomation, IUIAutomation, IUIAutomationElement, IUIAutomationTextPattern,
++                IUIAutomationTextRangeArray, UIA_TextPatternId,
++            };
++            use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GA_ROOT};
++
++            fn normalized_root(hwnd: HWND) -> u64 {
++                let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
++                if root.0.is_null() {
++                    hwnd.0 as u64
++                } else {
++                    root.0 as u64
++                }
++            }
++
++            let coinit_ok = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok() };
++            let result = (|| unsafe {
++                let automation: IUIAutomation =
++                    CoCreateInstance(&CUIAutomation, None, CLSCTX_INPROC_SERVER)
++                        .map_err(|e| anyhow::anyhow!("CoCreateInstance(CUIAutomation) failed: {e}"))?;
++                let focused: IUIAutomationElement = automation
++                    .GetFocusedElement()
++                    .map_err(|e| anyhow::anyhow!("GetFocusedElement failed: {e}"))?;
++
++                let focused_pid = focused
++                    .CurrentProcessId()
++                    .map_err(|e| anyhow::anyhow!("CurrentProcessId failed: {e}"))?;
++                if focused_pid <= 0 || focused_pid as u32 != pid_v {
++                    return Err(anyhow::anyhow!(
++                        "focused element pid {focused_pid} did not match target pid {pid_v}"
++                    ));
++                }
++
++                let focused_hwnd = focused
++                    .CurrentNativeWindowHandle()
++                    .map_err(|e| anyhow::anyhow!("CurrentNativeWindowHandle failed: {e}"))?;
++                if focused_hwnd.0.is_null() {
++                    return Err(anyhow::anyhow!("focused element had no native window handle"));
++                }
++
++                let focused_root = normalized_root(focused_hwnd);
++                let target_root = normalized_root(HWND(hwnd_v as *mut _));
++                if focused_root != target_root {
++                    return Err(anyhow::anyhow!(
++                        "focused element root hwnd {focused_root} did not match target root hwnd {target_root}"
++                    ));
++                }
++
++                let pattern_raw = focused
++                    .GetCurrentPattern(UIA_TextPatternId)
++                    .map_err(|e| anyhow::anyhow!("focused element does not support TextPattern: {e}"))?;
++                let text_pattern: IUIAutomationTextPattern = pattern_raw
++                    .cast()
++                    .map_err(|e| anyhow::anyhow!("cast to IUIAutomationTextPattern failed: {e}"))?;
++                let ranges: IUIAutomationTextRangeArray = text_pattern
++                    .GetSelection()
++                    .map_err(|e| anyhow::anyhow!("TextPattern.GetSelection failed: {e}"))?;
++                let count = ranges
++                    .Length()
++                    .map_err(|e| anyhow::anyhow!("selection Length failed: {e}"))?;
++
++                let mut parts: Vec<String> = Vec::new();
++                for i in 0..count {
++                    let range = ranges
++                        .GetElement(i)
++                        .map_err(|e| anyhow::anyhow!("selection GetElement({i}) failed: {e}"))?;
++                    let text = range
++                        .GetText(-1)
++                        .map_err(|e| anyhow::anyhow!("selection GetText(-1) failed: {e}"))?
++                        .to_string();
++                    if !text.is_empty() {
++                        parts.push(text);
++                    }
++                }
++
++                let text = parts.join("");
++                Ok(json!({
++                    "status": if text.is_empty() { "empty" } else { "matched" },
++                    "text": text,
++                    "pid": pid_v,
++                    "window_id": hwnd_v,
++                    "source": "uia-textpattern",
++                }))
++            })();
++
++            if coinit_ok {
++                unsafe { CoUninitialize(); }
++            }
++            result
++        }).await;
++
++        match outcome {
++            Ok(Ok(payload)) => {
++                let status = payload.get("status").and_then(|v| v.as_str()).unwrap_or("matched");
++                let text = payload.get("text").and_then(|v| v.as_str()).unwrap_or_default();
++                let summary = if status == "empty" {
++                    "No selected text was available via UIA TextPattern.".to_string()
++                } else {
++                    format!("Selected text via UIA TextPattern: {text}")
++                };
++                ToolResult::text(summary).with_structured(payload)
++            }
++            Ok(Err(e)) => ToolResult::error(format!("get_selected_text: {e}")),
++            Err(e) => ToolResult::error(format!("get_selected_text: join error: {e}")),
++        }
++    }
++}
++
+ // ── registry builder ──────────────────────────────────────────────────────────
+ 
+ pub fn build_registry(compat: bool) -> ToolRegistry {
+@@ -5459,6 +5604,7 @@ pub fn build_registry(compat: bool) -> ToolRegistry {
+     r.register(Box::new(KillAppTool));
+     r.register(Box::new(BringToFrontTool));
+     r.register(Box::new(DebugWindowInfoTool));
++    r.register(Box::new(GetSelectedTextTool));
+     r.register(Box::new(ClickTool { state: state.clone() }));
+     r.register(Box::new(DoubleClickTool { state: state.clone() }));
+     r.register(Box::new(RightClickTool { state: state.clone() }));

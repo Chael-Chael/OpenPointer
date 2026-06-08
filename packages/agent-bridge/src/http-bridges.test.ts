@@ -1,6 +1,9 @@
 import { createServer } from 'node:http';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CodexBridge, HermesBridge } from './http-bridges.js';
+import { CodexBridge, HermesBridge, OpenClawBridge, OpenCodeBridge } from './http-bridges.js';
 import { buildAgentContextEnvelope } from './routing.js';
 import type { PointerContext } from '@openpointer/core';
 
@@ -58,6 +61,89 @@ describe('HermesBridge', () => {
     const events = [];
     for await (const event of bridge.run(envelope)) events.push(event);
     expect(events.map((event) => event.type)).toEqual(['tool.discovery', 'run.started', 'assistant.delta', 'tool.started', 'run.completed']);
+  });
+});
+
+describe('OpenCodeBridge', () => {
+  it('posts OpenPointer context to the native OpenCode session API', async () => {
+    const sessionRequestBodies: Array<Record<string, unknown>> = [];
+    const messageRequestBodies: Array<Record<string, unknown>> = [];
+    const server = createServer((req, res) => {
+      if (req.method === 'POST' && req.url === '/session/ses_123/message') {
+        const chunks: Buffer[] = [];
+        req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        req.on('end', () => {
+          messageRequestBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>);
+          res.setHeader('Content-Type', 'application/json');
+          res.end(
+            JSON.stringify({
+              info: { id: 'msg_123', sessionID: 'ses_123' },
+              parts: [{ type: 'text', text: 'done' }]
+            })
+          );
+        });
+        return;
+      }
+      if (req.method === 'POST' && req.url?.startsWith('/session')) {
+        const chunks: Buffer[] = [];
+        req.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        req.on('end', () => {
+          sessionRequestBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown>);
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ id: 'ses_123', title: 'OpenPointer' }));
+        });
+        return;
+      }
+      res.statusCode = 404;
+      res.end();
+    });
+    servers.push(server);
+    const port = await new Promise<number>((resolve) => {
+      server.listen(0, () => {
+        const address = server.address();
+        resolve(typeof address === 'object' && address ? address.port : 0);
+      });
+    });
+    const bridge = new OpenCodeBridge({ baseUrl: `http://127.0.0.1:${port}`, cwd: '/repo', model: 'openpointer/mimo-v2.5' });
+    const envelope = buildAgentContextEnvelope({ instruction: 'fix the bug', mode: 'text', context, backend: 'opencode' });
+    const events = [];
+    for await (const event of bridge.run(envelope)) events.push(event);
+
+    const sessionRequestBody = sessionRequestBodies[0];
+    const messageRequestBody = messageRequestBodies[0];
+    if (!sessionRequestBody || !messageRequestBody) throw new Error('OpenCode test server did not receive expected requests.');
+    const sessionModel = sessionRequestBody.model as Record<string, unknown>;
+    const messageModel = messageRequestBody.model as Record<string, unknown>;
+    expect(sessionModel.providerID).toBe('openpointer');
+    expect(sessionModel.id).toBe('mimo-v2.5');
+    expect(messageModel.providerID).toBe('openpointer');
+    expect(messageModel.modelID).toBe('mimo-v2.5');
+    expect(events.map((event) => event.type)).toEqual(['tool.discovery', 'run.started', 'backend.session', 'assistant.delta', 'run.completed']);
+  });
+});
+
+describe('OpenClawBridge', () => {
+  it('runs the OpenClaw CLI agent JSON mode and maps its text payload', async () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'openpointer-openclaw-test-'));
+    const scriptPath = join(tempDir, 'fake-openclaw.mjs');
+    writeFileSync(scriptPath, 'console.log(JSON.stringify({ payloads: [{ text: "openclaw done" }] }));\n', 'utf8');
+
+    const bridge = new OpenClawBridge({
+      baseUrl: 'ws://127.0.0.1:18789',
+      executablePath: process.execPath,
+      executableArgs: [scriptPath],
+      cwd: tempDir,
+      model: 'openpointer/mimo-v2.5',
+      agent: 'main',
+      timeoutMs: 30000
+    });
+    const envelope = buildAgentContextEnvelope({ instruction: 'fix the bug', mode: 'text', context, backend: 'openclaw' });
+    const events = [];
+    for await (const event of bridge.run(envelope, { sessionKey: 'desktop:app:42' })) events.push(event);
+
+    expect(events.map((event) => event.type)).toEqual(['tool.discovery', 'run.started', 'backend.session', 'assistant.delta', 'run.completed']);
+    expect(events.find((event) => event.type === 'assistant.delta')).toMatchObject({ text: 'openclaw done' });
+    expect(events.find((event) => event.type === 'backend.session')).toMatchObject({ backend: 'openclaw', sessionId: 'agent:main:desktop:app:42' });
   });
 });
 

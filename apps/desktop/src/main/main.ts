@@ -27,6 +27,7 @@ import type {
   SubmitInstructionRequest
 } from '../shared/types.js';
 import { CuaBroker } from './cua-broker.js';
+import { CapabilityDiscoveryService } from './capability-discovery.js';
 import { CodexAdapterManager } from './codex-adapter.js';
 import { CuaGroundingProvider } from './cua-grounding.js';
 import { CuaSidecarManager, type CuaToolResult } from './cua-sidecar.js';
@@ -36,6 +37,7 @@ import { getClaudeAgentApiKey, getCodexApiKey, getHermesApiKey, getLocalVlmApiKe
 import { backendSessionKey, ChatHistoryManager } from './history.js';
 import { MouseShakeActivationController } from './mouse-shake-activation.js';
 import { OpenPointerHarness } from './openpointer-harness.js';
+import { buildResumeTerminalSpawn } from './terminal-resume.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '../../../..');
@@ -63,6 +65,7 @@ const codexAdapter = new CodexAdapterManager(repoRoot);
 const cuaTaskManager = new CuaTaskManager(4);
 const chatHistory = new ChatHistoryManager();
 const mouseShakeActivation = new MouseShakeActivationController();
+const capabilityDiscovery = new CapabilityDiscoveryService();
 
 // Single source of truth for the CUA tools exposed to the agent. This list is
 // both advertised to the model (envelope.toolServers[].tools) and enforced by
@@ -347,6 +350,19 @@ function currentSettings(): AppSettings {
   return cachedSettings;
 }
 
+function capabilityDiscoveryOptions() {
+  return {
+    homeDir: app.getPath('home'),
+    appDataDir: app.getPath('appData')
+  };
+}
+
+async function refreshCapabilitiesAndBroadcast(): Promise<ReturnType<CapabilityDiscoveryService['getSnapshot']>> {
+  const snapshot = await capabilityDiscovery.refresh(capabilityDiscoveryOptions());
+  broadcast(OP_CHANNELS.CapabilitySnapshotChanged, snapshot);
+  return snapshot;
+}
+
 // Escape closes the overlay. We register it as a global shortcut only while
 // active so Electron exclusively captures the key (via RegisterHotKey on
 // Windows) and it never leaks through to the focused app's own Esc shortcuts.
@@ -592,6 +608,7 @@ function registerIpc(): void {
     const displayId = displayIdForWebContents(event.sender);
     const payload = cursorPayload();
     if (displayId === undefined || payload.displayId === displayId) event.sender.send(OP_CHANNELS.Cursor, payload);
+    event.sender.send(OP_CHANNELS.CapabilitySnapshotChanged, capabilityDiscovery.getSnapshot());
     if (active && displayId !== undefined && activeDisplayId === displayId) {
       event.sender.send(OP_CHANNELS.Activate, lastActivationCursor ?? payload);
     } else {
@@ -611,6 +628,8 @@ function registerIpc(): void {
     void codexAdapter.ensure(next);
     return next;
   });
+  ipcMain.handle(OP_CHANNELS.GetCapabilitySnapshot, () => capabilityDiscovery.getSnapshot());
+  ipcMain.handle(OP_CHANNELS.RefreshCapabilities, async () => refreshCapabilitiesAndBroadcast());
   ipcMain.handle(OP_CHANNELS.CuaHealth, () => {
     configureCuaRuntime(getSettings());
     return cuaSidecar.getHealth();
@@ -764,6 +783,7 @@ function registerIpc(): void {
       mode: req.mode,
       context,
       backend: req.backend,
+      capabilityHints: req.capabilityHints,
       conversationId: req.conversationId
     });
   });
@@ -839,8 +859,8 @@ async function continueConversation(req: ContinueConversationRequest): Promise<C
 function resolveContinuableBackend(conversation: Conversation, requested?: AgentBackendId): { backend: AgentBackendId; sessionId: string } | null {
   const candidates: AgentBackendId[] =
     requested && requested !== 'auto' && requested !== 'local-vlm' && requested !== 'mock'
-      ? [requested, 'claude-agent', 'codex', 'hermes', 'opencode']
-      : ['claude-agent', 'codex', 'hermes', 'opencode'];
+      ? [requested, 'claude-agent', 'codex', 'hermes', 'opencode', 'openclaw']
+      : ['claude-agent', 'codex', 'hermes', 'opencode', 'openclaw'];
   const seen = new Set<AgentBackendId>();
   for (const backend of candidates) {
     if (seen.has(backend)) continue;
@@ -878,23 +898,27 @@ function resumeCommandForBackend(
     };
   }
 
+  if (backend === 'openclaw') {
+    const args = ['chat', '--session', sessionId];
+    return {
+      executable: settings.openclawExecutablePath?.trim() || 'openclaw',
+      args,
+      title: 'OpenPointer OpenClaw'
+    };
+  }
+
   return null;
 }
 
 function openResumeTerminal(executable: string, args: string[], title: string): void {
-  const commandLine = ['cd', '/d', quoteCmdArg(repoRoot), '&&', quoteCmdArg(executable), ...args.map(quoteCmdArg)].join(' ');
-  const child = spawn('cmd.exe', ['/d', '/c', 'start', title, 'cmd.exe', '/k', commandLine], {
+  const terminal = buildResumeTerminalSpawn({ executable, args, title }, repoRoot);
+  const child = spawn(terminal.executable, terminal.args, {
     cwd: repoRoot,
     detached: true,
     stdio: 'ignore',
     windowsHide: true
   });
   child.unref();
-}
-
-function quoteCmdArg(value: string): string {
-  if (/^[A-Za-z0-9_./:=+-]+$/.test(value)) return value;
-  return `"${value.replace(/"/g, '""')}"`;
 }
 
 function backendDisplayName(backend: AgentBackendId): string {
@@ -907,6 +931,8 @@ function backendDisplayName(backend: AgentBackendId): string {
       return 'Hermes';
     case 'opencode':
       return 'OpenCode';
+    case 'openclaw':
+      return 'OpenClaw';
     default:
       return backend;
   }
@@ -925,6 +951,16 @@ function bridgeConfig(settings = getSettings()): AgentBridgeRegistryConfig {
       : undefined,
     hermes: settings.hermesBaseUrl ? { baseUrl: settings.hermesBaseUrl, apiKey: getHermesApiKey() } : undefined,
     opencode: settings.opencodeBaseUrl ? { baseUrl: settings.opencodeBaseUrl, apiKey: getOpenCodeApiKey() } : undefined,
+    openclaw: settings.openclawGatewayUrl
+      ? {
+          baseUrl: settings.openclawGatewayUrl,
+          executablePath: settings.openclawExecutablePath || undefined,
+          cwd: repoRoot,
+          model: settings.openclawModel || undefined,
+          agent: settings.openclawAgent || 'main',
+          timeoutMs: 600000
+        }
+      : undefined,
     claudeAgent: {
       enabled: settings.claudeAgentEnabled,
       apiKey: getClaudeAgentApiKey(),
@@ -1322,18 +1358,6 @@ async function buildLightPointerContext(
   selectionText?: string
 ): Promise<PointerContext> {
   let windowInfo = preferredWindowInfo ?? (await activeWindowInfo());
-  let windowSnapshot: PointerContext['windowSnapshot'];
-  if (preferredWindowBounds || preferredWindowInfo?.windowId) {
-    const hiddenResult = await withOverlayHidden(cursor.displayId, async () => {
-      const currentWindow = preferredWindowInfo ?? (await activeWindowInfo());
-      return {
-        windowInfo: currentWindow,
-        windowSnapshot: await captureWindowSnapshot(cursor, currentWindow, preferredWindowPid, preferredWindowBounds)
-      };
-    });
-    windowInfo = hiddenResult.windowInfo;
-    windowSnapshot = hiddenResult.windowSnapshot;
-  }
   let groundingPreview: Awaited<ReturnType<CuaGroundingProvider['preview']>> | undefined;
   let groundedEntities = includeCua ? cuaEntities.filter((entity) => entity.groundingRef?.provider === 'cua') : [];
   if (includeCua && groundedEntities.length === 0) {
@@ -1345,7 +1369,6 @@ async function buildLightPointerContext(
     cursor,
     source: 'desktop',
     window: windowInfo,
-    windowSnapshot,
     entities,
     gestureKind: 'hover',
     gesturePath: [{ x: cursor.localX, y: cursor.localY, t: Date.now() }],
@@ -1788,6 +1811,9 @@ app.whenReady().then(async () => {
   cachedSettings = settings;
   configureCuaRuntime(settings);
   void codexAdapter.ensure(settings);
+  void refreshCapabilitiesAndBroadcast().catch((error) => {
+    console.warn('[omp] capability discovery failed', error);
+  });
   registerActivationHotkey(settings.activationHotkey);
   startCursorLoop();
   startGlobalLongPress();

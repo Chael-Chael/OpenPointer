@@ -1,6 +1,6 @@
 import type { AgentBackendId, AgentContextEnvelope } from '@openpointer/core';
 import { ClaudeAgentBridge } from './claude-agent.js';
-import { CodexBridge, HermesBridge, OpenCodeBridge } from './http-bridges.js';
+import { CodexBridge, HermesBridge, OpenClawBridge, OpenCodeBridge } from './http-bridges.js';
 import { LocalVlmBridge } from './local-vlm.js';
 import { MockAgentBridge } from './mock.js';
 import type { AgentBridge, AgentBridgeRegistryConfig } from './types.js';
@@ -13,6 +13,8 @@ export function createAgentBridge(backend: AgentBackendId, config: AgentBridgeRe
       return new HermesBridge(config.hermes);
     case 'opencode':
       return new OpenCodeBridge(config.opencode);
+    case 'openclaw':
+      return new OpenClawBridge(config.openclaw);
     case 'claude-agent':
       return new ClaudeAgentBridge(config.claudeAgent);
     case 'codex':
@@ -26,9 +28,10 @@ export function createAgentBridge(backend: AgentBackendId, config: AgentBridgeRe
 
 export function resolveBackendForEnvelope(envelope: AgentContextEnvelope, config: AgentBridgeRegistryConfig = {}): AgentBackendId {
   if (envelope.routing.backend !== 'auto') return envelope.routing.backend;
-  if (looksLikeCodingWorkflow(envelope)) return config.codex?.baseUrl ? 'codex' : config.opencode?.baseUrl ? 'opencode' : 'local-vlm';
+  if (looksLikeCodingWorkflow(envelope)) return config.codex?.baseUrl ? 'codex' : config.opencode?.baseUrl ? 'opencode' : config.openclaw?.baseUrl ? 'openclaw' : 'local-vlm';
   if (envelope.cuaDirective?.enabled) {
     if (config.hermes?.baseUrl) return 'hermes';
+    if (config.openclaw?.baseUrl) return 'openclaw';
     if (config.opencode?.baseUrl) return 'opencode';
     if (config.claudeAgent?.enabled) return 'claude-agent';
   }
@@ -39,6 +42,7 @@ function resolveAutoBackend(config: AgentBridgeRegistryConfig): AgentBackendId {
   if (config.hermes?.baseUrl) return 'hermes';
   if (config.localVlm?.baseUrl) return 'local-vlm';
   if (config.opencode?.baseUrl) return 'opencode';
+  if (config.openclaw?.baseUrl) return 'openclaw';
   if (config.claudeAgent?.enabled) return 'claude-agent';
   if (config.codex?.baseUrl) return 'codex';
   return 'local-vlm';

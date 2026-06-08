@@ -13,6 +13,10 @@ function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
     hermesBaseUrl: '',
     hasOpenCodeApiKey: false,
     opencodeBaseUrl: '',
+    openclawGatewayUrl: '',
+    openclawExecutablePath: '',
+    openclawAgent: 'main',
+    openclawModel: '',
     claudeAgentEnabled: false,
     claudeAgentBaseUrl: '',
     claudeAgentExecutable: '',
@@ -69,6 +73,11 @@ describe('backendReadiness', () => {
     const ready = makeSettings({ hermesBaseUrl: 'http://x/v1' });
     expect(backendReadiness(ready, 'auto').configured).toBe(true);
     expect(backendReadiness(makeSettings(), 'auto').configured).toBe(false);
+  });
+
+  it('treats OpenClaw CLI path as optional when the gateway URL is configured', () => {
+    expect(backendReadiness(makeSettings(), 'openclaw').configured).toBe(false);
+    expect(backendReadiness(makeSettings({ openclawGatewayUrl: 'ws://127.0.0.1:18789' }), 'openclaw').configured).toBe(true);
   });
 
   it('claude-agent is ready when enabled, api key optional', () => {

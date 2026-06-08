@@ -1,5 +1,16 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from 'react';
-import { clampNumber, type AgentBackendId, type AgentEvent, type BackendSessionKey, type ContextChip, type Conversation, type PointerEntity } from '@openpointer/core';
+import {
+  clampNumber,
+  type AgentBackendId,
+  type AgentEvent,
+  type BackendSessionKey,
+  type CapabilityHint,
+  type CapabilityHints,
+  type CapabilitySnapshot,
+  type ContextChip,
+  type Conversation,
+  type PointerEntity
+} from '@openpointer/core';
 import type { ApprovalDecision } from '@openpointer/agent-bridge';
 import type { AppSettings } from '@openpointer/storage';
 import { parseVoiceCommand } from '@openpointer/voice';
@@ -20,8 +31,18 @@ import {
 import { backendLabel, backendReadiness, latestEvent, placeholderForState, secretConfigured, statusLabel } from './lib/backend-status';
 import { parkBackgroundConversation, removeBackgroundConversation, resolveBackgroundConversations } from './lib/background-processes';
 import { availablePanelHeight, computeShellPosition, focusPromptInput, normalizeSelection, resolvedPanelHeight, selectionFromDrag } from './lib/geometry';
-import { selectedCuaAttachmentTitle, selectedListItemsForContext } from './lib/cua-selection';
 import {
+  DEFAULT_CUA_BRUSH_OPTIONS,
+  createCuaBrushState,
+  isCuaBrushIdleExpired,
+  updateCuaBrushState,
+  type CuaBrushCandidate,
+  type CuaBrushOptions,
+  type CuaBrushState
+} from './lib/cua-brush';
+import { mergeCuaEntityGroup, removeCuaEntityFromGroup, selectedCuaAttachmentTitle, selectedListItemsForContext } from './lib/cua-selection';
+import {
+  CUA_DRAFT_GROUP_MAX_ENTITIES,
   CUA_GROUNDING_INITIAL_DELAY_MS,
   CUA_GROUNDING_MIN_CURSOR_DELTA,
   CUA_GROUNDING_REFRESH_MS,
@@ -32,6 +53,7 @@ import {
   CUA_PICKER_MIN_WIDTH,
   DEFAULT_CUA_PICKER_SIZE,
   MAX_CUA_HIGHLIGHTS,
+  type LocalRect
 } from './lib/cua-constants';
 import {
   contextRegionAroundCursor,
@@ -46,12 +68,14 @@ import {
 import { entityDebugDetails, entityKindTitle, entityLabel, windowPreviewLabel } from './lib/entity-helpers';
 import {
   contextChipFromEntity,
+  contextChipFromRegion,
   contextChipFromWindowPreview,
   contextChipTitle,
   pinContextChip,
   removeContextChip
 } from './lib/context-chips';
 import { groupEventsToBlocks, type DialogueBlock, type HistoryToolEvent } from './lib/dialogue-parser';
+import { matchCapabilitySnapshot } from './lib/capability-match';
 import { HoldRing } from './components/fields';
 import { SettingsPanel } from './components/SettingsPanel';
 import { HistoryPanel } from './components/HistoryPanel';
@@ -60,14 +84,52 @@ import { ChevronIcon, EntityKindGlyph, WindowGlyph } from './components/glyphs';
 import { PointerContextPreview } from './components/PointerContextPreview';
 import { HistoryThinkingBlock } from './components/HistoryThinkingBlock';
 import { DialogueBlocksRenderer } from './components/DialogueBlocks';
-import { CuaTaskPanel, useCuaTasks } from './components/CuaTaskPanel';
+import { useCuaTasks } from './components/CuaTaskPanel';
 import { BackgroundProcessDock } from './components/BackgroundProcessDock';
 
 export type { DialogueBlock, HistoryToolEvent };
 
 const initialCursor: CursorPayload = { x: 300, y: 300, localX: 300, localY: 300, displayId: 0, dpr: 1 };
-const CONTEXT_CHIP_HOVER_DELAY_MS = 380;
+const CONTEXT_CHIP_HOVER_DELAY_MS = 120;
+const FLOATING_CONTEXT_CHIP_LIMIT = 6;
+const CUA_GROUP_LIMIT_MAX = 200;
 const CONTEXT_TRANSFER_PATTERN = /\b(copy|move|insert|paste|send|put|into|to)\b|放到|整理到|插入到|复制到|粘贴到|移到/u;
+
+type CuaBrushTuningKey = keyof CuaBrushOptions;
+
+type CuaBrushTuningField = {
+  key: CuaBrushTuningKey;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  unit: string;
+  group: 'Brush' | 'Lasso' | 'Timing';
+};
+
+const CUA_BRUSH_TUNING_FIELDS: CuaBrushTuningField[] = [
+  { key: 'activationGraceMs', label: 'Grace', min: 0, max: 1000, step: 25, unit: 'ms', group: 'Timing' },
+  { key: 'pathWindowMs', label: 'Path window', min: 800, max: 5000, step: 100, unit: 'ms', group: 'Timing' },
+  { key: 'idleClearMs', label: 'Idle clear', min: 1500, max: 12000, step: 250, unit: 'ms', group: 'Timing' },
+  { key: 'hitMargin', label: 'Hit margin', min: 0, max: 32, step: 1, unit: 'px', group: 'Brush' },
+  { key: 'minRevisits', label: 'Revisits', min: 1, max: 6, step: 1, unit: 'x', group: 'Brush' },
+  { key: 'revisitExitDistance', label: 'Exit dist', min: 4, max: 80, step: 2, unit: 'px', group: 'Brush' },
+  { key: 'minRepeatPathLength', label: 'Brush path', min: 40, max: 520, step: 10, unit: 'px', group: 'Brush' },
+  { key: 'lassoMinSamples', label: 'Samples', min: 5, max: 40, step: 1, unit: '', group: 'Lasso' },
+  { key: 'lassoMinPathLength', label: 'Lasso path', min: 80, max: 700, step: 10, unit: 'px', group: 'Lasso' },
+  { key: 'lassoCloseDistance', label: 'Close dist', min: 16, max: 160, step: 2, unit: 'px', group: 'Lasso' },
+  { key: 'lassoMinArea', label: 'Area', min: 200, max: 12000, step: 100, unit: 'px2', group: 'Lasso' }
+];
+
+function clampCuaBrushOptionValue(field: CuaBrushTuningField, value: number) {
+  if (!Number.isFinite(value)) return DEFAULT_CUA_BRUSH_OPTIONS[field.key];
+  const clamped = clampNumber(value, field.min, field.max, DEFAULT_CUA_BRUSH_OPTIONS[field.key]);
+  return field.step >= 1 ? Math.round(clamped / field.step) * field.step : clamped;
+}
+
+function clampCuaGroupLimit(value: number) {
+  return Math.round(clampNumber(value, 1, CUA_GROUP_LIMIT_MAX, CUA_DRAFT_GROUP_MAX_ENTITIES));
+}
 
 type ContinuableBackend = {
   backend: AgentBackendId;
@@ -78,8 +140,8 @@ function resolveContinuableBackend(conversation: Conversation | null, preferred:
   if (!conversation?.backendSessions) return null;
   const candidates: AgentBackendId[] =
     preferred !== 'auto' && preferred !== 'local-vlm' && preferred !== 'mock'
-      ? [preferred, 'claude-agent', 'codex', 'hermes', 'opencode']
-      : ['claude-agent', 'codex', 'hermes', 'opencode'];
+      ? [preferred, 'claude-agent', 'codex', 'hermes', 'opencode', 'openclaw']
+      : ['claude-agent', 'codex', 'hermes', 'opencode', 'openclaw'];
   const seen = new Set<AgentBackendId>();
   for (const backend of candidates) {
     if (seen.has(backend)) continue;
@@ -101,9 +163,118 @@ function backendSessionKey(backend: AgentBackendId): BackendSessionKey | undefin
       return 'hermes';
     case 'opencode':
       return 'opencode';
+    case 'openclaw':
+      return 'openclaw';
     default:
       return undefined;
   }
+}
+
+function isSubmittedUnfinishedState(state: UiState): boolean {
+  return state === 'submitting' || state === 'streaming' || state === 'approval';
+}
+
+function selectionRegion(selection: SelectionRect) {
+  return {
+    x: selection.x1,
+    y: selection.y1,
+    width: selection.x2 - selection.x1,
+    height: selection.y2 - selection.y1
+  };
+}
+
+function dedupePointerEntities(entities: PointerEntity[]): PointerEntity[] {
+  const seen = new Set<string>();
+  return entities.filter((entity) => {
+    if (seen.has(entity.id)) return false;
+    seen.add(entity.id);
+    return true;
+  });
+}
+
+function rectForCuaEntityGroup(entities: PointerEntity[]): LocalRect | undefined {
+  const rects = entities.map(highlightRectForEntity).filter((rect): rect is LocalRect => Boolean(rect));
+  if (rects.length === 0) return undefined;
+  const left = Math.min(...rects.map((rect) => rect.x));
+  const top = Math.min(...rects.map((rect) => rect.y));
+  const right = Math.max(...rects.map((rect) => rect.x + rect.width));
+  const bottom = Math.max(...rects.map((rect) => rect.y + rect.height));
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function groundedEntitiesFromContextChips(chips: ContextChip[]): PointerEntity[] {
+  return chips.flatMap((chip) => chip.entityRefs ?? []).filter((entity) => entity.groundingRef?.provider === 'cua');
+}
+
+function contextChipFromCuaEntityGroup(entities: PointerEntity[], status: ContextChip['status'] = 'candidate'): ContextChip | undefined {
+  const contextEntity = entities[0];
+  if (!contextEntity) return undefined;
+  const chip = contextChipFromEntity(contextEntity, status);
+  if (entities.length <= 1) return chip;
+  const ids = entities.map((entity) => entity.id).join('|');
+  return {
+    ...chip,
+    id: `cua-group:${ids}`,
+    label: `${entities.length} selected items`,
+    subtitle: selectedCuaAttachmentTitle(entities),
+    entityRefs: entities
+  };
+}
+
+function limitCuaEntityChip(chip: ContextChip, maxItems: number): ContextChip | undefined {
+  const refs = chip.entityRefs?.filter((entity) => entity.groundingRef?.provider === 'cua') ?? [];
+  if (refs.length === 0) return chip;
+  const nextRefs = mergeCuaEntityGroup([], refs, maxItems);
+  if (nextRefs.length === 0) return undefined;
+  const nextChip = contextChipFromCuaEntityGroup(nextRefs, chip.status);
+  return nextChip
+    ? {
+        ...nextChip,
+        createdAt: chip.createdAt,
+        lastSeenAt: Date.now()
+      }
+    : undefined;
+}
+
+function pinnedCuaEntityIdsFromChips(chips: ContextChip[]): Set<string> {
+  const ids = new Set<string>();
+  for (const chip of chips) {
+    for (const entity of chip.entityRefs ?? []) {
+      if (entity.groundingRef?.provider === 'cua') ids.add(entity.id);
+    }
+  }
+  return ids;
+}
+
+function uniqueContextChips(chips: Array<ContextChip | undefined>, max = 4): ContextChip[] {
+  const seen = new Set<string>();
+  const result: ContextChip[] = [];
+  for (const chip of chips) {
+    if (!chip || seen.has(chip.id)) continue;
+    seen.add(chip.id);
+    result.push(chip);
+    if (result.length >= max) break;
+  }
+  return result;
+}
+
+function windowContextFromChip(chip: ContextChip | undefined): WindowPreviewResponse['window'] {
+  if (!chip?.windowRef) return undefined;
+  const { title, app, process, windowId } = chip.windowRef;
+  return { title, app, process, windowId };
+}
+
+function windowChipLocalRect(chip: ContextChip | null, cursor: CursorPayload) {
+  const rect = chip?.windowRef?.bounds;
+  if (!rect) return undefined;
+  const originX = cursor.x - cursor.localX;
+  const originY = cursor.y - cursor.localY;
+  return {
+    x: rect.x - originX,
+    y: rect.y - originY,
+    width: rect.width,
+    height: rect.height
+  };
 }
 
 export function App() {
@@ -124,6 +295,7 @@ export function App() {
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const pillWidth = clampNumber(settings?.pillWidth, 280, 900, 520);
   const pillHeight = clampNumber(settings?.pillHeight, 24, 96, 24);
+  const pillRadius = Math.max(14, pillHeight / 2);
 
   // Dynamic sizing responsive to pillHeight
   const menuSize = Math.max(20, Math.min(32, pillHeight - 6));
@@ -139,6 +311,8 @@ export function App() {
   const [clearSecrets, setClearSecrets] = useState<ClearSecretFlags>(emptyClearSecretFlags);
   const [active, setActive] = useState(false);
   const [state, setState] = useState<UiState>('idle');
+  const stateRef = useRef<UiState>('idle');
+  stateRef.current = state;
   const [prompt, setPrompt] = useState('');
   const [events, setEvents] = useState<AgentEvent[]>([]);
   const [backend, setBackend] = useState<AgentBackendId>('auto');
@@ -161,26 +335,33 @@ export function App() {
   const [hoveredCuaEntityId, setHoveredCuaEntityId] = useState<string | null>(null);
   const [draftCuaEntities, setDraftCuaEntities] = useState<PointerEntity[]>([]);
   const [selectedCuaEntities, setSelectedCuaEntities] = useState<PointerEntity[]>([]);
+  const [cuaBrushOptions, setCuaBrushOptions] = useState<CuaBrushOptions>(() => ({ ...DEFAULT_CUA_BRUSH_OPTIONS }));
+  const [cuaGroupLimit, setCuaGroupLimit] = useState(CUA_DRAFT_GROUP_MAX_ENTITIES);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const conversationIdRef = useRef<string | null>(null);
   conversationIdRef.current = conversationId;
+  const collapseAfterSubmitRef = useRef(false);
   const lastConversationIdRef = useRef<string | null>(null);
   const lastDeactivatedAtRef = useRef<number>(0);
   const newConversationRequestedRef = useRef(false);
   const conversationRestoreEpochRef = useRef(0);
+  const submitInFlightRef = useRef(false);
   const [panelHeight, setPanelHeight] = useState<number | null>(null);
+  const [streamContentHeight, setStreamContentHeight] = useState(0);
   const [panelResizeDrag, setPanelResizeDrag] = useState<{ startY: number; startHeight: number } | null>(null);
   const [_thinkingTime, setThinkingTime] = useState<number>(0);
   const [showTools, setShowTools] = useState<boolean>(false);
   const thinkingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const thinkingStartRef = useRef<number>(0);
   const streamPanelRef = useRef<HTMLDivElement | null>(null);
+  const streamPanelContentRef = useRef<HTMLDivElement | null>(null);
   const streamPanelStickToBottomRef = useRef(true);
   // During assistant streaming, keep the top of the new answer stable instead
   // of continuously pushing it out of view as more tokens arrive.
   const streamPanelStreamingResponseRef = useRef(false);
   const groundingRequestSeqRef = useRef(0);
   const windowRequestSeqRef = useRef(0);
+  const activationWindowPinSeqRef = useRef(0);
   const cuaHoverLockSuppressedUntilRef = useRef(0);
   const cuaPickerInteractiveRef = useRef(false);
   // Submit-time screenshot signal from the main process (see CaptureActivity IPC).
@@ -200,7 +381,7 @@ export function App() {
     startXPos: number;
   } | null>(null);
   const [windowPreview, setWindowPreview] = useState<WindowPreviewResponse | null>(null);
-  const [candidateContextChip, setCandidateContextChip] = useState<ContextChip | null>(null);
+  const [candidateContextChips, setCandidateContextChips] = useState<ContextChip[]>([]);
   const [pinnedContextChips, setPinnedContextChips] = useState<ContextChip[]>([]);
   const [draggingContextChip, setDraggingContextChip] = useState<{
     chip: ContextChip;
@@ -216,6 +397,8 @@ export function App() {
   const [isFetchingModels, setIsFetchingModels] = useState(false);
   const [fetchModelsError, setFetchModelsError] = useState<string | null>(null);
   const [hoveredAttachment, setHoveredAttachment] = useState<'window' | 'selection' | 'entity' | 'cua' | null>(null);
+  const [capabilitySnapshot, setCapabilitySnapshot] = useState<CapabilitySnapshot | null>(null);
+  const [refreshingCapabilities, setRefreshingCapabilities] = useState(false);
   const {
     tasks: cuaTasks,
     cancelTask: cancelCuaTask,
@@ -224,7 +407,7 @@ export function App() {
     replayRecording: replayCuaTaskRecording
   } = useCuaTasks();
 
-  const showFullContext = detached && (historyTurns.length > 0 || state !== 'composing');
+  const showFullContext = active && (historyTurns.length > 0 || state !== 'composing');
 
   async function fetchModels() {
     if (!settings?.localVlmBaseUrl) return;
@@ -248,10 +431,33 @@ export function App() {
       setIsFetchingModels(false);
     }
   }
+
+  async function refreshCapabilities() {
+    if (refreshingCapabilities) return;
+    setRefreshingCapabilities(true);
+    try {
+      const snapshot = await window.openPointer.refreshCapabilities();
+      setCapabilitySnapshot(snapshot);
+    } finally {
+      setRefreshingCapabilities(false);
+    }
+  }
+
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const contextShelfRef = useRef<HTMLDivElement | null>(null);
   const draggingContextChipRef = useRef<typeof draggingContextChip>(null);
   draggingContextChipRef.current = draggingContextChip;
+  const draftCuaEntitiesRef = useRef(draftCuaEntities);
+  draftCuaEntitiesRef.current = draftCuaEntities;
+  const selectedCuaEntitiesRef = useRef(selectedCuaEntities);
+  selectedCuaEntitiesRef.current = selectedCuaEntities;
+  const cuaBrushOptionsRef = useRef(cuaBrushOptions);
+  cuaBrushOptionsRef.current = cuaBrushOptions;
+  const cuaGroupLimitRef = useRef(cuaGroupLimit);
+  cuaGroupLimitRef.current = cuaGroupLimit;
+  const pinnedContextChipsRef = useRef(pinnedContextChips);
+  pinnedContextChipsRef.current = pinnedContextChips;
+  const liveGroundingWindowKeyRef = useRef<string | null>(null);
   const cursorRef = useRef(cursor);
   cursorRef.current = cursor;
   const activeRef = useRef(false);
@@ -260,9 +466,9 @@ export function App() {
   promptRef.current = prompt;
   const lastInteractiveRef = useRef(false);
   const lastGlobalContextMenuAtRef = useRef(0);
-  const liveCuaPreview =
+  const cuaBrushStateRef = useRef<CuaBrushState>(createCuaBrushState(Date.now()));
+  const cuaSelectionActive =
     active &&
-    state === 'composing' &&
     settings?.cuaMode !== 'off' &&
     !selecting &&
     !selectionDrag &&
@@ -271,8 +477,8 @@ export function App() {
     !historyOpen &&
     !menuOpen &&
     !captureActivity.active &&
-    !cuaPickerLocked &&
-    selectedCuaEntities.length === 0;
+    !cuaPickerLocked;
+  const liveCuaPreview = cuaSelectionActive;
   const backgroundConversations = useMemo(
     () => resolveBackgroundConversations(backgroundConversationIds, conversationsList),
     [backgroundConversationIds, conversationsList]
@@ -285,6 +491,67 @@ export function App() {
       window.openPointer.setInteractive(false);
     }
   }, []);
+
+  const resetCuaBrushState = useCallback((windowKey?: string | null) => {
+    cuaBrushStateRef.current = createCuaBrushState(Date.now(), windowKey);
+  }, []);
+
+  const updateCuaBrushOption = useCallback((key: CuaBrushTuningKey, value: number) => {
+    const field = CUA_BRUSH_TUNING_FIELDS.find((item) => item.key === key);
+    if (!field) return;
+    const nextValue = clampCuaBrushOptionValue(field, value);
+    setCuaBrushOptions((current) => (current[key] === nextValue ? current : ({ ...current, [key]: nextValue } as CuaBrushOptions)));
+  }, []);
+
+  const resetCuaBrushOptions = useCallback(() => {
+    setCuaBrushOptions({ ...DEFAULT_CUA_BRUSH_OPTIONS });
+    setCuaGroupLimit(CUA_DRAFT_GROUP_MAX_ENTITIES);
+    resetCuaBrushState(liveGroundingWindowKeyRef.current);
+  }, [resetCuaBrushState]);
+
+  const updateCuaGroupLimit = useCallback(
+    (value: number) => {
+      const nextLimit = clampCuaGroupLimit(value);
+      setCuaGroupLimit((current) => (current === nextLimit ? current : nextLimit));
+      setDraftCuaEntities((current) => mergeCuaEntityGroup([], current, nextLimit));
+      setSelectedCuaEntities((current) => mergeCuaEntityGroup([], current, nextLimit));
+      setPinnedContextChips((current) =>
+        current.flatMap((chip) => {
+          const nextChip = limitCuaEntityChip(chip, nextLimit);
+          return nextChip ? [nextChip] : [];
+        })
+      );
+      resetCuaBrushState(liveGroundingWindowKeyRef.current);
+    },
+    [resetCuaBrushState]
+  );
+
+  useEffect(() => {
+    resetCuaBrushState(liveGroundingWindowKeyRef.current);
+  }, [cuaBrushOptions, resetCuaBrushState]);
+
+  const clearTransientCuaPreviewState = useCallback(
+    (options?: { clearUnpinnedSelected?: boolean }) => {
+      liveGroundingWindowKeyRef.current = null;
+      resetCuaBrushState();
+      setCuaEntities((current) => (current.length > 0 ? [] : current));
+      setHoveredCuaEntityId(null);
+      setDraftCuaEntities((current) => (current.length > 0 ? [] : current));
+      setCuaPickerLocked(false);
+      setCuaPickerPosition(null);
+      setCuaPickerResizeDrag(null);
+      setCandidateContextChips((current) => (current.length > 0 ? [] : current));
+      if (options?.clearUnpinnedSelected) {
+        setSelectedCuaEntities((current) => {
+          if (current.length === 0) return current;
+          const pinnedIds = pinnedCuaEntityIdsFromChips(pinnedContextChipsRef.current);
+          const next = current.filter((entity) => pinnedIds.has(entity.id));
+          return next.length === current.length ? current : next;
+        });
+      }
+    },
+    [resetCuaBrushState]
+  );
 
   async function refreshConversationsList() {
     const list = await window.openPointer.getConversations();
@@ -315,10 +582,18 @@ export function App() {
   }
 
   useEffect(() => {
+    void refreshConversationsList().catch(() => {
+      /* transient IPC failure; history can refresh on the next explicit read */
+    });
+  }, []);
+
+  useEffect(() => {
     void window.openPointer.getSettings().then((value) => {
       setSettings(value);
       setBackend(value.agentBackend);
     });
+    void window.openPointer.getCapabilitySnapshot().then(setCapabilitySnapshot);
+    const offCapabilities = window.openPointer.onCapabilitySnapshotChanged(setCapabilitySnapshot);
     const offCursor = window.openPointer.onCursor((payload) => {
       if (isCursorOnThisOverlay(payload)) setCursor(payload);
     });
@@ -362,7 +637,7 @@ export function App() {
       setCursor(payload);
       setCuaPickerAnchor(payload);
       setWindowPreview(null);
-      setCandidateContextChip(null);
+      setCandidateContextChips([]);
       setDraggingContextChip(null);
       setCuaPickerLocked(false);
       setCuaPickerPosition(null);
@@ -372,6 +647,7 @@ export function App() {
       // clicked, while the rest of the desktop remains pass-through.
       setDetached(false);
       setDetachedPos(computeShellPosition(payload.localX, payload.localY, pillWidth, pillHeight, false));
+      pinActivationWindowContext(payload);
 
       window.openPointer.getSettings().then(async (currentSettings) => {
         setSettings(currentSettings);
@@ -382,9 +658,14 @@ export function App() {
     const offDeactivate = window.openPointer.onDeactivate((payload) => {
       lastInteractiveRef.current = false;
       groundingRequestSeqRef.current += 1;
+      activationWindowPinSeqRef.current += 1;
       const currentConversationId = conversationIdRef.current;
-      parkConversationInBackground(currentConversationId);
+      const shouldPark = !payload?.startNewConversationOnNextActivate && Boolean(currentConversationId) && isSubmittedUnfinishedState(stateRef.current);
+      const preserveDraft =
+        !payload?.startNewConversationOnNextActivate && !shouldPark && promptRef.current.trim().length > 0 && stateRef.current === 'composing';
+      if (shouldPark) parkConversationInBackground(currentConversationId);
       if (payload?.startNewConversationOnNextActivate) {
+        collapseAfterSubmitRef.current = false;
         lastConversationIdRef.current = null;
         lastDeactivatedAtRef.current = 0;
         newConversationRequestedRef.current = true;
@@ -397,31 +678,36 @@ export function App() {
       }
       setActive(false);
       setState('idle');
-      setPrompt('');
+      if (!preserveDraft) setPrompt('');
       setEvents([]);
       setHold(null);
       setMenuOpen(false);
       setSettingsOpen(false);
       setBackendDropdownOpen(false);
-      setConversationId(null);
-      setHistoryTurns([]);
-      setConversationMeta(null);
+      if (!preserveDraft) {
+        setConversationId(null);
+        setHistoryTurns([]);
+        setConversationMeta(null);
+      }
       setContinueError(null);
       setHistoryOpen(false);
       setDetached(false);
-      setSelection(null);
+      if (!preserveDraft) setSelection(null);
       setCuaEntities([]);
       setWindowPreview(null);
-      setCandidateContextChip(null);
-      setPinnedContextChips([]);
+      setCandidateContextChips([]);
+      if (!preserveDraft) setPinnedContextChips([]);
       setDraggingContextChip(null);
       setCuaPickerAnchor(initialCursor);
       setCuaPickerLocked(false);
       setCuaPickerPosition(null);
       setCuaPickerResizeDrag(null);
       setHoveredCuaEntityId(null);
-      setDraftCuaEntities([]);
-      setSelectedCuaEntities([]);
+      if (!preserveDraft) {
+        resetCuaBrushState();
+        setDraftCuaEntities([]);
+        setSelectedCuaEntities([]);
+      }
       setDetachedPos(null);
       setSelecting(false);
       setSelectionOrigin(null);
@@ -454,6 +740,7 @@ export function App() {
     window.openPointer.ready();
     return () => {
       offCursor();
+      offCapabilities();
       offHold();
       offActivate();
       offDeactivate();
@@ -463,7 +750,7 @@ export function App() {
         thinkingTimerRef.current = null;
       }
     };
-  }, [isCursorOnThisOverlay, settings?.pillHeight, settings?.pillWidth]);
+  }, [isCursorOnThisOverlay, resetCuaBrushState, settings?.pillHeight, settings?.pillWidth]);
 
   useEffect(() => {
     if (conversationId && (state === 'completed' || state === 'composing' || state === 'idle' || state === 'failed')) {
@@ -512,7 +799,11 @@ export function App() {
       if (!target) return false;
       const el = target as Element;
       if (el.closest('.background-process-dock')) return true;
-      if (!detached) return Boolean(el.closest('.openpointer-shell, .cua-picker-panel, .context-candidate-chip, .context-chip-ghost'));
+      if (!detached) {
+        return Boolean(
+          el.closest('.openpointer-shell, .cua-picker-panel, .context-candidate-chip, .context-chip-ghost, .cua-selection-group-pill, .cua-element-remove-pill')
+        );
+      }
       // If the mouse is over the main container or body, pass clicks through
       if (el.tagName === 'HTML' || el.tagName === 'BODY' || el.classList.contains('app-container')) {
         return false;
@@ -526,7 +817,6 @@ export function App() {
       // from toggling setIgnoreMouseEvents repeatedly, which would
       // interfere with uIOhook's global long-press detection and cause
       // the pill to pop up unexpectedly when the user just moves the mouse.
-      if (shouldCapture && !active && backgroundConversations.length === 0) return;
       if (shouldCapture !== lastInteractiveRef.current) {
         lastInteractiveRef.current = shouldCapture;
         window.openPointer.setInteractive(shouldCapture);
@@ -557,7 +847,6 @@ export function App() {
     active,
     menuOpen,
     detached,
-    backgroundConversations.length,
     backendDropdownOpen,
     settingsOpen,
     historyOpen,
@@ -568,16 +857,26 @@ export function App() {
     selectionDrag,
     panelResizeDrag,
     cuaPickerResizeDrag,
-    candidateContextChip,
+    candidateContextChips.length,
     draggingContextChip,
     state
   ]);
 
   // Esc = close this session; Right-click = restore follow mode or cancel local selection.
   useEffect(() => {
+    function collapseSubmittedRun(): boolean {
+      if (!activeRef.current || !isSubmittedUnfinishedState(stateRef.current)) return false;
+      if (submitInFlightRef.current) return false;
+      if (!conversationIdRef.current) collapseAfterSubmitRef.current = true;
+      window.openPointer.deactivate();
+      return true;
+    }
+
     function restoreFollowMode() {
       setCuaPickerLocked(false);
       setCuaPickerPosition(null);
+      resetCuaBrushState(liveGroundingWindowKeyRef.current);
+      setDraftCuaEntities([]);
       if (menuOpen) {
         setMenuOpen(false);
         return;
@@ -628,17 +927,23 @@ export function App() {
       if (!isCursorOnThisOverlay(payload)) return;
       setCursor(payload);
       setCuaPickerAnchor(payload);
+      if (collapseSubmittedRun()) return;
       window.setTimeout(() => releaseOverlayPointerCapture(), 0);
     });
+    function onWindowBlur() {
+      collapseSubmittedRun();
+    }
     window.addEventListener('keydown', onKeyDown, { capture: true });
     window.addEventListener('contextmenu', onContextMenu, { capture: true });
+    window.addEventListener('blur', onWindowBlur);
     return () => {
       offGlobalContextMenu();
       offGlobalMouseDown();
       window.removeEventListener('keydown', onKeyDown, { capture: true });
       window.removeEventListener('contextmenu', onContextMenu, { capture: true });
+      window.removeEventListener('blur', onWindowBlur);
     };
-  }, [isCursorOnThisOverlay, menuOpen, selecting, selectionDrag, detached, releaseOverlayPointerCapture]);
+  }, [isCursorOnThisOverlay, menuOpen, selecting, selectionDrag, detached, releaseOverlayPointerCapture, resetCuaBrushState]);
 
   // Live-update selection rectangle while selecting (cursor comes via IPC)
   useEffect(() => {
@@ -757,10 +1062,10 @@ export function App() {
     };
   }, [pillWidthDrag, settings, pillWidth]);
 
-  // Keep the detached pill pulled up if the conversation panel is open,
+  // Keep an explicitly detached pill pulled up if the conversation panel is open,
   // preventing it from extending off the bottom of the screen.
   useEffect(() => {
-    if (showFullContext && detachedPos) {
+    if (showFullContext && detached && detachedPos) {
       const maxPanelH = Math.max(160, panelHeight ?? 0);
       const maxY = window.innerHeight - pillHeight - maxPanelH - 12;
       if (detachedPos.y > maxY) {
@@ -770,7 +1075,7 @@ export function App() {
         });
       }
     }
-  }, [showFullContext, panelHeight, pillHeight, detachedPos]);
+  }, [showFullContext, detached, panelHeight, pillHeight, detachedPos]);
 
   useEffect(() => {
     if (state === 'composing' && active && !selecting && !selectionDrag && !settingsOpen && !captureActivity.active) {
@@ -780,13 +1085,16 @@ export function App() {
   }, [active, selecting, selectionDrag, settingsOpen, captureActivity.active, state]);
 
   useEffect(() => {
+    resetCuaBrushState(liveGroundingWindowKeyRef.current);
+  }, [active, resetCuaBrushState]);
+
+  useEffect(() => {
     if (liveCuaPreview) setCuaPickerAnchor(cursor);
   }, [cursor, liveCuaPreview]);
 
   useEffect(() => {
     const shouldClearPreview =
       !active ||
-      state !== 'composing' ||
       settings?.cuaMode === 'off' ||
       selecting ||
       Boolean(selectionDrag) ||
@@ -797,17 +1105,13 @@ export function App() {
       captureActivity.active;
 
     if (shouldClearPreview) {
-      if (selectedCuaEntities.length === 0) {
-        setCuaEntities([]);
-        setHoveredCuaEntityId(null);
-        setDraftCuaEntities([]);
-        setCuaPickerLocked(false);
-        setCuaPickerPosition(null);
-        setCuaPickerResizeDrag(null);
-      }
+      clearTransientCuaPreviewState({ clearUnpinnedSelected: true });
       return;
     }
-    if (!liveCuaPreview) return;
+    if (!liveCuaPreview && !cuaPickerLocked) {
+      clearTransientCuaPreviewState({ clearUnpinnedSelected: true });
+      return;
+    }
 
     // Keep the CUA tree fresh while the user is moving the pointer in
     // discovery mode. The picker itself is derived from the latest tree and the
@@ -836,21 +1140,31 @@ export function App() {
         .requestGrounding({ cursor: requestCursor })
         .then((preview) => {
           if (cancelled || groundingRequestSeqRef.current !== requestSeq) return;
+          const nextWindowKey = preview.status === 'matched' && preview.pid && preview.windowId ? `${preview.pid}:${preview.windowId}` : null;
+          if (!nextWindowKey) {
+            clearTransientCuaPreviewState({ clearUnpinnedSelected: true });
+            lastCompletedAt = Date.now();
+            return;
+          }
+          if (liveGroundingWindowKeyRef.current && liveGroundingWindowKeyRef.current !== nextWindowKey) {
+            clearTransientCuaPreviewState({ clearUnpinnedSelected: true });
+          }
+          liveGroundingWindowKeyRef.current = nextWindowKey;
           const cursorStillNearRequest = cursorDistanceSquared(cursorRef.current, requestCursor) < minCursorDeltaSquared;
           const hoveredEntityId = cursorStillNearRequest ? (preview.hoveredEntityId ?? null) : null;
           setCuaEntities(preview.entities);
           setHoveredCuaEntityId(hoveredEntityId);
           const selectedListItems = selectedListItemsForContext(preview.entities);
-          if (selectedListItems.length > 0) {
-            setSelectedCuaEntities((current) => (current.length === 0 ? selectedListItems : current));
+          if (selectedListItems.length > 0 && selectedCuaEntitiesRef.current.length === 0 && draftCuaEntitiesRef.current.length === 0) {
+            resetCuaBrushState(nextWindowKey);
+            setSelectedCuaEntities(selectedListItems);
             setDraftCuaEntities([]);
           }
           lastCompletedAt = Date.now();
         })
         .catch(() => {
           if (cancelled || groundingRequestSeqRef.current !== requestSeq) return;
-          setCuaEntities([]);
-          setHoveredCuaEntityId(null);
+          clearTransientCuaPreviewState({ clearUnpinnedSelected: true });
           lastCompletedAt = Date.now();
         })
         .finally(() => {
@@ -873,15 +1187,15 @@ export function App() {
     active,
     captureActivity.active,
     historyOpen,
+    clearTransientCuaPreviewState,
+    cuaPickerLocked,
     liveCuaPreview,
     menuOpen,
-    selectedCuaEntities.length,
     selecting,
     selection,
     selectionDrag,
     settings?.cuaMode,
-    settingsOpen,
-    state
+    settingsOpen
   ]);
 
   useEffect(() => {
@@ -1018,6 +1332,19 @@ export function App() {
     panel.scrollTop = panel.scrollHeight;
   }, [transcript, events.length, historyTurns.length, state, showTools]);
 
+  useEffect(() => {
+    const content = streamPanelContentRef.current;
+    if (!showFullContext || !content) {
+      setStreamContentHeight(0);
+      return;
+    }
+    const updateHeight = () => setStreamContentHeight(Math.ceil(content.scrollHeight));
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [showFullContext, transcript, events.length, historyTurns.length, state, showTools]);
+
   function onStreamPanelScroll(event: ReactUIEvent<HTMLDivElement>) {
     const panel = event.currentTarget;
     const distanceFromBottom = panel.scrollHeight - panel.scrollTop - panel.clientHeight;
@@ -1075,12 +1402,12 @@ export function App() {
     // Cap the panel to the space actually left below the pill so it scrolls
     // internally instead of being clipped by the screen's bottom edge.
     const maxHeight = availablePanelHeight(effectiveShellPos.y, pillHeight);
-    const height = resolvedPanelHeight(effectiveShellPos.y, pillHeight, panelHeight);
+    const height = resolvedPanelHeight(effectiveShellPos.y, pillHeight, panelHeight, streamContentHeight);
     return {
       height: `${height}px`,
       maxHeight: `${maxHeight}px`
     };
-  }, [panelHeight, effectiveShellPos.y, pillHeight]);
+  }, [panelHeight, streamContentHeight, effectiveShellPos.y, pillHeight]);
   function onResizeMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
     event.stopPropagation();
@@ -1124,7 +1451,9 @@ export function App() {
     const targetConversation =
       targetConversationId === conversationMeta?.id
         ? conversationMeta
-        : backgroundConversations.find((item) => item.id === targetConversationId) ?? conversationsList.find((item) => item.id === targetConversationId) ?? null;
+        : (backgroundConversations.find((item) => item.id === targetConversationId) ??
+          conversationsList.find((item) => item.id === targetConversationId) ??
+          null);
     const targetContinuableBackend = resolveContinuableBackend(targetConversation, backend);
     try {
       const res = await window.openPointer.continueConversation({
@@ -1156,16 +1485,22 @@ export function App() {
 
   async function submit(mode: 'text' | 'voice' = 'text', overrideText = prompt) {
     const text = overrideText.trim();
-    const submittedCuaEntities = selectedCuaEntities;
+    const submittedContextChips = uniqueContextChips([selectionContextChip, ...pinnedContextChips, selectedCuaContextChip]);
+    const submittedWindowChip = submittedContextChips.find((chip) => chip.kind === 'window' && chip.windowRef);
+    const submittedCuaEntities = mergeCuaEntityGroup(
+      [],
+      dedupePointerEntities([...selectedCuaEntities, ...groundedEntitiesFromContextChips(submittedContextChips)]),
+      cuaGroupLimitRef.current
+    );
     const selectedEntity = submittedCuaEntities[0];
     const hasSelectionContext = Boolean(selection);
     const cuaEnabled = settings?.cuaMode !== 'off';
     const hasCuaContext = submittedCuaEntities.length > 0;
-    const submittedContextChips = pinnedContextChips;
     const hasPinnedContext = submittedContextChips.length > 0;
-    const submittedWindowContext = windowPreview?.window;
-    const submittedWindowPid = windowPreview?.pid;
-    const submittedWindowBounds = windowPreview?.bounds;
+    const submittedWindowContext = windowContextFromChip(submittedWindowChip);
+    const submittedWindowPid = submittedWindowChip?.windowRef?.pid;
+    const submittedWindowBounds = submittedWindowChip?.windowRef?.bounds;
+    const submittedCapabilityHints = matchedCapabilities;
     const hasWindowContext = Boolean(submittedWindowContext);
     const instructionText = text || defaultContextInstruction(hasSelectionContext, hasCuaContext || hasPinnedContext, hasWindowContext || hasPinnedContext);
     if ((!text && !hasSelectionContext && !hasCuaContext && !hasWindowContext && !hasPinnedContext) || state === 'submitting') return;
@@ -1179,6 +1514,8 @@ export function App() {
     setEvents([]);
     setContinueError(null);
     setState('submitting');
+    submitInFlightRef.current = true;
+    setDetachedPos((current) => current ?? computeShellPosition(cursor.localX, cursor.localY, pillWidth, pillHeight, false));
     setMenuOpen(false);
 
     setThinkingTime(0);
@@ -1199,10 +1536,12 @@ export function App() {
         ]
       : undefined;
     setSelection(null);
+    resetCuaBrushState(liveGroundingWindowKeyRef.current);
     setDraftCuaEntities([]);
     setSelectedCuaEntities([]);
     setPinnedContextChips([]);
-    setCandidateContextChip(null);
+    activationWindowPinSeqRef.current += 1;
+    setCandidateContextChips([]);
     setDraggingContextChip(null);
     setCuaPickerLocked(false);
     setCuaPickerPosition(null);
@@ -1227,6 +1566,7 @@ export function App() {
         includeCua: cuaEnabled,
         cuaEntities: submittedCuaEntities,
         contextChips: submittedContextChips,
+        capabilityHints: submittedCapabilityHints,
         conversationId: currentConversationId ?? undefined
       });
       newConversationRequestedRef.current = false;
@@ -1234,12 +1574,20 @@ export function App() {
       lastConversationIdRef.current = res.conversationId;
       lastDeactivatedAtRef.current = Date.now();
       setConversationId(res.conversationId);
+      if (collapseAfterSubmitRef.current) {
+        collapseAfterSubmitRef.current = false;
+        parkConversationInBackground(res.conversationId);
+      }
       const conv = await window.openPointer.getConversation(res.conversationId);
       if (conversationIdRef.current === res.conversationId && conv) {
         setHistoryTurns(conv.turns);
         setConversationMeta(conv);
       }
+      void refreshConversationsList().catch(() => {
+        /* transient IPC failure; BG history will refresh on the next explicit read */
+      });
     } catch (error) {
+      collapseAfterSubmitRef.current = false;
       // Without this the UI is stuck in the submitting state forever (no agent
       // events arrive when the submit IPC itself fails) and the thinking timer
       // keeps ticking.
@@ -1249,6 +1597,8 @@ export function App() {
       }
       setEvents([{ type: 'run.failed', error: error instanceof Error ? error.message : 'Failed to submit instruction.', recoverable: true }]);
       setState('failed');
+    } finally {
+      submitInFlightRef.current = false;
     }
   }
 
@@ -1371,6 +1721,7 @@ export function App() {
   function startNewConversation() {
     parkConversationInBackground(conversationIdRef.current);
     conversationRestoreEpochRef.current += 1;
+    collapseAfterSubmitRef.current = false;
     newConversationRequestedRef.current = true;
     conversationIdRef.current = null;
     lastConversationIdRef.current = null;
@@ -1392,6 +1743,9 @@ export function App() {
     setState('composing');
     setSelection(null);
     setSelectionDrag(null);
+    setPinnedContextChips([]);
+    pinActivationWindowContext(cursorRef.current);
+    resetCuaBrushState(liveGroundingWindowKeyRef.current);
     setDraftCuaEntities([]);
     setSelectedCuaEntities([]);
     setCuaPickerLocked(false);
@@ -1418,12 +1772,14 @@ export function App() {
       setEvents([]);
       setPrompt('');
       setPinnedContextChips([]);
-      setCandidateContextChip(null);
+      activationWindowPinSeqRef.current += 1;
+      setCandidateContextChips([]);
       setDraggingContextChip(null);
       setActive(true);
       setDetached(true);
       setDetachedPos((current) => current ?? computeShellPosition(cursorRef.current.localX, cursorRef.current.localY, pillWidth, pillHeight, true));
       setState('composing');
+      resetCuaBrushState(liveGroundingWindowKeyRef.current);
       setDraftCuaEntities([]);
       setSelectedCuaEntities([]);
       setCuaPickerLocked(false);
@@ -1475,14 +1831,80 @@ export function App() {
     event.stopPropagation();
     setSelection(null);
     setSelectionDrag(null);
+    resetCuaBrushState(liveGroundingWindowKeyRef.current);
     setDraftCuaEntities([]);
     setSelectedCuaEntities([]);
     window.setTimeout(() => focusPromptInput(inputRef.current), 0);
   }
 
+  function pinActivationWindowContext(cursorPayload: CursorPayload) {
+    const requestId = ++activationWindowPinSeqRef.current;
+    void window.openPointer
+      .requestWindowContext({ cursor: cursorPayload })
+      .then((preview) => {
+        if (activationWindowPinSeqRef.current !== requestId || preview.status !== 'matched' || !preview.window) return;
+        setWindowPreview((current) => current ?? preview);
+        const chip = contextChipFromWindowPreview(preview);
+        if (chip) setPinnedContextChips((current) => pinContextChip(current, chip));
+      })
+      .catch(() => {
+        // Default window context is best-effort; the live preview can still recover.
+      });
+  }
+
   function commitContextChip(chip: ContextChip) {
     setPinnedContextChips((current) => pinContextChip(current, chip));
-    setCandidateContextChip(null);
+    const groundedEntities = groundedEntitiesFromContextChips([chip]);
+    if (groundedEntities.length > 0) {
+      setSelectedCuaEntities((current) => mergeCuaEntityGroup(current, groundedEntities, cuaGroupLimitRef.current));
+      setDraftCuaEntities([]);
+    }
+    setCandidateContextChips((current) => current.filter((item) => item.id !== chip.id));
+    window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+  }
+
+  function commitDraftCuaGroup(event?: ReactMouseEvent<HTMLElement>) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    if (draftCuaEntities.length === 0) return;
+    const nextGroup = mergeCuaEntityGroup([], draftCuaEntities, cuaGroupLimitRef.current);
+    const groupChip = contextChipFromCuaEntityGroup(nextGroup, 'pinned');
+    if (groupChip) {
+      setPinnedContextChips((current) => pinContextChip(current, groupChip));
+    }
+    setSelectedCuaEntities((current) => mergeCuaEntityGroup(current, nextGroup, cuaGroupLimitRef.current));
+    resetCuaBrushState(liveGroundingWindowKeyRef.current);
+    setDraftCuaEntities([]);
+    setCandidateContextChips([]);
+    setHoveredCuaEntityId(null);
+    window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+  }
+
+  function removeCuaGroupEntity(entityId: string, event?: ReactMouseEvent<HTMLElement>) {
+    event?.preventDefault();
+    event?.stopPropagation();
+    resetCuaBrushState(liveGroundingWindowKeyRef.current);
+    setDraftCuaEntities((current) => removeCuaEntityFromGroup(current, entityId));
+    setSelectedCuaEntities((current) => removeCuaEntityFromGroup(current, entityId));
+    setPinnedContextChips((current) =>
+      current.flatMap((chip) => {
+        const refs = chip.entityRefs ?? [];
+        if (!refs.some((entity) => entity.id === entityId)) return [chip];
+        const nextRefs = removeCuaEntityFromGroup(refs, entityId);
+        if (nextRefs.length === 0) return [];
+        const nextChip = contextChipFromCuaEntityGroup(nextRefs, chip.status);
+        return nextChip
+          ? [
+              {
+                ...nextChip,
+                createdAt: chip.createdAt,
+                lastSeenAt: Date.now()
+              }
+            ]
+          : [];
+      })
+    );
+    setHoveredCuaEntityId((current) => (current === entityId ? null : current));
     window.setTimeout(() => focusPromptInput(inputRef.current), 0);
   }
 
@@ -1498,7 +1920,7 @@ export function App() {
       offsetY: event.clientY - rect.top,
       overShelf: isPointOverContextShelf(event.clientX, event.clientY)
     });
-    setCandidateContextChip(null);
+    setCandidateContextChips([]);
     if (!lastInteractiveRef.current) {
       lastInteractiveRef.current = true;
       window.openPointer.setInteractive(true);
@@ -1511,8 +1933,19 @@ export function App() {
     return x >= rect.left - 28 && x <= rect.right + 28 && y >= rect.top - 24 && y <= rect.bottom + 24;
   }
 
-  function clearPinnedContextChip(chipId: string) {
-    setPinnedContextChips((current) => removeContextChip(current, chipId));
+  function clearContextRowChip(chip: ContextChip) {
+    if (chip.kind === 'window') activationWindowPinSeqRef.current += 1;
+    if (selectionContextChip?.id === chip.id) {
+      setSelection(null);
+      setSelectionDrag(null);
+    }
+    const entityIds = new Set((chip.entityRefs ?? []).map((entity) => entity.id));
+    if (entityIds.size > 0) {
+      resetCuaBrushState(liveGroundingWindowKeyRef.current);
+      setSelectedCuaEntities((current) => current.filter((entity) => !entityIds.has(entity.id)));
+      setDraftCuaEntities([]);
+    }
+    setPinnedContextChips((current) => removeContextChip(current, chip.id));
     setHoveredAttachment(null);
     window.setTimeout(() => focusPromptInput(inputRef.current), 0);
   }
@@ -1527,13 +1960,70 @@ export function App() {
     window.setTimeout(() => focusPromptInput(inputRef.current), 0);
   }
 
-  const highlightedSelectedCuaEntities = draftCuaEntities;
+  const groupedCuaEntities = useMemo(() => dedupePointerEntities(draftCuaEntities).filter(hasPreciseCuaRect), [draftCuaEntities]);
+  const draftCuaGroupRect = useMemo(() => rectForCuaEntityGroup(draftCuaEntities), [draftCuaEntities]);
+  const draftCuaGroupPillStyle = useMemo<CSSProperties | undefined>(() => {
+    if (!draftCuaGroupRect) return undefined;
+    const pillWidth = draftCuaEntities.length >= 10 ? 74 : 62;
+    const pillHeight = 30;
+    const left = clampNumber(draftCuaGroupRect.x + draftCuaGroupRect.width / 2 - pillWidth / 2, 12, Math.max(12, window.innerWidth - pillWidth - 12), 12);
+    const above = draftCuaGroupRect.y - pillHeight - 8;
+    const below = draftCuaGroupRect.y + draftCuaGroupRect.height + 8;
+    const top = above >= 12 ? above : clampNumber(below, 12, Math.max(12, window.innerHeight - pillHeight - 12), 12);
+    return { left, top };
+  }, [draftCuaEntities.length, draftCuaGroupRect]);
+  const showCuaGroupOverlay = cuaSelectionActive && groupedCuaEntities.length > 0;
+  const showDraftCuaGroupPill = showCuaGroupOverlay && draftCuaEntities.length > 0 && Boolean(draftCuaGroupPillStyle);
 
   const selectedEntity = useMemo(() => {
     return selectedCuaEntities[0];
   }, [selectedCuaEntities]);
   const selectedCuaListItems = useMemo(() => selectedListItemsForContext(selectedCuaEntities), [selectedCuaEntities]);
-  const pinnedContextChipIds = useMemo(() => new Set(pinnedContextChips.map((chip) => chip.id)), [pinnedContextChips]);
+  const pinnedCuaEntityIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const chip of pinnedContextChips) {
+      for (const entity of chip.entityRefs ?? []) ids.add(entity.id);
+    }
+    return ids;
+  }, [pinnedContextChips]);
+  const unpinnedSelectedCuaEntities = useMemo(
+    () => selectedCuaEntities.filter((entity) => !pinnedCuaEntityIds.has(entity.id)),
+    [pinnedCuaEntityIds, selectedCuaEntities]
+  );
+  const selectionContextChip = useMemo(() => (selection ? contextChipFromRegion(selectionRegion(selection), 'pinned') : undefined), [selection]);
+  const selectedCuaContextChip = useMemo(() => {
+    return contextChipFromCuaEntityGroup(unpinnedSelectedCuaEntities, 'pinned');
+  }, [unpinnedSelectedCuaEntities]);
+  const contextRowChips = useMemo(
+    () => uniqueContextChips([selectionContextChip, ...pinnedContextChips, selectedCuaContextChip]),
+    [pinnedContextChips, selectedCuaContextChip, selectionContextChip]
+  );
+  const contextRowChipIds = useMemo(() => new Set(contextRowChips.map((chip) => chip.id)), [contextRowChips]);
+  const windowContextCandidate = useMemo(() => (windowPreview ? contextChipFromWindowPreview(windowPreview) : undefined), [windowPreview]);
+  const capabilityMatchText = useMemo(() => {
+    const chipText = [...contextRowChips, ...candidateContextChips, windowContextCandidate]
+      .filter((chip): chip is ContextChip => Boolean(chip))
+      .flatMap((chip) => [
+        chip.label,
+        chip.subtitle,
+        chip.selectionText,
+        chip.windowRef?.title,
+        chip.windowRef?.app,
+        chip.windowRef?.process,
+        ...(chip.entityRefs ?? []).flatMap((entity) => [entity.text, entity.name, entity.role, entity.kind])
+      ]);
+    const entityText = [...selectedCuaEntities, ...draftCuaEntities].flatMap((entity) => [entity.text, entity.name, entity.role, entity.kind]);
+    return [prompt, windowPreviewLabel(windowPreview), ...chipText, ...entityText].filter(Boolean).join(' ');
+  }, [candidateContextChips, contextRowChips, draftCuaEntities, prompt, selectedCuaEntities, windowContextCandidate, windowPreview]);
+  const matchedCapabilities: CapabilityHints = useMemo(
+    () => matchCapabilitySnapshot(capabilitySnapshot, backend, capabilityMatchText),
+    [backend, capabilityMatchText, capabilitySnapshot]
+  );
+  const attachedContextChipIds = useMemo(() => {
+    const ids = new Set(contextRowChipIds);
+    for (const entity of selectedCuaEntities) ids.add(`entity:${entity.id}`);
+    return ids;
+  }, [contextRowChipIds, selectedCuaEntities]);
   const showContextRolePreview = pinnedContextChips.length >= 2 && CONTEXT_TRANSFER_PATTERN.test(prompt);
   const sourceContextChip = showContextRolePreview ? pinnedContextChips[0] : undefined;
   const targetContextChip = showContextRolePreview ? pinnedContextChips[1] : undefined;
@@ -1559,6 +2049,45 @@ export function App() {
         .slice(0, MAX_CUA_HIGHLIGHTS),
     [cuaCandidateCursor.localX, cuaCandidateCursor.localY, cuaEntities, cuaHighlightRegion]
   );
+
+  const cuaBrushCandidates = useMemo<CuaBrushCandidate[]>(() => {
+    const selectedEntityIds = new Set(selectedCuaEntities.map((entity) => entity.id));
+    const candidates: CuaBrushCandidate[] = [];
+    for (const entity of cuaEntities) {
+      if (entity.groundingRef?.provider !== 'cua') continue;
+      if (selectedEntityIds.has(entity.id)) continue;
+      const rect = highlightRectForEntity(entity);
+      if (rect) candidates.push({ entity, rect });
+    }
+    return candidates;
+  }, [cuaEntities, selectedCuaEntities]);
+
+  useEffect(() => {
+    if (!liveCuaPreview || cuaBrushCandidates.length === 0) return;
+    const result = updateCuaBrushState(cuaBrushStateRef.current, {
+      point: { x: cursor.localX, y: cursor.localY, t: Date.now() },
+      candidates: cuaBrushCandidates,
+      windowKey: liveGroundingWindowKeyRef.current,
+      options: cuaBrushOptionsRef.current
+    });
+    cuaBrushStateRef.current = result.state;
+    if (result.matchedEntities.length === 0) return;
+    setDraftCuaEntities((current) => {
+      const next = mergeCuaEntityGroup(current, result.matchedEntities, cuaGroupLimitRef.current);
+      return next.length === current.length && next.every((entity, index) => entity.id === current[index]?.id) ? current : next;
+    });
+  }, [cuaBrushCandidates, cursor.localX, cursor.localY, liveCuaPreview]);
+
+  useEffect(() => {
+    if (draftCuaEntities.length === 0) return;
+    const timer = window.setInterval(() => {
+      if (!isCuaBrushIdleExpired(cuaBrushStateRef.current, Date.now(), cuaBrushOptionsRef.current)) return;
+      resetCuaBrushState(liveGroundingWindowKeyRef.current);
+      setDraftCuaEntities([]);
+      setHoveredCuaEntityId(null);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [draftCuaEntities.length, resetCuaBrushState]);
 
   const cuaPickerCandidates = useMemo(() => {
     const byId = new Map<string, PointerEntity>();
@@ -1591,11 +2120,11 @@ export function App() {
       const hovered = [...draftCuaEntities, ...cuaPickerCandidates, ...cuaEntities].find((entity) => entity.id === hoveredCuaEntityId);
       if (hovered && hasPreciseCuaRect(hovered)) byId.set(hovered.id, hovered);
     }
-    for (const entity of highlightedSelectedCuaEntities) {
+    for (const entity of groupedCuaEntities) {
       if (hasPreciseCuaRect(entity)) byId.set(entity.id, entity);
     }
     return [...byId.values()];
-  }, [cuaEntities, cuaPickerCandidates, cuaPickerLocked, draftCuaEntities, highlightedSelectedCuaEntities, hoveredCuaEntityId]);
+  }, [cuaEntities, cuaPickerCandidates, cuaPickerLocked, draftCuaEntities, groupedCuaEntities, hoveredCuaEntityId]);
 
   const debugCuaBoxEntities = useMemo(() => {
     const byId = new Map<string, PointerEntity>();
@@ -1610,7 +2139,6 @@ export function App() {
 
   const showCuaDebugOverlay =
     active &&
-    state === 'composing' &&
     settings?.cuaDebugOverlayEnabled === true &&
     settings?.cuaMode !== 'off' &&
     !selecting &&
@@ -1623,7 +2151,6 @@ export function App() {
 
   const showCuaPicker =
     active &&
-    state === 'composing' &&
     settings?.cuaDebugOverlayEnabled === true &&
     settings?.cuaMode !== 'off' &&
     !selecting &&
@@ -1633,6 +2160,7 @@ export function App() {
     !menuOpen &&
     !selection &&
     selectedCuaEntities.length === 0 &&
+    draftCuaEntities.length === 0 &&
     cuaPickerCandidates.length > 0;
 
   function computeCuaPickerLayout() {
@@ -1681,12 +2209,52 @@ export function App() {
       const rect = highlightRectForEntity(entity);
       return rect ? pointInLocalRect(cursor.localX, cursor.localY, rect, 2) : false;
     });
+  const cursorInsideCuaGroupBox =
+    showCuaGroupOverlay &&
+    groupedCuaEntities.some((entity) => {
+      const rect = highlightRectForEntity(entity);
+      return rect ? pointInLocalRect(cursor.localX, cursor.localY, rect, 4) : false;
+    });
+  const cursorInsideCuaInteractiveBox = cursorInsideCuaDebugBox || cursorInsideCuaGroupBox;
 
   const hoveredCuaEntity = useMemo(() => {
     if (!hoveredCuaEntityId) return undefined;
     return [...debugCuaBoxEntities, ...draftCuaEntities, ...cuaPickerCandidates, ...cuaEntities].find((entity) => entity.id === hoveredCuaEntityId);
   }, [cuaEntities, cuaPickerCandidates, debugCuaBoxEntities, draftCuaEntities, hoveredCuaEntityId]);
   const hoveredCuaRect = hoveredCuaEntity ? highlightRectForEntity(hoveredCuaEntity) : undefined;
+  const floatingCuaContextChips = useMemo(() => {
+    const chips: ContextChip[] = [];
+    const seen = new Set<string>();
+    const addEntity = (entity: PointerEntity | undefined) => {
+      if (!entity || entity.groundingRef?.provider !== 'cua') return;
+      const chip = contextChipFromEntity(entity);
+      if (attachedContextChipIds.has(chip.id) || seen.has(chip.id)) return;
+      seen.add(chip.id);
+      chips.push(chip);
+    };
+    addEntity(hoveredCuaEntity);
+    for (const entity of cuaPickerCandidates) addEntity(entity);
+    return chips.slice(0, FLOATING_CONTEXT_CHIP_LIMIT);
+  }, [attachedContextChipIds, cuaPickerCandidates, hoveredCuaEntity]);
+
+  function candidateContextChipStyle(chip: ContextChip, index = 0): CSSProperties {
+    const entity = chip.entityRefs?.[0];
+    const rect = entity ? highlightRectForEntity(entity) : windowChipLocalRect(chip, cursor);
+    const chipWidth = 248;
+    const chipHeight = 38;
+    if (rect) {
+      const horizontalOffset = ((index % 3) - 1) * 8;
+      const left = clampNumber(rect.x + rect.width / 2 - chipWidth / 2 + horizontalOffset, 12, Math.max(12, window.innerWidth - chipWidth - 12), 12);
+      const above = rect.y - chipHeight - 8;
+      const below = rect.y + rect.height + 8;
+      const top = above >= 12 ? above : clampNumber(below, 12, Math.max(12, window.innerHeight - chipHeight - 12), 12);
+      return { left, top };
+    }
+    return {
+      left: clampNumber(cursor.localX + 18, 12, Math.max(12, window.innerWidth - 260), 12),
+      top: clampNumber(cursor.localY - 18 + index * 42, 12, Math.max(12, window.innerHeight - 54), 12)
+    };
+  }
   const cuaDebugTooltipStyle: CSSProperties | undefined =
     hoveredCuaEntity && hoveredCuaRect
       ? {
@@ -1706,42 +2274,45 @@ export function App() {
       selecting ||
       Boolean(selectionDrag) ||
       Boolean(selection) ||
-      Boolean(draggingContextChip);
+      Boolean(draggingContextChip) ||
+      draftCuaEntities.length > 0;
 
     if (shouldHideCandidate) {
-      setCandidateContextChip(null);
+      setCandidateContextChips([]);
       return;
     }
 
-    const candidate = hoveredCuaEntity
-      ? contextChipFromEntity(hoveredCuaEntity)
-      : windowPreview
-        ? contextChipFromWindowPreview(windowPreview)
-        : undefined;
+    const candidates =
+      floatingCuaContextChips.length > 0
+        ? floatingCuaContextChips
+        : windowContextCandidate && !attachedContextChipIds.has(windowContextCandidate.id)
+          ? [windowContextCandidate]
+          : [];
 
-    if (!candidate || pinnedContextChipIds.has(candidate.id)) {
-      setCandidateContextChip(null);
+    if (candidates.length === 0) {
+      setCandidateContextChips([]);
       return;
     }
 
     const timer = window.setTimeout(() => {
-      setCandidateContextChip(candidate);
+      setCandidateContextChips(candidates);
     }, CONTEXT_CHIP_HOVER_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [
     active,
+    attachedContextChipIds,
     captureActivity.active,
     draggingContextChip,
+    draftCuaEntities.length,
+    floatingCuaContextChips,
     historyOpen,
-    hoveredCuaEntity,
     menuOpen,
-    pinnedContextChipIds,
     selecting,
     selection,
     selectionDrag,
     settingsOpen,
     state,
-    windowPreview
+    windowContextCandidate
   ]);
 
   useEffect(() => {
@@ -1825,7 +2396,7 @@ export function App() {
       Boolean(cuaPickerResizeDrag) ||
       Boolean(draggingContextChip);
 
-    if (cursorInsideCuaPicker || cursorInsideCuaDebugBox) {
+    if (cursorInsideCuaPicker || cursorInsideCuaInteractiveBox) {
       cuaPickerInteractiveRef.current = true;
       if (!lastInteractiveRef.current) {
         lastInteractiveRef.current = true;
@@ -1844,7 +2415,7 @@ export function App() {
   }, [
     active,
     backendDropdownOpen,
-    cursorInsideCuaDebugBox,
+    cursorInsideCuaInteractiveBox,
     cuaPickerResizeDrag,
     cursorInsideCuaPicker,
     historyOpen,
@@ -1859,11 +2430,10 @@ export function App() {
     settingsOpen
   ]);
 
-
-
   const glowFillColor = '#0D6FFF';
   const modalOpen = settingsOpen || historyOpen;
-  const shellHiddenForContextCapture = selecting || Boolean(selectionDrag) || captureActivity.active;
+  const shellHiddenForContextCapture = selecting || Boolean(selectionDrag);
+  const showCuaBrushTuningPanel = active && settings?.cuaMode !== 'off' && !shellHiddenForContextCapture && !menuOpen && !settingsOpen && !historyOpen;
   const overlayNeedsPointerEvents =
     detached ||
     menuOpen ||
@@ -1876,7 +2446,8 @@ export function App() {
     Boolean(selection) ||
     Boolean(panelResizeDrag) ||
     Boolean(selectionDrag) ||
-    Boolean(cuaPickerResizeDrag);
+    Boolean(cuaPickerResizeDrag) ||
+    showCuaBrushTuningPanel;
   const menuStyle = useMemo<CSSProperties>(() => {
     const width = 220;
     const estimatedHeight = 232;
@@ -1898,25 +2469,23 @@ export function App() {
         {
           '--pill-width': `${pillWidth}px`,
           '--pill-height': `${pillHeight}px`,
-          '--radius-pill': `${pillHeight / 2}px`
+          '--radius-pill': `${pillRadius}px`
         } as CSSProperties
       }
     >
-      <CuaTaskPanel
-        tasks={cuaTasks}
-        theme={settings?.modalTheme ?? 'blue'}
-        onCancel={cancelCuaTask}
-        onStartRecording={startCuaTaskRecording}
-        onStopRecording={stopCuaTaskRecording}
-        onReplayRecording={replayCuaTaskRecording}
-      />
       <BackgroundProcessDock
-        conversations={backgroundConversations}
+        conversations={conversationsList}
+        tasks={cuaTasks}
+        pinnedConversationIds={backgroundConversationIds}
         corner={settings?.backgroundProcessCorner ?? 'bottom-left'}
         theme={settings?.modalTheme ?? 'blue'}
         terminalErrors={backgroundTerminalErrors}
         onOpen={(id) => void loadConversation(id)}
         onTerminal={(id) => void continueConversation('terminal', id)}
+        onStop={cancelCuaTask}
+        onStartRecording={startCuaTaskRecording}
+        onStopRecording={stopCuaTaskRecording}
+        onReplayRecording={replayCuaTaskRecording}
         onDelete={(id) => void deleteConversation(id)}
       />
 
@@ -1949,36 +2518,35 @@ export function App() {
             </defs>
           </svg>
 
-          {candidateContextChip && !draggingContextChip && (
-            <div
-              className="context-candidate-chip"
-              style={{
-                left: clampNumber(cursor.localX + 18, 12, Math.max(12, window.innerWidth - 260), 12),
-                top: clampNumber(cursor.localY - 18, 12, Math.max(12, window.innerHeight - 54), 12)
-              }}
-              onMouseDown={(event) => beginContextChipDrag(candidateContextChip, event)}
-              title={contextChipTitle(candidateContextChip)}
-            >
-              <ContextChipGlyph chip={candidateContextChip} />
-              <span className="context-candidate-chip-text">
-                <span>{candidateContextChip.label}</span>
-                {candidateContextChip.subtitle && <small>{candidateContextChip.subtitle}</small>}
-              </span>
-              <button
-                type="button"
-                className="context-candidate-chip-add"
-                onMouseDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  commitContextChip(candidateContextChip);
-                }}
-                aria-label="Pin context"
-                title="Pin context"
+          {!draggingContextChip &&
+            candidateContextChips.map((chip, index) => (
+              <div
+                key={chip.id}
+                className={`context-candidate-chip is-${chip.kind}`}
+                style={candidateContextChipStyle(chip, index)}
+                onMouseDown={(event) => beginContextChipDrag(chip, event)}
+                title={contextChipTitle(chip)}
               >
-                +
-              </button>
-            </div>
-          )}
+                <ContextChipGlyph chip={chip} />
+                <span className="context-candidate-chip-text">
+                  <span>{chip.label}</span>
+                  {chip.subtitle && <small>{chip.subtitle}</small>}
+                </span>
+                <button
+                  type="button"
+                  className="context-candidate-chip-add"
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    commitContextChip(chip);
+                  }}
+                  aria-label="Add context"
+                  title="Add context"
+                >
+                  +
+                </button>
+              </div>
+            ))}
 
           {draggingContextChip && (
             <div
@@ -1995,6 +2563,54 @@ export function App() {
                 {draggingContextChip.chip.subtitle && <small>{draggingContextChip.chip.subtitle}</small>}
               </span>
             </div>
+          )}
+
+          {showCuaGroupOverlay &&
+            groupedCuaEntities.map((entity) => {
+              const rect = highlightRectForEntity(entity);
+              if (!rect) return null;
+              const isHovered = hoveredCuaEntityId === entity.id;
+              return (
+                <div
+                  key={`cua-group-${entity.id}`}
+                  className={`cua-element-highlight cua-element-selected${isHovered ? ' is-hovered' : ''}`}
+                  style={{
+                    left: rect.x,
+                    top: rect.y,
+                    width: rect.width,
+                    height: rect.height
+                  }}
+                  onMouseEnter={() => setHoveredCuaEntityId(entity.id)}
+                  onMouseLeave={() => setHoveredCuaEntityId(null)}
+                  title={entityDebugDetails(entity).join('\n')}
+                >
+                  <button
+                    type="button"
+                    className="cua-element-remove-pill"
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={(event) => removeCuaGroupEntity(entity.id, event)}
+                    aria-label={`Remove ${entityLabel(entity)} from CUA group`}
+                    title="Remove from group"
+                  >
+                    x
+                  </button>
+                </div>
+              );
+            })}
+
+          {showDraftCuaGroupPill && draftCuaGroupPillStyle && (
+            <button
+              type="button"
+              className="cua-selection-group-pill"
+              style={draftCuaGroupPillStyle}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => commitDraftCuaGroup(event)}
+              aria-label={`Add ${draftCuaEntities.length} CUA elements to conversation`}
+              title="Add group to conversation"
+            >
+              <span className="cua-selection-group-plus">+</span>
+              <span>{draftCuaEntities.length}</span>
+            </button>
           )}
 
           {showCuaDebugOverlay &&
@@ -2254,7 +2870,9 @@ export function App() {
                   <div className="flex flex-col gap-1 text-[11px] text-white/85">
                     {selectedCuaListItems.length > 0 && (
                       <div className="rounded-[var(--radius-pill)] bg-white/5 p-1.5 text-white/85">
-                        <div className="mb-1 text-[9px] uppercase text-white/50">{selectedCuaListItems.length} selected list item{selectedCuaListItems.length === 1 ? '' : 's'}</div>
+                        <div className="mb-1 text-[9px] uppercase text-white/50">
+                          {selectedCuaListItems.length} selected list item{selectedCuaListItems.length === 1 ? '' : 's'}
+                        </div>
                         <div className="grid gap-0.5">
                           {selectedCuaListItems.slice(0, 5).map((entity) => (
                             <div key={entity.id} className="truncate">
@@ -2320,21 +2938,25 @@ export function App() {
               )}
 
               {/* Small Pill above the main capsule to switch backend source */}
-              <div
-                className="small-pill absolute bottom-[calc(100%+6px)] left-0 z-10 flex items-center gap-1.5 px-3 py-1 bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_4px_12px_rgba(0,0,0,0.08)] border border-glass-border rounded-full w-fit cursor-pointer hover:bg-[rgba(13,111,255,0.95)] hover:scale-[1.02] active:scale-[0.98] transition-all duration-150 text-white font-semibold select-none animate-elastic-pop origin-bottom-left"
-                style={{
-                  height: `${smallPillHeight}px`,
-                  fontSize: `${Math.max(9, Math.min(11, pillHeight - 14))}px`
-                }}
-                onClick={() => setBackendDropdownOpen(!backendDropdownOpen)}
-              >
-                {/* Inner Shadow Layer covering the ENTIRE small pill, inheriting border-radius */}
-                <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_1.5px_2px_2px_-2px_rgba(255,255,255,0.55),inset_0px_-0.5px_0.5px_0px_rgba(255,255,255,0.2),inset_0px_0.5px_0.5px_0px_rgba(255,255,255,0.2)]" />
-                <span className="flex items-center gap-1">
-                  {getBackendIcon(backend, Math.max(10, Math.min(12, pillHeight - 14)))}
-                  <span>{backendLabel(backend)}</span>
-                </span>
-                <ChevronIcon size={7} isOpen={backendDropdownOpen} />
+              <div className="absolute bottom-[calc(100%+6px)] left-0 z-10 flex items-center gap-1.5 animate-elastic-pop origin-bottom-left">
+                <div
+                  className="small-pill relative flex items-center gap-1.5 px-3 py-1 bg-[rgba(13,111,255,0.85)] backdrop-blur-[6.8px] shadow-[0px_4px_12px_rgba(0,0,0,0.08)] border border-glass-border rounded-full w-fit cursor-pointer hover:bg-[rgba(13,111,255,0.95)] hover:scale-[1.02] active:scale-[0.98] transition-all duration-150 text-white font-semibold select-none"
+                  style={{
+                    height: `${smallPillHeight}px`,
+                    fontSize: `${Math.max(9, Math.min(11, pillHeight - 14))}px`
+                  }}
+                  onClick={() => setBackendDropdownOpen(!backendDropdownOpen)}
+                >
+                  {/* Inner Shadow Layer covering the ENTIRE small pill, inheriting border-radius */}
+                  <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_1.5px_2px_2px_-2px_rgba(255,255,255,0.55),inset_0px_-0.5px_0.5px_0px_rgba(255,255,255,0.2),inset_0px_0.5px_0.5px_0px_rgba(255,255,255,0.2)]" />
+                  <span className="flex items-center gap-1">
+                    {getBackendIcon(backend, Math.max(10, Math.min(12, pillHeight - 14)))}
+                    <span>{backendLabel(backend)}</span>
+                  </span>
+                  <ChevronIcon size={7} isOpen={backendDropdownOpen} />
+                </div>
+                <CapabilityPill kind="mcp" items={matchedCapabilities.mcp} height={smallPillHeight} />
+                <CapabilityPill kind="skills" items={matchedCapabilities.skills} height={smallPillHeight} />
               </div>
 
               {/* Custom glassmorphic backend selector dropdown list, hovering above the small pill */}
@@ -2506,18 +3128,57 @@ export function App() {
               {/* Blur glow layer — always matches pill shape/size */}
               <div
                 className="absolute inset-0 bg-[rgba(13,111,255,0.56)] blur-[23.9px] z-0 pointer-events-none animate-pill-glow"
-                style={{ borderRadius: `${pillHeight / 2}px` }}
+                style={{ borderRadius: `${pillRadius}px` }}
               />
 
               <div
                 className="command-bubble relative z-4 flex flex-col animate-pill-unfold origin-left"
                 data-pill-theme={settings?.modalTheme ?? 'blue'}
                 style={{
-                  borderRadius: `${pillHeight / 2}px`
+                  borderRadius: `${pillRadius}px`
                 }}
               >
                 {/* Inner Shadow Layer covering the ENTIRE capsule, inheriting border-radius */}
                 <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
+
+                <div className="pill-context-row" onMouseDown={onPillMouseDown}>
+                  <div
+                    ref={contextShelfRef}
+                    className={`context-chip-shelf${draggingContextChip?.overShelf ? ' is-drop-target' : ''}${contextRowChips.length === 0 ? ' is-empty' : ''}`}
+                  >
+                    {contextRowChips.length === 0 && !draggingContextChip && <span className="context-chip-shelf-empty">Hover anything to add context</span>}
+                    {draggingContextChip && contextRowChips.length === 0 && <span className="context-chip-shelf-empty">Drop context</span>}
+                    {contextRowChips.map((chip) => (
+                      <div
+                        key={chip.id}
+                        className="context-chip-token"
+                        title={contextChipTitle(chip)}
+                        onMouseEnter={() => {
+                          if (chip.kind === 'window') setHoveredAttachment('window');
+                          if (chip.kind === 'region') setHoveredAttachment('selection');
+                          if (chip.kind === 'entity') setHoveredAttachment('entity');
+                        }}
+                        onMouseLeave={() => setHoveredAttachment(null)}
+                      >
+                        <ContextChipGlyph chip={chip} />
+                        <span className="context-chip-token-label">{chip.label}</span>
+                        <button
+                          type="button"
+                          className="context-chip-token-remove"
+                          onMouseDown={(event) => event.stopPropagation()}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            clearContextRowChip(chip);
+                          }}
+                          aria-label={`Remove ${chip.label}`}
+                          title="Remove context"
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
                 {showContextRolePreview && (
                   <div className="context-role-preview">
@@ -2530,7 +3191,7 @@ export function App() {
                         onMouseDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
                           event.stopPropagation();
-                          clearPinnedContextChip(sourceContextChip.id);
+                          clearContextRowChip(sourceContextChip);
                         }}
                         aria-label={`Remove ${sourceContextChip.label}`}
                         title="Remove source"
@@ -2560,7 +3221,7 @@ export function App() {
                         onMouseDown={(event) => event.stopPropagation()}
                         onClick={(event) => {
                           event.stopPropagation();
-                          clearPinnedContextChip(targetContextChip.id);
+                          clearContextRowChip(targetContextChip);
                         }}
                         aria-label={`Remove ${targetContextChip.label}`}
                         title="Remove target"
@@ -2572,7 +3233,7 @@ export function App() {
                 )}
 
                 <div
-                  className="flex items-center w-full relative z-1"
+                  className="pill-instruction-row"
                   style={{
                     minHeight: `${pillHeight}px`,
                     gap: `${gap}px`,
@@ -2583,124 +3244,6 @@ export function App() {
                   }}
                   onMouseDown={onPillMouseDown}
                 >
-                  {(pinnedContextChips.length > 0 || draggingContextChip) && (
-                    <div
-                      ref={contextShelfRef}
-                      className={`context-chip-shelf${draggingContextChip?.overShelf ? ' is-drop-target' : ''}${pinnedContextChips.length === 0 ? ' is-empty' : ''}`}
-                    >
-                      {pinnedContextChips.length === 0 && <span className="context-chip-shelf-empty">Drop context</span>}
-                      {pinnedContextChips.map((chip) => (
-                        <div key={chip.id} className="context-chip-token" title={contextChipTitle(chip)}>
-                          <ContextChipGlyph chip={chip} />
-                          <span className="context-chip-token-label">{chip.label}</span>
-                          <button
-                            type="button"
-                            className="context-chip-token-remove"
-                            onMouseDown={(event) => event.stopPropagation()}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              clearPinnedContextChip(chip.id);
-                            }}
-                            aria-label={`Remove ${chip.label}`}
-                            title="Remove context"
-                          >
-                            x
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Context Attachments Indicators */}
-                  {(windowPreview?.window || selection || selectedCuaEntities.length > 0) && (
-                    <div className="flex items-center gap-1.5 shrink-0 select-none">
-                      {windowPreview?.window && (
-                        <div
-                          className="group relative flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all duration-150 cursor-default animate-elastic-pop"
-                          style={{
-                            width: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
-                            height: `${Math.max(20, Math.min(28, pillHeight - 8))}px`
-                          }}
-                          onMouseEnter={() => setHoveredAttachment('window')}
-                          onMouseLeave={() => setHoveredAttachment(null)}
-                          title={`Window: ${windowPreviewLabel(windowPreview) ?? 'Current window'}`}
-                        >
-                          <WindowGlyph size={Math.max(12, Math.min(15, pillHeight - 12))} />
-                        </div>
-                      )}
-
-                      {selection && (
-                        <div
-                          className="group relative flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-[rgba(229,56,59,0.95)] transition-all duration-150 cursor-pointer animate-elastic-pop font-bold"
-                          style={{
-                            width: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
-                            height: `${Math.max(20, Math.min(28, pillHeight - 8))}px`
-                          }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelection(null);
-                            setHoveredAttachment(null);
-                          }}
-                          onMouseEnter={() => setHoveredAttachment('selection')}
-                          onMouseLeave={() => setHoveredAttachment(null)}
-                          title="Attached: Selected Region (Click to remove)"
-                        >
-                          <span
-                            className="group-hover:hidden flex items-center justify-center text-white/90"
-                            style={{ fontSize: `${Math.max(10, Math.min(13, pillHeight - 14))}px` }}
-                          >
-                            📸
-                          </span>
-                          <span
-                            className="hidden group-hover:flex items-center justify-center text-white"
-                            style={{ fontSize: `${Math.max(12, Math.min(14, pillHeight - 14))}px` }}
-                          >
-                            ×
-                          </span>
-                        </div>
-                      )}
-
-                      {selectedCuaEntities.length > 0 && selectedEntity && (
-                        <div
-                          className="group relative flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-[rgba(229,56,59,0.95)] transition-all duration-150 cursor-pointer animate-elastic-pop font-bold"
-                          style={{
-                            width: `${Math.max(20, Math.min(28, pillHeight - 8))}px`,
-                            height: `${Math.max(20, Math.min(28, pillHeight - 8))}px`
-                          }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDraftCuaEntities([]);
-                            setSelectedCuaEntities([]);
-                            setCuaEntities([]);
-                            setCuaPickerLocked(false);
-                            setCuaPickerPosition(null);
-                            setHoveredAttachment(null);
-                          }}
-                          onMouseEnter={() => setHoveredAttachment('entity')}
-                          onMouseLeave={() => setHoveredAttachment(null)}
-                          title={selectedCuaAttachmentTitle(selectedCuaEntities)}
-                        >
-                          <span
-                            className="group-hover:hidden flex items-center justify-center text-white/90"
-                          >
-                            <EntityKindGlyph kind={selectedEntity.kind} size={Math.max(11, Math.min(14, pillHeight - 12))} />
-                          </span>
-                          {selectedCuaListItems.length > 1 && (
-                            <span className="pointer-events-none absolute -right-1 -top-1 flex min-w-[14px] items-center justify-center rounded-full bg-white px-1 text-[8px] font-black leading-[14px] text-[#0D6FFF] shadow-[0_1px_4px_rgba(0,0,0,0.18)]">
-                              {selectedCuaListItems.length}
-                            </span>
-                          )}
-                          <span
-                            className="hidden group-hover:flex items-center justify-center text-white"
-                            style={{ fontSize: `${Math.max(12, Math.min(14, pillHeight - 14))}px` }}
-                          >
-                            ×
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
                   <textarea
                     ref={inputRef}
                     autoFocus
@@ -2756,10 +3299,10 @@ export function App() {
                       onScroll={onStreamPanelScroll}
                     >
                       <div className="flex justify-between gap-2.5 text-white/50 text-[11px] font-semibold uppercase tracking-[0.02em]">
-                        <span>{backendLabel(backend)}</span>
+                        <span className="font-instrument font-normal tracking-[0]">{backendLabel(backend)}</span>
                         <span>{statusLabel(state)}</span>
                       </div>
-                      <div className="flex flex-col gap-4 mt-2.5 w-full">
+                      <div ref={streamPanelContentRef} className="flex flex-col gap-4 mt-2.5 w-full">
                         {historyTurns.map((turn, index) => {
                           const showContinueActions = turn.role === 'assistant' && index === historyTurns.length - 1 && Boolean(continuableBackend);
                           if (turn.role === 'user') {
@@ -2873,6 +3416,16 @@ export function App() {
                   </>
                 )}
               </div>
+
+              {showCuaBrushTuningPanel && (
+                <CuaBrushTuningPanel
+                  options={cuaBrushOptions}
+                  groupLimit={cuaGroupLimit}
+                  updateOption={updateCuaBrushOption}
+                  updateGroupLimit={updateCuaGroupLimit}
+                  resetOptions={resetCuaBrushOptions}
+                />
+              )}
             </section>
           )}
 
@@ -2941,12 +3494,15 @@ export function App() {
           fetchedModels={fetchedModels}
           isFetchingModels={isFetchingModels}
           fetchModelsError={fetchModelsError}
+          capabilitySnapshot={capabilitySnapshot}
+          refreshingCapabilities={refreshingCapabilities}
           conversations={conversationsList}
           onClose={() => setSettingsOpen(false)}
           updateSettings={updateSettings}
           updateSecret={updateSecret}
           clearSecret={clearSecret}
           fetchModels={() => void fetchModels()}
+          refreshCapabilities={() => void refreshCapabilities()}
           saveSettings={() => void saveSettings()}
           loadConversation={(id) => void loadConversation(id)}
           deleteConversation={(id, event) => void handleDeleteConversation(id, event)}
@@ -2962,6 +3518,222 @@ export function App() {
         />
       )}
     </div>
+  );
+}
+
+function CuaBrushTuningPanel({
+  options,
+  groupLimit,
+  updateOption,
+  updateGroupLimit,
+  resetOptions
+}: {
+  options: CuaBrushOptions;
+  groupLimit: number;
+  updateOption: (key: CuaBrushTuningKey, value: number) => void;
+  updateGroupLimit: (value: number) => void;
+  resetOptions: () => void;
+}) {
+  const groups: Array<CuaBrushTuningField['group']> = ['Timing', 'Brush', 'Lasso'];
+  return (
+    <div
+      className="cua-brush-tuning-panel relative z-20 mt-2 max-h-[360px] w-full overflow-y-auto rounded-[18px] border border-white/15 bg-[rgba(7,19,42,0.88)] p-2.5 text-white shadow-[0_14px_34px_rgba(0,0,0,0.26)] backdrop-blur-[18px] pointer-events-auto"
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="rounded-full bg-[#5ea8ff]/20 px-2 py-0.5 text-[10px] font-black uppercase tracking-[0.08em] text-[#9fcbff]">CUA tune</span>
+          <span className="text-[10px] font-semibold text-white/58">temporary numeric brush / lasso thresholds</span>
+        </div>
+        <button
+          type="button"
+          className="rounded-full border border-white/14 bg-white/10 px-2.5 py-1 text-[10px] font-bold text-white/78 transition hover:bg-white/18 hover:text-white"
+          onClick={resetOptions}
+        >
+          Reset
+        </button>
+      </div>
+      <div className="grid gap-2">
+        <section className="rounded-[14px] bg-[#3b82f6]/[0.12] p-2">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <div className="text-[9px] font-black uppercase tracking-[0.12em] text-white/48">Limit</div>
+            <div className="text-[10px] font-bold text-white/68">max selected CUA entities</div>
+          </div>
+          <label className="grid grid-cols-[74px_68px_1fr] items-center gap-2 text-[10px] text-white/78">
+            <span className="truncate font-semibold">Max items</span>
+            <NumericTuningInput value={groupLimit} min={1} max={CUA_GROUP_LIMIT_MAX} step={1} onCommit={updateGroupLimit} />
+            <span className="text-[9px] font-bold text-white/42">1-{CUA_GROUP_LIMIT_MAX} ct</span>
+          </label>
+        </section>
+        {groups.map((group) => (
+          <section key={group} className="rounded-[14px] bg-white/[0.055] p-2">
+            <div className="mb-1.5 text-[9px] font-black uppercase tracking-[0.12em] text-white/42">{group}</div>
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              {CUA_BRUSH_TUNING_FIELDS.filter((field) => field.group === group).map((field) => (
+                <label key={field.key} className="grid grid-cols-[74px_68px_1fr] items-center gap-2 text-[10px] text-white/76">
+                  <span className="truncate font-semibold">{field.label}</span>
+                  <NumericTuningInput
+                    value={options[field.key]}
+                    min={field.min}
+                    max={field.max}
+                    step={field.step}
+                    onCommit={(value) => updateOption(field.key, value)}
+                  />
+                  <span className="text-[9px] font-bold text-white/42">
+                    {field.min}-{field.max}
+                    {field.unit ? ` ${field.unit}` : ''}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function NumericTuningInput({ value, min, max, step, onCommit }: { value: number; min: number; max: number; step: number; onCommit: (value: number) => void }) {
+  const [draft, setDraft] = useState(() => String(value));
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!focused) setDraft(String(value));
+  }, [focused, value]);
+
+  const commitDraft = useCallback(() => {
+    const trimmed = draft.trim();
+    if (trimmed.length === 0) {
+      setDraft(String(value));
+      return;
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) {
+      setDraft(String(value));
+      return;
+    }
+    onCommit(parsed);
+  }, [draft, onCommit, value]);
+
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      step={step}
+      value={draft}
+      className="h-[22px] w-[56px] rounded-[8px] border border-white/14 bg-black/24 px-1.5 text-right text-[10px] font-bold text-white outline-none focus:border-[#72b7ff]/80"
+      onFocus={() => setFocused(true)}
+      onBlur={() => {
+        setFocused(false);
+        commitDraft();
+      }}
+      onChange={(event) => {
+        const next = event.target.value;
+        setDraft(next);
+        const parsed = Number(next);
+        if (next.trim().length > 0 && Number.isFinite(parsed) && parsed >= min && parsed <= max) {
+          onCommit(parsed);
+        }
+      }}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          commitDraft();
+          event.currentTarget.blur();
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          setDraft(String(value));
+          event.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
+function CapabilityPill({ kind, items, height }: { kind: 'mcp' | 'skills'; items: CapabilityHint[]; height: number }) {
+  if (items.length === 0) return null;
+  const isMcp = kind === 'mcp';
+  const label = isMcp ? 'MCP' : 'Skills';
+  const visibleItems = items.slice(0, 8);
+  const remaining = items.length - visibleItems.length;
+  return (
+    <div className="group relative">
+      <div
+        className={`relative flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-white shadow-[0px_4px_12px_rgba(0,0,0,0.08)] backdrop-blur-[6.8px] transition-all duration-150 ${
+          isMcp ? 'border-yellow-200/40 bg-yellow-500/85 hover:bg-yellow-500/95' : 'border-purple-200/40 bg-purple-500/85 hover:bg-purple-500/95'
+        }`}
+        style={{
+          height: `${height}px`,
+          fontSize: `${Math.max(9, Math.min(11, height - 12))}px`
+        }}
+        aria-label={`${label}: ${items.length}`}
+      >
+        <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_1.5px_2px_2px_-2px_rgba(255,255,255,0.55),inset_0px_-0.5px_0.5px_0px_rgba(255,255,255,0.2),inset_0px_0.5px_0.5px_0px_rgba(255,255,255,0.2)]" />
+        {isMcp ? <ToolGlyph size={12} /> : <DocumentGlyph size={12} />}
+        <span className="min-w-[1ch] font-semibold leading-none">{items.length}</span>
+      </div>
+      <div className="pointer-events-none absolute left-0 bottom-[calc(100%+6px)] z-30 hidden w-[260px] rounded-[12px] border border-white/15 bg-black/85 p-2.5 text-left text-[11px] text-white shadow-[0_10px_30px_rgba(0,0,0,0.32)] backdrop-blur-[18px] group-hover:block">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="font-semibold">{label}</span>
+          <span className="text-white/55">{items.length} matched</span>
+        </div>
+        <div className="grid gap-1.5">
+          {visibleItems.map((item) => (
+            <div key={item.id} className="rounded-[8px] bg-white/[0.07] px-2 py-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate font-semibold text-white/95">{item.name}</span>
+                <span className="shrink-0 text-[9px] uppercase text-white/45">{item.sources.join('+')}</span>
+              </div>
+              {item.description && <div className="mt-0.5 line-clamp-2 text-white/62">{item.description}</div>}
+              <div className="mt-1 truncate text-[9px] text-white/42">{item.backendIds.map(backendLabel).join(', ')}</div>
+            </div>
+          ))}
+          {remaining > 0 && <div className="px-1 text-[10px] text-white/50">+{remaining} more</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ToolGlyph({ size }: { size: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3.8 17.2a2.1 2.1 0 0 0 3 3l5.5-5.5a4 4 0 0 0 5.4-5.4l-3.1 3.1-3-3 3.1-3.1Z" />
+    </svg>
+  );
+}
+
+function DocumentGlyph({ size }: { size: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.1"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+      <path d="M14 3v5h5" />
+      <path d="M8 13h8M8 17h5" />
+    </svg>
   );
 }
 

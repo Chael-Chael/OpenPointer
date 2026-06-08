@@ -31,24 +31,26 @@ development and production.
 git submodule update --init --recursive
 ```
 
-## Apply the structured-output patch
+## Apply the OpenPointer patches
 
 The driver is patched to emit a structured `elements` array (control type,
-name, bounding box, actions, and source) from `get_window_state`. This patch is
-applied automatically during `npm install` via the `postinstall` script:
+name, bounding box, actions, selection state, and source) from
+`get_window_state`. OpenPointer also adds a Windows `get_selected_text` tool for
+clipboard-free UIA `TextPattern.GetSelection()` reads. These patches are applied
+automatically during `npm install` via the `postinstall` script:
 
 ```
-git -C vendor/cua apply ../../patches/cua/0001-get-window-state-elements-structured-output.patch || exit 0
+node scripts/setup-cua.mjs --patch-only
 ```
 
-The `|| exit 0` means a failed apply (for example, the patch is already
-applied) does not abort install. To apply it manually:
+The setup script checks each patch in `patches/cua/*.patch` in filename order
+and skips patches that are already applied. To apply the patch set manually:
 
 ```powershell
-git -C vendor/cua apply patches/cua/0001-get-window-state-elements-structured-output.patch
+node scripts/setup-cua.mjs --patch-only
 ```
 
-If the patch fails because it was already applied, that is expected — skip it.
+If a patch is already applied, that is expected — skip it.
 
 ## Build the binary
 

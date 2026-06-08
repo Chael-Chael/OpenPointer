@@ -7,6 +7,8 @@ const CURSOR_OFFSET_X = 36;
 const PANEL_COMFORT_HEIGHT = 360;
 const PANEL_MIN_HEIGHT = 160;
 const PANEL_MAX_HEIGHT = 800;
+const PANEL_INITIAL_HEIGHT = 104;
+const PANEL_GROWTH_CURVE = 420;
 export const DEFAULT_STREAM_PANEL_HEIGHT = PANEL_COMFORT_HEIGHT;
 
 export function computeShellPosition(cursorX: number, cursorY: number, shellWidth = 520, pillHeight = 24, hasPanel = false) {
@@ -45,8 +47,15 @@ export function availablePanelHeight(shellY: number, pillHeight = 24): number {
   return Math.min(PANEL_MAX_HEIGHT, Math.max(PANEL_MIN_HEIGHT, available));
 }
 
-export function resolvedPanelHeight(shellY: number, pillHeight = 24, preferredHeight: number | null = null): number {
+export function resolvedPanelHeight(shellY: number, pillHeight = 24, preferredHeight: number | null = null, contentHeight?: number): number {
   const maxHeight = availablePanelHeight(shellY, pillHeight);
+  if (preferredHeight !== null) return Math.min(preferredHeight, maxHeight);
+  if (typeof contentHeight === 'number' && Number.isFinite(contentHeight) && contentHeight > 0) {
+    const headroom = Math.max(0, maxHeight - PANEL_INITIAL_HEIGHT);
+    const overflow = Math.max(0, contentHeight - PANEL_INITIAL_HEIGHT);
+    const easedGrowth = headroom * (1 - Math.exp(-overflow / PANEL_GROWTH_CURVE));
+    return Math.min(maxHeight, Math.max(PANEL_INITIAL_HEIGHT, PANEL_INITIAL_HEIGHT + easedGrowth));
+  }
   return Math.min(preferredHeight ?? DEFAULT_STREAM_PANEL_HEIGHT, maxHeight);
 }
 

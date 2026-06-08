@@ -4,6 +4,7 @@ import claudeSvg from '../../assets/claude-color.svg?raw';
 import codexSvg from '../../assets/codex-color.svg?raw';
 import hermesSvg from '../../assets/hermesagent.svg?raw';
 import openaiSvg from '../../assets/openai.svg?raw';
+import openclawSvg from '../../assets/openclaw-color.svg?raw';
 import opencodeSvg from '../../assets/opencode.svg?raw';
 
 function SvgIcon({ svg, size }: { svg: string; size: number }) {
@@ -77,6 +78,8 @@ export function getBackendIcon(backend: AgentBackendId, size = 12) {
       return <SvgIcon svg={hermesSvg} size={size} />;
     case 'opencode':
       return <SvgIcon svg={opencodeSvg} size={size} />;
+    case 'openclaw':
+      return <SvgIcon svg={openclawSvg} size={size} />;
     case 'auto':
       return <AutoIcon size={size} />;
     case 'mock':

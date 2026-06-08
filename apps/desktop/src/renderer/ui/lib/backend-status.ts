@@ -35,6 +35,15 @@ export function backendReadiness(settings: AppSettings | null, backend: AgentBac
       tone: 'ready'
     };
   }
+  if (backend === 'openclaw') {
+    if (!settings.openclawGatewayUrl.trim()) return { configured: false, label: 'Missing config', detail: 'Add an OpenClaw gateway URL.', tone: 'missing' };
+    return {
+      configured: true,
+      label: 'Ready',
+      detail: settings.openclawExecutablePath.trim() ? 'Gateway URL and CLI path are configured.' : 'Gateway URL configured; using openclaw from PATH.',
+      tone: 'ready'
+    };
+  }
   if (backend === 'claude-agent') {
     if (!settings.claudeAgentEnabled) return { configured: false, label: 'Missing config', detail: 'Claude Code is disabled.', tone: 'missing' };
     return {
@@ -103,6 +112,8 @@ export function backendLabel(backend: AgentBackendId): string {
       return 'Hermes';
     case 'opencode':
       return 'OpenCode';
+    case 'openclaw':
+      return 'OpenClaw';
     case 'claude-agent':
       return 'Claude Code';
     case 'codex':

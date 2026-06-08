@@ -55,6 +55,7 @@ export type AgentBridgeRegistryConfig = {
   localVlm?: LocalVlmBridgeConfig;
   hermes?: HttpAgentBridgeConfig;
   opencode?: HttpAgentBridgeConfig;
+  openclaw?: HttpAgentBridgeConfig & { agent?: string; executableArgs?: string[] };
   claudeAgent?: ClaudeAgentBridgeConfig;
   codex?: HttpAgentBridgeConfig;
 };

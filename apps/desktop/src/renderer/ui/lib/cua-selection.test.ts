@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PointerEntity } from '@openpointer/core';
-import { selectedCuaAttachmentTitle, selectedListItemsForContext } from './cua-selection';
+import { mergeCuaEntityGroup, removeCuaEntityFromGroup, selectedCuaAttachmentTitle, selectedListItemsForContext } from './cua-selection';
 
 function listItem(id: string, selected = true): PointerEntity {
   return {
@@ -29,5 +29,17 @@ describe('selectedListItemsForContext', () => {
 
   it('builds a compact attachment title for selected list items', () => {
     expect(selectedCuaAttachmentTitle([listItem('row-1'), listItem('row-2')])).toContain('2 selected list items');
+  });
+});
+
+describe('CUA entity grouping', () => {
+  it('appends new entities, dedupes by id, and keeps the latest capped group', () => {
+    const merged = mergeCuaEntityGroup([listItem('row-1'), listItem('row-2')], [listItem('row-2'), listItem('row-3'), listItem('row-4')], 3);
+    expect(merged.map((entity) => entity.id)).toEqual(['row-2', 'row-3', 'row-4']);
+  });
+
+  it('removes a grouped entity by id', () => {
+    const remaining = removeCuaEntityFromGroup([listItem('row-1'), listItem('row-2'), listItem('row-3')], 'row-2');
+    expect(remaining.map((entity) => entity.id)).toEqual(['row-1', 'row-3']);
   });
 });

@@ -178,6 +178,32 @@ describe('OpenPointerHarness', () => {
     expect(submitted[0]?.envelope.toolServers).toBeUndefined();
   });
 
+  it('attaches submitted capability hints to the agent envelope', async () => {
+    const { harness, submitted } = createHarness(baseSettings());
+
+    await harness.submit({
+      text: 'summarize the selected paper',
+      mode: 'text',
+      context: pointerContext(),
+      capabilityHints: {
+        mcp: [
+          {
+            id: 'mcp-zotero',
+            kind: 'mcp',
+            name: 'zotero',
+            description: 'Reference manager MCP',
+            backendIds: ['mock'],
+            sources: ['native'],
+            matchedKeywords: ['paper']
+          }
+        ],
+        skills: []
+      }
+    });
+
+    expect(submitted[0]?.envelope.capabilityHints?.mcp[0]?.name).toBe('zotero');
+  });
+
   it('routes approvals to the broker before backend bridges', async () => {
     const { harness, approvals, setBrokerPending } = createHarness(baseSettings());
 

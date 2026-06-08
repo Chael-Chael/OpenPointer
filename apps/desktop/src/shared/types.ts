@@ -1,5 +1,16 @@
 import type { ApprovalDecision } from '@openpointer/agent-bridge';
-import type { AgentBackendId, AgentEvent, AgentInputMode, ContextChip, Point, PointerContext, PointerEntity, Rect } from '@openpointer/core';
+import type {
+  AgentBackendId,
+  AgentEvent,
+  AgentInputMode,
+  CapabilityHints,
+  CapabilitySnapshot,
+  ContextChip,
+  Point,
+  PointerContext,
+  PointerEntity,
+  Rect
+} from '@openpointer/core';
 import type { AppSettings } from '@openpointer/storage';
 
 export type CursorPayload = {
@@ -34,6 +45,7 @@ export type SubmitInstructionRequest = {
   includeCua?: boolean;
   cuaEntities?: PointerEntity[];
   contextChips?: ContextChip[];
+  capabilityHints?: CapabilityHints;
   conversationId?: string;
 };
 
@@ -187,6 +199,7 @@ export type DesktopApi = {
   onGlobalMouseDown(cb: (cursor: CursorPayload) => void): () => void;
   onHoldProgress(cb: (payload: HoldProgressPayload) => void): () => void;
   onAgentEvent(cb: (event: AgentEvent) => void): () => void;
+  onCapabilitySnapshotChanged(cb: (snapshot: CapabilitySnapshot) => void): () => void;
   onCuaTaskEvent(cb: (payload: CuaTaskEventPayload) => void): () => void;
   onCaptureActivity(cb: (payload: CaptureActivityPayload) => void): () => void;
   deactivate(options?: DeactivatePayload): void;
@@ -208,6 +221,8 @@ export type DesktopApi = {
   cancelRun(): void;
   getSettings(): Promise<AppSettings>;
   saveSettings(patch: SaveSettingsPatch): Promise<AppSettings>;
+  getCapabilitySnapshot(): Promise<CapabilitySnapshot>;
+  refreshCapabilities(): Promise<CapabilitySnapshot>;
   getConversations(): Promise<import('@openpointer/core').Conversation[]>;
   getConversation(id: string): Promise<import('@openpointer/core').Conversation | null>;
   deleteConversation(id: string): Promise<void>;

@@ -5,7 +5,7 @@
 //
 // It is idempotent and safe to re-run. Steps:
 //   1. Ensure the vendor/cua submodule is initialised.
-//   2. Apply the get_window_state elements patch (skipped if already applied).
+//   2. Apply OpenPointer's CUA driver patch set (skipped if already applied).
 //   3. Download the pinned prebuilt cua-driver release binary (Windows/macOS/Linux).
 //
 // The downloaded release driver works with OpenPointer's release-compat
@@ -14,7 +14,7 @@
 // pass --build to attempt that when cargo is available.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -49,26 +49,34 @@ function ensureSubmodule() {
   if (code !== 0) throw new Error('git submodule update failed.');
 }
 
-// Step 2: apply the elements patch (idempotent).
-function applyPatch() {
-  const patch = ['..', '..', 'patches', 'cua', '0001-get-window-state-elements-structured-output.patch'].join('/');
+// Step 2: apply the CUA patches (idempotent).
+function applyPatch(patchFile) {
+  const patch = ['..', '..', 'patches', 'cua', patchFile].join('/');
   // --reverse --check succeeds when the patch is already applied.
   const already = runQuiet('git', ['-C', 'vendor/cua', 'apply', '--reverse', '--check', patch]);
   if (already.code === 0) {
-    log('patch', 'elements patch already applied.');
+    log('patch', `${patchFile} already applied.`);
     return;
   }
   const canApply = runQuiet('git', ['-C', 'vendor/cua', 'apply', '--check', patch]);
   if (canApply.code !== 0) {
-    log('patch', `WARNING: elements patch is not applicable (continuing). ${canApply.out.trim()}`);
+    log('patch', `WARNING: ${patchFile} is not applicable (continuing). ${canApply.out.trim()}`);
     return;
   }
   const applied = runQuiet('git', ['-C', 'vendor/cua', 'apply', patch]);
   if (applied.code === 0) {
-    log('patch', 'elements patch applied.');
+    log('patch', `${patchFile} applied.`);
   } else {
-    log('patch', `WARNING: could not apply patch (continuing). ${applied.out.trim()}`);
+    log('patch', `WARNING: could not apply ${patchFile} (continuing). ${applied.out.trim()}`);
   }
+}
+
+function applyPatches() {
+  const patchesDir = join(repoRoot, 'patches', 'cua');
+  const patches = readdirSync(patchesDir)
+    .filter((name) => name.endsWith('.patch'))
+    .sort((a, b) => a.localeCompare(b));
+  for (const patch of patches) applyPatch(patch);
 }
 
 // Step 3: download the prebuilt cua-driver release binary.
@@ -139,22 +147,97 @@ function installDriver() {
 }
 
 // Optional: compile the patched driver for pixel-precise element bounds.
+function resolveUserCargo() {
+  const exe = process.platform === 'win32' ? 'cargo.exe' : 'cargo';
+  const candidates = [
+    'cargo',
+    process.env.USERPROFILE ? join(process.env.USERPROFILE, '.cargo', 'bin', exe) : '',
+    process.env.HOME ? join(process.env.HOME, '.cargo', 'bin', exe) : ''
+  ].filter(Boolean);
+  return candidates.find((candidate) => {
+    if (candidate !== 'cargo' && !existsSync(candidate)) return false;
+    return runQuiet(candidate, ['--version']).code === 0;
+  });
+}
+
+function hasMsvcLinker() {
+  if (process.platform !== 'win32') return true;
+  const link = runQuiet('where', ['link.exe']);
+  return link.code === 0;
+}
+
+function resolveVsDevCmd() {
+  if (process.platform !== 'win32') return undefined;
+  const vswhere = join(
+    process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)',
+    'Microsoft Visual Studio',
+    'Installer',
+    'vswhere.exe'
+  );
+  const candidates = [];
+  if (existsSync(vswhere)) {
+    const found = runQuiet(vswhere, [
+      '-products',
+      '*',
+      '-requires',
+      'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+      '-latest',
+      '-property',
+      'installationPath'
+    ]);
+    const installPath = found.out.trim();
+    if (found.code === 0 && installPath) {
+      candidates.push(join(installPath, 'Common7', 'Tools', 'VsDevCmd.bat'));
+    }
+  }
+  candidates.push(
+    join(
+      process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)',
+      'Microsoft Visual Studio',
+      '2022',
+      'BuildTools',
+      'Common7',
+      'Tools',
+      'VsDevCmd.bat'
+    )
+  );
+  return candidates.find((candidate) => existsSync(candidate));
+}
+
 function buildDriver() {
-  const cargo = runQuiet('cargo', ['--version']);
-  if (cargo.code !== 0) {
+  const cargoBin = resolveUserCargo();
+  if (!cargoBin) {
     log('build', 'cargo not found; skipping native build. Install Rust + a C/C++ toolchain to enable precise bounds.');
     return;
   }
+  const cargo = runQuiet(cargoBin, ['--version']);
   log('build', `compiling patched cua-driver with ${cargo.out.trim()} ...`);
   const rustDir = join('vendor', 'cua', 'libs', 'cua-driver', 'rust');
-  const code = run('cargo', ['build', '--release'], { cwd: join(repoRoot, rustDir) });
+  const rustPath = join(repoRoot, rustDir);
+  let code;
+  if (process.platform === 'win32' && !hasMsvcLinker()) {
+    const vsDevCmd = resolveVsDevCmd();
+    if (!vsDevCmd) {
+      log(
+        'build',
+        'MSVC linker link.exe not found; skipping native build. Install Visual Studio Build Tools with the Desktop development with C++ workload, then rerun `npm run setup:cua -- --build`.'
+      );
+      return;
+    }
+    log('build', 'link.exe is not in PATH; building via Visual Studio developer environment.');
+    code = run('cmd.exe', ['/d', '/c', 'call', vsDevCmd, '-arch=x64', '-host_arch=x64', '&&', cargoBin, 'build', '--release'], {
+      cwd: rustPath
+    });
+  } else {
+    code = run(cargoBin, ['build', '--release'], { cwd: rustPath });
+  }
   log('build', code === 0 ? 'native driver built.' : 'WARNING: cargo build failed; release binary still usable.');
 }
 
 function main() {
   try {
     ensureSubmodule();
-    applyPatch();
+    applyPatches();
     if (patchOnly) {
       log('done', 'CUA patch check complete.');
       return;

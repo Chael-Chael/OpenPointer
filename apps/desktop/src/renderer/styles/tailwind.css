@@ -389,6 +389,118 @@
   animation: cua-highlight-flash 720ms ease-in-out infinite;
 }
 
+.cua-element-selected {
+  background: rgba(13, 111, 255, 0.14);
+  border-color: rgba(13, 111, 255, 0.95);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.68) inset,
+    0 0 0 2px rgba(13, 111, 255, 0.2),
+    0 12px 34px rgba(13, 111, 255, 0.22);
+  z-index: 7;
+  animation: cua-selected-highlight-flash 860ms ease-in-out infinite;
+}
+
+.cua-element-selected.is-hovered {
+  background: rgba(13, 111, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.88);
+  z-index: 9;
+}
+
+.cua-element-remove-pill {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  color: #0d6fff;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(13, 111, 255, 0.32);
+  border-radius: 999px;
+  box-shadow: 0 8px 18px rgba(10, 32, 90, 0.18);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.9);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    background 120ms ease;
+  z-index: 2;
+}
+
+.cua-element-selected:hover .cua-element-remove-pill,
+.cua-element-selected.is-hovered .cua-element-remove-pill,
+.cua-element-remove-pill:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+}
+
+.cua-element-remove-pill:hover {
+  background: #ffffff;
+}
+
+.cua-selection-group-pill {
+  position: fixed;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 58px;
+  height: 30px;
+  padding: 0 11px;
+  color: #ffffff;
+  background: rgba(13, 111, 255, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  box-shadow:
+    inset 1px 2px 2px -2px rgba(255, 255, 255, 0.68),
+    0 12px 30px rgba(13, 111, 255, 0.26);
+  backdrop-filter: blur(10px);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  pointer-events: auto;
+  transition:
+    background 120ms ease,
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.cua-selection-group-pill:hover {
+  background: rgba(13, 111, 255, 0.98);
+  box-shadow:
+    inset 1px 2px 2px -2px rgba(255, 255, 255, 0.74),
+    0 14px 34px rgba(13, 111, 255, 0.32);
+  transform: translateY(-1px);
+}
+
+.cua-selection-group-pill:active {
+  transform: translateY(0) scale(0.98);
+}
+
+.cua-selection-group-plus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: #0d6fff;
+  background: rgba(255, 255, 255, 0.94);
+  border-radius: 999px;
+  font-size: 14px;
+  line-height: 1;
+}
+
 .cua-debug-tooltip {
   position: fixed;
   z-index: 9;
@@ -582,6 +694,22 @@
 
 /* ── Hold Ring (SVG) ── */
 
+@keyframes cua-selected-highlight-flash {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.68) inset,
+      0 0 0 2px rgba(13, 111, 255, 0.2),
+      0 12px 34px rgba(13, 111, 255, 0.22);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(255, 255, 255, 0.86) inset,
+      0 0 0 5px rgba(13, 111, 255, 0.32),
+      0 16px 42px rgba(13, 111, 255, 0.3);
+  }
+}
+
 @utility hold-ring {
   position: absolute;
   left: 0;
@@ -685,6 +813,25 @@
   overflow: hidden;
 }
 
+.pill-context-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 31px;
+  padding: 6px 8px 2px;
+}
+
+.pill-instruction-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  width: 100%;
+  align-items: center;
+}
+
 .command-bubble[data-pill-theme="white"] {
   background: rgba(255, 255, 255, 0.92);
   box-shadow: 0 8px 6px rgba(0, 0, 0, 0.08);
@@ -711,6 +858,26 @@
 .command-bubble[data-pill-theme="white"] .bubble-menu:hover {
   background: rgba(0, 0, 0, 0.06) !important;
   color: rgba(0, 0, 0, 0.85) !important;
+}
+
+.command-bubble[data-pill-theme="white"] .context-chip-shelf {
+  border-color: rgba(0, 0, 0, 0.1);
+  background: rgba(0, 0, 0, 0.04);
+  color: rgba(0, 0, 0, 0.58);
+}
+
+.command-bubble[data-pill-theme="white"] .context-chip-token {
+  background: rgba(0, 0, 0, 0.07);
+  color: rgba(0, 0, 0, 0.78);
+}
+
+.command-bubble[data-pill-theme="white"] .context-chip-token-remove {
+  background: rgba(0, 0, 0, 0.08);
+  color: rgba(0, 0, 0, 0.54);
+}
+
+.command-bubble[data-pill-theme="white"] .context-chip-shelf-empty {
+  color: rgba(0, 0, 0, 0.42);
 }
 
 .command-bubble[data-pill-theme="white"] > div:first-child {
@@ -1029,10 +1196,11 @@
 .background-process-trigger {
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 78px;
-  height: 38px;
-  padding: 0 11px;
+  justify-content: center;
+  gap: 6px;
+  width: 54px;
+  height: 54px;
+  padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 999px;
   background: rgba(13, 111, 255, 0.88);
@@ -1053,7 +1221,7 @@
 
 .background-process-dock:hover .background-process-trigger,
 .background-process-dock:focus-within .background-process-trigger {
-  width: 112px;
+  width: 96px;
   background: rgba(13, 111, 255, 0.94);
 }
 
@@ -1062,11 +1230,19 @@
 }
 
 .background-process-dot {
+  position: absolute;
+  top: 9px;
+  right: 10px;
   width: 8px;
   height: 8px;
   border-radius: 999px;
+  background: rgba(255, 255, 255, 0.42);
+  box-shadow: none;
+}
+
+.background-process-dot.is-active {
   background: #67e8f9;
-  box-shadow: 0 0 12px rgba(103, 232, 249, 0.62);
+  box-shadow: 0 0 12px rgba(103, 232, 249, 0.72);
 }
 
 .background-process-label {
@@ -1077,11 +1253,14 @@
 }
 
 .background-process-count {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
   display: inline-grid;
   place-items: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 7px;
+  min-width: 21px;
+  height: 21px;
+  padding: 0 6px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.15);
   color: rgba(255, 255, 255, 0.82);
@@ -1091,7 +1270,7 @@
 }
 
 .background-process-panel {
-  width: min(340px, calc(100vw - 28px));
+  width: min(380px, calc(100vw - 28px));
   max-height: 0;
   margin: 0;
   overflow: hidden;
@@ -1131,7 +1310,7 @@
 
 .background-process-dock:hover .background-process-panel,
 .background-process-dock:focus-within .background-process-panel {
-  max-height: min(420px, calc(100vh - 82px));
+  max-height: min(520px, calc(100vh - 82px));
   margin: 8px 0;
   opacity: 1;
   pointer-events: auto;
@@ -1154,10 +1333,25 @@
 
 .background-process-list {
   display: grid;
-  gap: 8px;
-  max-height: min(360px, calc(100vh - 150px));
+  gap: 12px;
+  max-height: min(460px, calc(100vh - 150px));
   overflow-y: auto;
   padding: 0 10px 10px;
+}
+
+.background-process-section {
+  display: grid;
+  gap: 8px;
+}
+
+.background-process-section-title {
+  padding: 0 2px;
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .background-process-item {
@@ -1170,6 +1364,10 @@
   box-shadow:
     inset 1px 2px 2px -2px rgba(255, 255, 255, 0.48),
     inset 0 -1px 1px rgba(255, 255, 255, 0.14);
+}
+
+.background-process-item.is-task {
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .background-process-main {
@@ -1195,6 +1393,9 @@
 
 .background-process-meta {
   margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   overflow: hidden;
   color: rgba(255, 255, 255, 0.54);
   font-size: 10.5px;
@@ -1202,6 +1403,38 @@
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.background-process-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  height: 17px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 9px;
+  font-weight: 900;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.background-process-status.is-running,
+.background-process-status.is-pending {
+  background: rgba(103, 232, 249, 0.18);
+  color: #cffafe;
+}
+
+.background-process-status.is-completed {
+  background: rgba(34, 197, 94, 0.18);
+  color: #bbf7d0;
+}
+
+.background-process-status.is-failed,
+.background-process-status.is-cancelled {
+  background: rgba(244, 63, 94, 0.18);
+  color: #fecdd3;
 }
 
 .background-process-actions {
@@ -1243,6 +1476,18 @@
   font-size: 11px;
   font-weight: 700;
   line-height: 1.25;
+}
+
+.background-process-empty {
+  margin: 0;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
 }
 
 @utility stream-panel {
@@ -2474,6 +2719,7 @@
   overflow-x: hidden;
   min-height: 0;
   overscroll-behavior: contain;
+  transition: height 220ms cubic-bezier(0.16, 1, 0.3, 1), max-height 220ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @utility scrollbar-capsule {
@@ -2704,16 +2950,19 @@
 
 .context-chip-shelf {
   display: inline-flex;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   align-items: center;
   gap: 4px;
-  max-width: min(42%, 280px);
+  max-width: 100%;
   min-width: 36px;
   min-height: 24px;
   padding: 2px;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.07);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
   transition:
     min-width 140ms ease,
     background 140ms ease,
@@ -2721,8 +2970,12 @@
     box-shadow 140ms ease;
 }
 
+.context-chip-shelf::-webkit-scrollbar {
+  display: none;
+}
+
 .context-chip-shelf.is-empty {
-  min-width: 96px;
+  min-width: 132px;
   justify-content: center;
 }
 
@@ -2742,10 +2995,11 @@
 
 .context-chip-token {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 5px;
   min-width: 0;
-  max-width: 132px;
+  max-width: 150px;
   min-height: 22px;
   padding: 2px 3px 2px 7px;
   border-radius: 999px;

@@ -37,6 +37,10 @@ const DEFAULTS: AppSettings = {
   hermesBaseUrl: 'http://127.0.0.1:8642/v1',
   hasOpenCodeApiKey: false,
   opencodeBaseUrl: '',
+  openclawGatewayUrl: 'ws://127.0.0.1:18789',
+  openclawExecutablePath: '',
+  openclawAgent: 'main',
+  openclawModel: '',
   claudeAgentEnabled: false,
   claudeAgentBaseUrl: '',
   claudeAgentExecutable: '',
@@ -86,6 +90,8 @@ export function getSettings(): AppSettings {
   // edits made in the UI actually take effect and are not clobbered by .env.
   const persisted = settingsFileExists();
   const envOverride = (keys: string[]): string | undefined => (persisted ? undefined : firstEnv(keys));
+  const envSeedIfEmpty = (keys: string[], loadedValue: string | undefined): string | undefined =>
+    !persisted || !loadedValue?.trim() ? firstEnv(keys) : undefined;
   return {
     ...DEFAULTS,
     ...loaded,
@@ -93,8 +99,13 @@ export function getSettings(): AppSettings {
     localVlmEnabled: readBoolean(envOverride(['OP_LOCAL_VLM_ENABLED']), loaded.localVlmEnabled ?? DEFAULTS.localVlmEnabled),
     localVlmBaseUrl: envOverride(['OP_LOCAL_VLM_BASE_URL', 'OP_OPENAI_COMPAT_BASE_URL']) || loaded.localVlmBaseUrl || DEFAULTS.localVlmBaseUrl,
     localVlmModel: envOverride(['OP_LOCAL_VLM_MODEL', 'OP_OPENAI_COMPAT_MODEL']) || loaded.localVlmModel || '',
-    hermesBaseUrl: envOverride(['OP_HERMES_BASE_URL']) || loaded.hermesBaseUrl || DEFAULTS.hermesBaseUrl,
-    opencodeBaseUrl: envOverride(['OP_OPENCODE_BASE_URL']) || loaded.opencodeBaseUrl || '',
+    hermesBaseUrl: envSeedIfEmpty(['OP_HERMES_BASE_URL'], loaded.hermesBaseUrl) || loaded.hermesBaseUrl || DEFAULTS.hermesBaseUrl,
+    opencodeBaseUrl: envSeedIfEmpty(['OP_OPENCODE_BASE_URL'], loaded.opencodeBaseUrl) || loaded.opencodeBaseUrl || '',
+    openclawGatewayUrl: envSeedIfEmpty(['OP_OPENCLAW_GATEWAY_URL'], loaded.openclawGatewayUrl) || loaded.openclawGatewayUrl || DEFAULTS.openclawGatewayUrl,
+    openclawExecutablePath:
+      envSeedIfEmpty(['OP_OPENCLAW_EXECUTABLE', 'OP_OPENCLAW_CLI_PATH'], loaded.openclawExecutablePath) || loaded.openclawExecutablePath || DEFAULTS.openclawExecutablePath,
+    openclawAgent: envSeedIfEmpty(['OP_OPENCLAW_AGENT'], loaded.openclawAgent) || loaded.openclawAgent || DEFAULTS.openclawAgent,
+    openclawModel: envSeedIfEmpty(['OP_OPENCLAW_MODEL'], loaded.openclawModel) || loaded.openclawModel || DEFAULTS.openclawModel,
     claudeAgentEnabled: readBoolean(envOverride(['OP_CLAUDE_AGENT_ENABLED']), loaded.claudeAgentEnabled ?? DEFAULTS.claudeAgentEnabled),
     claudeAgentBaseUrl: envOverride(['OP_CLAUDE_AGENT_BASE_URL']) || loaded.claudeAgentBaseUrl || DEFAULTS.claudeAgentBaseUrl,
     claudeAgentExecutable: envOverride(['OP_CLAUDE_EXECUTABLE']) || loaded.claudeAgentExecutable || DEFAULTS.claudeAgentExecutable,
@@ -283,7 +294,7 @@ function writeSecret(
 }
 
 function normalizeBackend(value: string): AppSettings['agentBackend'] {
-  return ['auto', 'local-vlm', 'hermes', 'opencode', 'claude-agent', 'codex'].includes(value) ? (value as AppSettings['agentBackend']) : 'auto';
+  return ['auto', 'local-vlm', 'hermes', 'opencode', 'openclaw', 'claude-agent', 'codex'].includes(value) ? (value as AppSettings['agentBackend']) : 'auto';
 }
 
 function normalizeCodexTransport(value: string): AppSettings['codexAppServerTransport'] {

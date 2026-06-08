@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CuaTaskEventPayload, CuaTaskSummary } from '../../../shared/types';
 
 type CuaTaskPanelProps = {
@@ -25,7 +25,7 @@ export function CuaTaskPanel({ tasks, theme = 'blue', onCancel, onStartRecording
   return (
     <section className="cua-task-panel" data-pill-theme={theme}>
       <div className="cua-task-panel-header">
-        <h2>CUA Tasks</h2>
+        <h2>Agent work</h2>
         <span className="cua-task-count">{visibleTasks.length}</span>
       </div>
       <div className="cua-task-list">
@@ -68,6 +68,7 @@ export function CuaTaskPanel({ tasks, theme = 'blue', onCancel, onStartRecording
 
 export function useCuaTasks() {
   const [tasks, setTasks] = useState<CuaTaskSummary[]>([]);
+  const notifiedTaskIdsRef = useRef(new Set<string>());
 
   useEffect(() => {
     let mounted = true;
@@ -76,7 +77,8 @@ export function useCuaTasks() {
     });
     const off = window.openPointer.onCuaTaskEvent((payload: CuaTaskEventPayload) => {
       setTasks((prev) => upsertTask(prev, payload.task));
-      if (payload.type === 'task.updated' && payload.task.status === 'completed') {
+      if (payload.type === 'task.updated' && payload.task.status === 'completed' && !notifiedTaskIdsRef.current.has(payload.task.id)) {
+        notifiedTaskIdsRef.current.add(payload.task.id);
         notifyTaskComplete(payload.task);
       }
     });
@@ -114,12 +116,12 @@ function upsertTask(tasks: CuaTaskSummary[], next: CuaTaskSummary): CuaTaskSumma
 function notifyTaskComplete(task: CuaTaskSummary): void {
   if (!('Notification' in window)) return;
   if (Notification.permission === 'granted') {
-    new Notification('CUA task completed', { body: task.instruction });
+    new Notification('OpenPointer task complete', { body: task.instruction });
     return;
   }
   if (Notification.permission === 'default') {
     void Notification.requestPermission().then((permission) => {
-      if (permission === 'granted') new Notification('CUA task completed', { body: task.instruction });
+      if (permission === 'granted') new Notification('OpenPointer task complete', { body: task.instruction });
     });
   }
 }

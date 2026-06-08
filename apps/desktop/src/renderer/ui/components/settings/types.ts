@@ -1,5 +1,5 @@
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import type { AgentBackendId } from '@openpointer/core';
+import type { AgentBackendId, CapabilitySnapshot } from '@openpointer/core';
 import type { AppSettings } from '@openpointer/storage';
 import type { Conversation } from '@openpointer/core';
 import type { SecretDrafts, ClearSecretFlags, SecretKey } from '../../state';
@@ -18,12 +18,15 @@ export type SettingsPanelProps = {
   fetchedModels: string[] | null;
   isFetchingModels: boolean;
   fetchModelsError: string | null;
+  capabilitySnapshot: CapabilitySnapshot | null;
+  refreshingCapabilities: boolean;
   conversations: Conversation[];
   onClose(): void;
   updateSettings(patch: Partial<AppSettings>): void;
   updateSecret(key: SecretKey, value: string): void;
   clearSecret(key: SecretKey): void;
   fetchModels(): void;
+  refreshCapabilities(): void;
   saveSettings(): void;
   loadConversation(id: string): void;
   deleteConversation(id: string, event: ReactMouseEvent): void;

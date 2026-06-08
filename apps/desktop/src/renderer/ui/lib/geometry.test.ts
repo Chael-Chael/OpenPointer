@@ -84,4 +84,20 @@ describe('resolvedPanelHeight', () => {
     const maxHeight = availablePanelHeight(300, 44);
     expect(resolvedPanelHeight(300, 44, 800)).toBe(maxHeight);
   });
+
+  it('starts compact when content height is small', () => {
+    setViewport(1920, 1080);
+    expect(resolvedPanelHeight(100, 44, null, 40)).toBe(104);
+  });
+
+  it('expands non-linearly as streamed content grows', () => {
+    setViewport(1920, 1080);
+    const small = resolvedPanelHeight(100, 44, null, 180);
+    const medium = resolvedPanelHeight(100, 44, null, 520);
+    const large = resolvedPanelHeight(100, 44, null, 3000);
+    expect(small).toBeGreaterThan(104);
+    expect(medium).toBeGreaterThan(small);
+    expect(large).toBeGreaterThan(medium);
+    expect(large).toBeLessThanOrEqual(availablePanelHeight(100, 44));
+  });
 });

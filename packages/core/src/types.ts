@@ -173,12 +173,43 @@ export type PointerContext = {
   createdAt: number;
 };
 
-export type AgentBackendId = 'auto' | 'local-vlm' | 'hermes' | 'opencode' | 'claude-agent' | 'codex' | 'mock';
-export type BackendSessionKey = 'claudeAgent' | 'codex' | 'hermes' | 'opencode';
+export type AgentBackendId = 'auto' | 'local-vlm' | 'hermes' | 'opencode' | 'openclaw' | 'claude-agent' | 'codex' | 'mock';
+export type BackendSessionKey = 'claudeAgent' | 'codex' | 'hermes' | 'opencode' | 'openclaw';
 
 export type AgentInputMode = 'text' | 'voice';
 
 export type AgentToolPolicy = 'agent_decides' | 'prefer' | 'require';
+
+export type CapabilityKind = 'mcp' | 'skill';
+export type CapabilitySource = 'cc-switch' | 'native';
+
+export type CapabilityItem = {
+  id: string;
+  kind: CapabilityKind;
+  name: string;
+  description?: string;
+  backendIds: AgentBackendId[];
+  sources: CapabilitySource[];
+  tags?: string[];
+};
+
+export type CapabilityHint = CapabilityItem & {
+  matchedKeywords: string[];
+};
+
+export type CapabilityHints = {
+  mcp: CapabilityHint[];
+  skills: CapabilityHint[];
+};
+
+export type CapabilitySnapshot = {
+  status: 'idle' | 'scanning' | 'ready' | 'failed';
+  lastScannedAt?: number;
+  sources: CapabilitySource[];
+  mcp: CapabilityItem[];
+  skills: CapabilityItem[];
+  error?: string;
+};
 
 export type AgentAttachment = {
   type: 'screenshot';
@@ -250,6 +281,7 @@ export type AgentContextEnvelope = {
     toolPolicy: AgentToolPolicy;
   };
   cuaDirective?: CuaDirective;
+  capabilityHints?: CapabilityHints;
   toolServers?: Array<{
     id: 'cua';
     transport: 'local' | 'local-http';

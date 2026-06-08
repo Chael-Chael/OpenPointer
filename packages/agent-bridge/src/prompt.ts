@@ -5,10 +5,12 @@ const TOOL_DISCOVERY_MESSAGE = 'Agent may use available MCP tools, skills, or CU
 export function buildToolDiscoveryEvent(envelope: AgentContextEnvelope) {
   const skills = envelope.routing.preferredTools.filter((tool) => tool.includes('skill')).map((tool) => tool.replace(/-/g, ' '));
   const serverTools = envelope.toolServers?.flatMap((server) => server.tools.map((tool) => `${server.id}:${tool}`)) ?? [];
+  const hintedMcp = envelope.capabilityHints?.mcp.map((item) => `mcp:${item.name}`) ?? [];
+  const hintedSkills = envelope.capabilityHints?.skills.map((item) => item.name) ?? [];
   return {
     type: 'tool.discovery' as const,
-    tools: [...envelope.routing.preferredTools, ...serverTools],
-    skills,
+    tools: [...envelope.routing.preferredTools, ...serverTools, ...hintedMcp],
+    skills: [...skills, ...hintedSkills],
     message: TOOL_DISCOVERY_MESSAGE
   };
 }
@@ -25,6 +27,7 @@ export function buildAgentInstructions(envelope: AgentContextEnvelope): string {
     `Tool policy: ${envelope.routing.toolPolicy}.`,
     envelope.routing.preferredTools.length > 0 ? `Preferred tools: ${envelope.routing.preferredTools.join(', ')}.` : '',
     envelope.routing.requiredCapabilities.length > 0 ? `Required capabilities: ${envelope.routing.requiredCapabilities.join(', ')}.` : '',
+    envelope.capabilityHints ? formatCapabilityHints(envelope.capabilityHints) : '',
     envelope.toolServers?.length ? formatToolServers(envelope.toolServers) : '',
     envelope.cuaDirective ? formatCuaDirective(envelope.cuaDirective) : ''
   ];
@@ -335,4 +338,32 @@ function formatToolServers(toolServers: NonNullable<AgentContextEnvelope['toolSe
     '- read_selected_text({}): read the currently selected text from the target app.',
     '- insert_text({ "text": string, "click_target"?: boolean }): insert text at the current pointer/target location.'
   ].join('\n');
+}
+
+function formatCapabilityHints(hints: NonNullable<AgentContextEnvelope['capabilityHints']>): string {
+  const mcp = hints.mcp.map((item) => formatCapabilityHint(item));
+  const skills = hints.skills.map((item) => formatCapabilityHint(item));
+  if (mcp.length === 0 && skills.length === 0) return '';
+  return [
+    'Context-matched capability hints:',
+    JSON.stringify(
+      {
+        mcp,
+        skills
+      },
+      null,
+      2
+    ),
+    'These hints are based on local capability names/descriptions and current pointer context. Use them only if they are actually available in your runtime.'
+  ].join('\n');
+}
+
+function formatCapabilityHint(item: NonNullable<AgentContextEnvelope['capabilityHints']>['mcp'][number]) {
+  return {
+    name: item.name,
+    description: item.description,
+    sources: item.sources,
+    backendIds: item.backendIds,
+    matchedKeywords: item.matchedKeywords
+  };
 }

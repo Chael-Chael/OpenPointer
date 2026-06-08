@@ -61,7 +61,8 @@ export async function* postRunAndStream(args: {
     }
 
     for await (const raw of parseRuntimeStream(streamResponse)) {
-      yield mapRuntimeEvent(raw, args.backend);
+      const event = mapRuntimeEvent(raw, args.backend);
+      if (event) yield event;
     }
   } catch (error) {
     yield { type: 'run.failed', error: error instanceof Error ? error.message : String(error), recoverable: true };
@@ -90,7 +91,7 @@ export async function* parseRuntimeStream(response: Response): AsyncIterable<Run
   if (parsed) yield parsed;
 }
 
-export function mapRuntimeEvent(raw: RuntimeEvent, backend: AgentBackendId): AgentEvent {
+export function mapRuntimeEvent(raw: RuntimeEvent, backend: AgentBackendId): AgentEvent | null {
   const type = String(raw.type ?? raw.event ?? '');
   if (isAgentEvent(raw)) return raw;
   if (type.includes('delta') || type.includes('message')) {
@@ -116,7 +117,8 @@ export function mapRuntimeEvent(raw: RuntimeEvent, backend: AgentBackendId): Age
   if (type.includes('complete') || type.includes('done')) {
     return { type: 'run.completed', text: typeof raw.text === 'string' ? raw.text : undefined };
   }
-  return { type: 'assistant.delta', text: JSON.stringify(raw) };
+  if (!type && typeof raw.text === 'string') return { type: 'assistant.delta', text: raw.text };
+  return null;
 }
 
 function parseRuntimeChunk(chunk: string): RuntimeEvent | null {
@@ -126,6 +128,7 @@ function parseRuntimeChunk(chunk: string): RuntimeEvent | null {
     .filter((line) => line.startsWith('data:'))
     .map((line) => line.slice(5).trim());
   const payload = dataLines.length > 0 ? dataLines.join('\n') : chunk;
+  if (payload.startsWith(':')) return null;
   if (!payload || payload === '[DONE]') return payload === '[DONE]' ? { type: 'run.completed' } : null;
   try {
     return JSON.parse(payload) as RuntimeEvent;

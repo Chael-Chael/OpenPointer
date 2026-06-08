@@ -1,7 +1,7 @@
 import type { AgentContextEnvelope, AgentEvent, PointerContext } from '@openpointer/core';
 
 export type AppSettings = {
-  agentBackend: 'auto' | 'local-vlm' | 'hermes' | 'opencode' | 'claude-agent' | 'codex';
+  agentBackend: 'auto' | 'local-vlm' | 'hermes' | 'opencode' | 'openclaw' | 'claude-agent' | 'codex';
   localVlmEnabled: boolean;
   localVlmBaseUrl: string;
   localVlmModel: string;
@@ -10,6 +10,10 @@ export type AppSettings = {
   hermesBaseUrl: string;
   hasOpenCodeApiKey: boolean;
   opencodeBaseUrl: string;
+  openclawGatewayUrl: string;
+  openclawExecutablePath: string;
+  openclawAgent: string;
+  openclawModel: string;
   claudeAgentEnabled: boolean;
   claudeAgentBaseUrl: string;
   claudeAgentExecutable: string;

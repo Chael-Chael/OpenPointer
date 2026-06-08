@@ -111,6 +111,8 @@ export function backendSessionKey(backend: AgentBackendId): BackendSessionKey | 
       return 'hermes';
     case 'opencode':
       return 'opencode';
+    case 'openclaw':
+      return 'openclaw';
     default:
       return undefined;
   }

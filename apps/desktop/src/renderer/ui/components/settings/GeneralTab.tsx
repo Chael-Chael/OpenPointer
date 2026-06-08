@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { AgentBackendId } from '@openpointer/core';
+import type { AgentBackendId, CapabilitySnapshot } from '@openpointer/core';
 import type { AppSettings } from '@openpointer/storage';
 import type { CuaHealth } from '../../../../shared/types';
 import type { SecretDrafts, ClearSecretFlags, SecretKey } from '../../state';
@@ -17,10 +17,13 @@ type GeneralTabProps = {
   fetchedModels: string[] | null;
   isFetchingModels: boolean;
   fetchModelsError: string | null;
+  capabilitySnapshot: CapabilitySnapshot | null;
+  refreshingCapabilities: boolean;
   updateSettings(patch: Partial<AppSettings>): void;
   updateSecret(key: SecretKey, value: string): void;
   clearSecret(key: SecretKey): void;
   fetchModels(): void;
+  refreshCapabilities(): void;
 };
 
 export function GeneralTab({
@@ -33,10 +36,13 @@ export function GeneralTab({
   fetchedModels,
   isFetchingModels,
   fetchModelsError,
+  capabilitySnapshot,
+  refreshingCapabilities,
   updateSettings,
   updateSecret,
   clearSecret,
   fetchModels,
+  refreshCapabilities,
 }: GeneralTabProps) {
   const [cuaHealth, setCuaHealth] = useState<CuaHealth | null>(null);
 
@@ -53,16 +59,30 @@ export function GeneralTab({
   return (
     <>
       <section className="settings-section">
-        <label className="field">
-          <span>Default backend</span>
-          <select value={backend} onChange={(event) => setBackend(event.target.value as AgentBackendId)}>
-            {selectableBackends.map((item) => (
-              <option key={item} value={item}>
-                {backendLabel(item)}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="grid grid-cols-[minmax(180px,1fr)_minmax(260px,1.4fr)] gap-3 max-md:grid-cols-1">
+          <label className="field">
+            <span>Default backend</span>
+            <select value={backend} onChange={(event) => setBackend(event.target.value as AgentBackendId)}>
+              {selectableBackends.map((item) => (
+                <option key={item} value={item}>
+                  {backendLabel(item)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="rounded-[12px] border border-white/10 bg-white/[0.04] px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[11px] font-bold uppercase text-white/55">MCP / Skills Discovery</div>
+                <div className="mt-1 text-[12px] text-white/78">{capabilityDiscoveryLabel(capabilitySnapshot)}</div>
+              </div>
+              <button type="button" className="ghost-button !h-7 !px-2.5 !py-1 !text-[11px]" onClick={refreshCapabilities} disabled={refreshingCapabilities}>
+                {refreshingCapabilities ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
+            {capabilitySnapshot?.error && <div className="mt-1 truncate text-[10px] text-danger">{capabilitySnapshot.error}</div>}
+          </div>
+        </div>
       </section>
 
       <div className="grid grid-cols-2 gap-3 max-md:grid-cols-1">
@@ -165,6 +185,33 @@ export function GeneralTab({
             clearQueued={clearSecrets.opencodeApiKey}
             onChange={(value) => updateSecret('opencodeApiKey', value)}
             onClear={() => clearSecret('opencodeApiKey')}
+          />
+        </BackendCard>
+
+        <BackendCard title="OpenClaw" status={backendReadiness(draftAwareSettings, 'openclaw')}>
+          <TextField
+            label="Gateway URL"
+            value={settings.openclawGatewayUrl}
+            onChange={(value) => updateSettings({ openclawGatewayUrl: value })}
+            placeholder="ws://127.0.0.1:18789"
+          />
+          <TextField
+            label="OpenClaw executable"
+            value={settings.openclawExecutablePath}
+            onChange={(value) => updateSettings({ openclawExecutablePath: value })}
+            placeholder="openclaw"
+          />
+          <TextField
+            label="Agent"
+            value={settings.openclawAgent}
+            onChange={(value) => updateSettings({ openclawAgent: value })}
+            placeholder="main"
+          />
+          <TextField
+            label="Model"
+            value={settings.openclawModel}
+            onChange={(value) => updateSettings({ openclawModel: value })}
+            placeholder="openpointer/mimo-v2.5"
           />
         </BackendCard>
 
@@ -371,4 +418,12 @@ export function GeneralTab({
       </section>
     </>
   );
+}
+
+function capabilityDiscoveryLabel(snapshot: CapabilitySnapshot | null): string {
+  if (!snapshot || snapshot.status === 'idle') return 'Waiting for startup scan.';
+  if (snapshot.status === 'scanning') return 'Scanning local agent capabilities.';
+  const counts = `${snapshot.mcp.length} MCP, ${snapshot.skills.length} skills`;
+  const scannedAt = snapshot.lastScannedAt ? new Date(snapshot.lastScannedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'not scanned';
+  return `${counts} · last scan ${scannedAt}`;
 }

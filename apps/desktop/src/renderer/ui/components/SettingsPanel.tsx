@@ -17,12 +17,15 @@ export function SettingsPanel(props: SettingsPanelProps) {
     fetchedModels,
     isFetchingModels,
     fetchModelsError,
+    capabilitySnapshot,
+    refreshingCapabilities,
     conversations,
     onClose,
     updateSettings,
     updateSecret,
     clearSecret,
     fetchModels,
+    refreshCapabilities,
     saveSettings,
     loadConversation,
     deleteConversation,
@@ -63,10 +66,13 @@ export function SettingsPanel(props: SettingsPanelProps) {
             fetchedModels={fetchedModels}
             isFetchingModels={isFetchingModels}
             fetchModelsError={fetchModelsError}
+            capabilitySnapshot={capabilitySnapshot}
+            refreshingCapabilities={refreshingCapabilities}
             updateSettings={updateSettings}
             updateSecret={updateSecret}
             clearSecret={clearSecret}
             fetchModels={fetchModels}
+            refreshCapabilities={refreshCapabilities}
           />
         )}
 

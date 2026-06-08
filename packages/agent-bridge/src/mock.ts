@@ -1,4 +1,5 @@
 import type { AgentContextEnvelope, AgentEvent } from '@openpointer/core';
+import { buildToolDiscoveryEvent } from './prompt.js';
 import type { AgentBridge, AgentRunOptions } from './types.js';
 
 export class MockAgentBridge implements AgentBridge {
@@ -7,12 +8,7 @@ export class MockAgentBridge implements AgentBridge {
   async *run(envelope: AgentContextEnvelope, _options: AgentRunOptions = {}): AsyncIterable<AgentEvent> {
     const runId = `mock-${Date.now()}`;
     yield { type: 'run.started', runId, backend: this.id };
-    yield {
-      type: 'tool.discovery',
-      tools: envelope.routing.preferredTools,
-      skills: envelope.routing.preferredTools.filter((tool) => tool.includes('skill')),
-      message: 'Agent may use available MCP tools, skills, or CUA depending on backend configuration.'
-    };
+    yield buildToolDiscoveryEvent(envelope);
     yield { type: 'assistant.delta', text: `Received: ${envelope.instruction.text}` };
     if (envelope.cuaDirective?.enabled) {
       yield { type: 'tool.started', name: 'cua', input: envelope.cuaDirective.target };
