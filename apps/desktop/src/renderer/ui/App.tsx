@@ -107,6 +107,7 @@ const EFFORT_CHOICES = ['low', 'medium', 'high', 'max'] as const;
 
 type CuaBrushTuningKey = keyof CuaBrushOptions;
 type SettingsBackend = AppSettings['agentBackend'];
+type TuningBackend = 'claude-agent' | 'codex';
 
 type CuaBrushTuningSnapshot = {
   options: CuaBrushOptions;
@@ -410,6 +411,7 @@ export function App() {
   const [backendDropdownOpen, setBackendDropdownOpen] = useState(false);
   const [claudeSubmenuOpen, setClaudeSubmenuOpen] = useState(false);
   const [codexSubmenuOpen, setCodexSubmenuOpen] = useState(false);
+  const [effortSubmenuBackend, setEffortSubmenuBackend] = useState<TuningBackend | null>(null);
   const [detached, setDetached] = useState(false);
   const [selection, setSelection] = useState<SelectionRect | null>(null);
   const [detachedPos, setDetachedPos] = useState<{ x: number; y: number } | null>(null);
@@ -1434,6 +1436,9 @@ export function App() {
       const target = event.target as HTMLElement;
       if (!target.closest('.backend-dropdown') && !target.closest('.small-pill')) {
         setBackendDropdownOpen(false);
+        setClaudeSubmenuOpen(false);
+        setCodexSubmenuOpen(false);
+        setEffortSubmenuBackend(null);
       }
     }
     window.addEventListener('click', onClick, { capture: true });
@@ -1824,6 +1829,7 @@ export function App() {
       setBackendDropdownOpen(false);
       setClaudeSubmenuOpen(false);
       setCodexSubmenuOpen(false);
+      setEffortSubmenuBackend(null);
     }
     if (!options.keepMenuOpen) setMenuOpen(false);
     if (!options.keepMenuOpen) window.setTimeout(() => focusPromptInput(inputRef.current), 0);
@@ -2687,6 +2693,8 @@ export function App() {
   const glowFillColor = '#0D6FFF';
   const modalOpen = settingsOpen || historyOpen;
   const shellHiddenForContextCapture = selecting || Boolean(selectionDrag);
+  const tuningSubmenuBackend: TuningBackend | null = claudeSubmenuOpen ? 'claude-agent' : codexSubmenuOpen ? 'codex' : null;
+  const showEffortSubmenu = tuningSubmenuBackend !== null && effortSubmenuBackend === tuningSubmenuBackend;
   const showCuaBrushTuningPanel = active && settings?.cuaMode !== 'off' && !shellHiddenForContextCapture && !menuOpen && !settingsOpen && !historyOpen;
   const overlayNeedsPointerEvents =
     detached ||
@@ -3201,7 +3209,15 @@ export function App() {
                   }}
                   onClick={() => {
                     setMenuOpen(false);
-                    setBackendDropdownOpen((open) => !open);
+                    setBackendDropdownOpen((open) => {
+                      const next = !open;
+                      if (!next) {
+                        setClaudeSubmenuOpen(false);
+                        setCodexSubmenuOpen(false);
+                        setEffortSubmenuBackend(null);
+                      }
+                      return next;
+                    });
                   }}
                 >
                   {/* Inner Shadow Layer covering the ENTIRE small pill, inheriting border-radius */}
@@ -3238,18 +3254,34 @@ export function App() {
                             className={`flex items-center justify-between w-full py-1.5 px-3 border-0 rounded-[var(--radius-pill)] bg-transparent text-left cursor-pointer transition-colors duration-140 font-semibold text-[11px] relative z-1 ${
                               isSelected ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]' : 'text-white/80 hover:bg-white/10 hover:text-white'
                             }`}
+                            onMouseEnter={() => {
+                              if (isClaude) {
+                                setClaudeSubmenuOpen(true);
+                                setCodexSubmenuOpen(false);
+                                setEffortSubmenuBackend(null);
+                              } else if (isCodex) {
+                                setCodexSubmenuOpen(true);
+                                setClaudeSubmenuOpen(false);
+                                setEffortSubmenuBackend(null);
+                              } else {
+                                setClaudeSubmenuOpen(false);
+                                setCodexSubmenuOpen(false);
+                                setEffortSubmenuBackend(null);
+                              }
+                            }}
                             onClick={async () => {
                               await applyBackendSettings(item);
                               if (isClaude) {
-                                setClaudeSubmenuOpen(!claudeSubmenuOpen);
+                                setClaudeSubmenuOpen(true);
                                 setCodexSubmenuOpen(false);
                               } else if (isCodex) {
-                                setCodexSubmenuOpen(!codexSubmenuOpen);
+                                setCodexSubmenuOpen(true);
                                 setClaudeSubmenuOpen(false);
                               } else {
                                 setBackendDropdownOpen(false);
                                 setClaudeSubmenuOpen(false);
                                 setCodexSubmenuOpen(false);
+                                setEffortSubmenuBackend(null);
                                 window.setTimeout(() => focusPromptInput(inputRef.current), 0);
                               }
                             }}
@@ -3260,7 +3292,7 @@ export function App() {
                             </span>
                             <span className="flex items-center gap-1">
                               {isSelected && <span className="text-[9px] font-bold">✓</span>}
-                              {(isClaude || isCodex) && <ChevronIcon size={6} isOpen={showSubmenu} />}
+                              {(isClaude || isCodex) && <ChevronIcon size={6} isOpen={showSubmenu} direction="right" />}
                             </span>
                           </button>
                         </div>
@@ -3277,27 +3309,27 @@ export function App() {
                         <button
                           key={model || 'default'}
                           type="button"
-                          className={`w-full text-left py-1.5 px-3 border-0 rounded-[var(--radius-pill)] text-[11px] font-semibold cursor-pointer transition-colors ${
+                          className={`w-full flex items-center justify-between text-left py-1.5 px-3 border-0 rounded-[var(--radius-pill)] text-[11px] font-semibold cursor-pointer transition-colors ${
                             (settings?.claudeAgentModel || '') === model
                               ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]'
                               : 'bg-transparent text-white/80 hover:bg-white/10 hover:text-white'
                           }`}
+                          onMouseEnter={() => setEffortSubmenuBackend('claude-agent')}
                           onClick={async (e) => {
                             e.stopPropagation();
                             await applyBackendSettings('claude-agent', { claudeAgentModel: model });
-                            setClaudeSubmenuOpen(false);
-                            setBackendDropdownOpen(false);
-                            window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+                            setEffortSubmenuBackend('claude-agent');
                           }}
                         >
-                          {model || 'Default'}
+                          <span>{model || 'Default'}</span>
+                          <ChevronIcon size={6} isOpen={false} direction="right" />
                         </button>
                       ))}
                     </div>
                   )}
 
-                  {/* Column 3: Effort sub-panel (shown when Claude submenu is open) */}
-                  {claudeSubmenuOpen && (
+                  {/* Column 3: Effort sub-panel (shown after hovering/selecting a Claude model) */}
+                  {tuningSubmenuBackend === 'claude-agent' && showEffortSubmenu && (
                     <div className="relative min-w-[100px] p-1 border border-glass-border rounded-[var(--radius-pill)] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] flex flex-col gap-0.5 animate-dropdown-appear">
                       <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
                       <div className="text-[9px] text-white/50 uppercase tracking-wider px-3 pt-1.5 pb-0.5">Effort</div>
@@ -3313,6 +3345,10 @@ export function App() {
                           onClick={async (e) => {
                             e.stopPropagation();
                             await applyBackendSettings('claude-agent', { claudeAgentEffort: effort });
+                            setClaudeSubmenuOpen(false);
+                            setBackendDropdownOpen(false);
+                            setEffortSubmenuBackend(null);
+                            window.setTimeout(() => focusPromptInput(inputRef.current), 0);
                           }}
                         >
                           {effort.charAt(0).toUpperCase() + effort.slice(1)}
@@ -3330,27 +3366,27 @@ export function App() {
                         <button
                           key={model}
                           type="button"
-                          className={`w-full text-left py-1.5 px-3 border-0 rounded-[var(--radius-pill)] text-[11px] font-semibold cursor-pointer transition-colors ${
-                            (settings?.codexModel || 'gpt-5.5') === model
+                          className={`w-full flex items-center justify-between text-left py-1.5 px-3 border-0 rounded-[var(--radius-pill)] text-[11px] font-semibold cursor-pointer transition-colors ${
+                            (settings?.codexModel || 'gpt-5.4') === model
                               ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]'
                               : 'bg-transparent text-white/80 hover:bg-white/10 hover:text-white'
                           }`}
+                          onMouseEnter={() => setEffortSubmenuBackend('codex')}
                           onClick={async (e) => {
                             e.stopPropagation();
                             await applyBackendSettings('codex', { codexModel: model });
-                            setCodexSubmenuOpen(false);
-                            setBackendDropdownOpen(false);
-                            window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+                            setEffortSubmenuBackend('codex');
                           }}
                         >
-                          {model}
+                          <span>{model}</span>
+                          <ChevronIcon size={6} isOpen={false} direction="right" />
                         </button>
                       ))}
                     </div>
                   )}
 
                   {/* Codex effort sub-panel */}
-                  {codexSubmenuOpen && (
+                  {tuningSubmenuBackend === 'codex' && showEffortSubmenu && (
                     <div className="relative min-w-[100px] p-1 border border-glass-border rounded-[var(--radius-pill)] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] flex flex-col gap-0.5 animate-dropdown-appear">
                       <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
                       <div className="text-[9px] text-white/50 uppercase tracking-wider px-3 pt-1.5 pb-0.5">Effort</div>
@@ -3366,6 +3402,10 @@ export function App() {
                           onClick={async (e) => {
                             e.stopPropagation();
                             await applyBackendSettings('codex', { codexEffort: effort });
+                            setCodexSubmenuOpen(false);
+                            setBackendDropdownOpen(false);
+                            setEffortSubmenuBackend(null);
+                            window.setTimeout(() => focusPromptInput(inputRef.current), 0);
                           }}
                         >
                           {effort.charAt(0).toUpperCase() + effort.slice(1)}
@@ -3537,6 +3577,7 @@ export function App() {
                       setBackendDropdownOpen(false);
                       setClaudeSubmenuOpen(false);
                       setCodexSubmenuOpen(false);
+                      setEffortSubmenuBackend(null);
                       setMenuOpen((open) => !open);
                     }}
                     aria-label="Menu"

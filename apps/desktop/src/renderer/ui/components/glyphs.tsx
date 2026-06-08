@@ -1,6 +1,7 @@
 import type { PointerEntity } from '@openpointer/core';
 
-export function ChevronIcon({ size = 8, isOpen = false }: { size?: number; isOpen?: boolean }) {
+export function ChevronIcon({ size = 8, isOpen = false, direction = 'down' }: { size?: number; isOpen?: boolean; direction?: 'down' | 'right' }) {
+  const rotation = direction === 'right' ? -90 : isOpen ? 180 : 0;
   return (
     <svg
       width={size}
@@ -12,7 +13,7 @@ export function ChevronIcon({ size = 8, isOpen = false }: { size?: number; isOpe
       strokeLinecap="round"
       strokeLinejoin="round"
       style={{
-        transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+        transform: `rotate(${rotation}deg)`,
         transition: 'transform 180ms ease'
       }}
       aria-hidden="true"
