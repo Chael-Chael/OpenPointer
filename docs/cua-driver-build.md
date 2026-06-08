@@ -54,6 +54,31 @@ If a patch is already applied, that is expected — skip it.
 
 ## Build the binary
 
+For normal OpenPointer development, use the npm wrapper. It applies the patch
+set, installs the pinned upstream release if needed, stops any running vendored
+driver that would lock the executable, builds the patched release binary, and
+fails if the native build cannot complete:
+
+```powershell
+npm run cua:prepare
+```
+
+To verify the built driver really returns structured elements with bounding
+boxes:
+
+```powershell
+npm run cua:verify
+```
+
+For team debugging where tests should first refresh the patched driver:
+
+```powershell
+npm run test:cua
+```
+
+`npm test` intentionally does not build Rust on every run; use `test:cua` when
+the CUA driver is part of the scenario being tested.
+
 The driver crate lives at `vendor/cua/libs/cua-driver/rust`. Build it with
 Cargo:
 

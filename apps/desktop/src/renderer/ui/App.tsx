@@ -315,7 +315,7 @@ export function App() {
   stateRef.current = state;
   const [prompt, setPrompt] = useState('');
   const [events, setEvents] = useState<AgentEvent[]>([]);
-  const [backend, setBackend] = useState<AgentBackendId>('auto');
+  const [backend, setBackend] = useState<AgentBackendId>('codex');
   const [menuOpen, setMenuOpen] = useState(false);
   const [backendDropdownOpen, setBackendDropdownOpen] = useState(false);
   const [claudeSubmenuOpen, setClaudeSubmenuOpen] = useState(false);
@@ -391,6 +391,7 @@ export function App() {
     offsetY: number;
     overShelf: boolean;
   } | null>(null);
+  const isDraggingContextChip = Boolean(draggingContextChip);
   const [settledApprovalIds, setSettledApprovalIds] = useState<Set<string>>(() => new Set());
 
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
@@ -553,39 +554,39 @@ export function App() {
     [resetCuaBrushState]
   );
 
-  async function refreshConversationsList() {
+  const refreshConversationsList = useCallback(async () => {
     const list = await window.openPointer.getConversations();
     setConversationsList(list);
     return list;
-  }
+  }, []);
 
-  function clearBackgroundTerminalError(id: string) {
+  const clearBackgroundTerminalError = useCallback((id: string) => {
     setBackgroundTerminalErrors((current) => {
       if (!current[id]) return current;
       const { [id]: _removed, ...next } = current;
       return next;
     });
-  }
+  }, []);
 
-  function parkConversationInBackground(id: string | null | undefined) {
+  const parkConversationInBackground = useCallback((id: string | null | undefined) => {
     if (!id) return;
     setBackgroundConversationIds((current) => parkBackgroundConversation(current, id));
     clearBackgroundTerminalError(id);
     void refreshConversationsList().catch(() => {
       /* transient IPC failure; dock will refresh on the next history read */
     });
-  }
+  }, [clearBackgroundTerminalError, refreshConversationsList]);
 
-  function removeConversationFromBackground(id: string) {
+  const removeConversationFromBackground = useCallback((id: string) => {
     setBackgroundConversationIds((current) => removeBackgroundConversation(current, id));
     clearBackgroundTerminalError(id);
-  }
+  }, [clearBackgroundTerminalError]);
 
   useEffect(() => {
     void refreshConversationsList().catch(() => {
       /* transient IPC failure; history can refresh on the next explicit read */
     });
-  }, []);
+  }, [refreshConversationsList]);
 
   useEffect(() => {
     void window.openPointer.getSettings().then((value) => {
@@ -750,7 +751,7 @@ export function App() {
         thinkingTimerRef.current = null;
       }
     };
-  }, [isCursorOnThisOverlay, resetCuaBrushState, settings?.pillHeight, settings?.pillWidth]);
+  }, [isCursorOnThisOverlay, parkConversationInBackground, pillHeight, pillWidth, resetCuaBrushState]);
 
   useEffect(() => {
     if (conversationId && (state === 'completed' || state === 'composing' || state === 'idle' || state === 'failed')) {
@@ -1194,6 +1195,7 @@ export function App() {
     selecting,
     selection,
     selectionDrag,
+    resetCuaBrushState,
     settings?.cuaMode,
     settingsOpen
   ]);
@@ -1647,9 +1649,10 @@ export function App() {
 
   async function saveSettings() {
     if (!settings) return;
+    const backendToSave: AppSettings['agentBackend'] = selectableBackends.includes(backend) && backend !== 'mock' ? (backend as AppSettings['agentBackend']) : 'codex';
     const next = await window.openPointer.saveSettings({
       ...settings,
-      agentBackend: backend === 'mock' ? 'auto' : backend,
+      agentBackend: backendToSave,
       localVlmApiKey: secretDrafts.localVlmApiKey || undefined,
       hermesApiKey: secretDrafts.hermesApiKey || undefined,
       opencodeApiKey: secretDrafts.opencodeApiKey || undefined,
@@ -2316,7 +2319,7 @@ export function App() {
   ]);
 
   useEffect(() => {
-    if (!draggingContextChip) return;
+    if (!isDraggingContextChip) return;
 
     function onMouseMove(event: MouseEvent) {
       const overShelf = isPointOverContextShelf(event.clientX, event.clientY);
@@ -2351,7 +2354,7 @@ export function App() {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
-  }, [detached, draggingContextChip?.chip.id, releaseOverlayPointerCapture]);
+  }, [detached, isDraggingContextChip, releaseOverlayPointerCapture]);
 
   const lockCuaPickerAtCurrentPosition = useCallback(() => {
     groundingRequestSeqRef.current += 1;

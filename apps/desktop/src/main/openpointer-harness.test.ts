@@ -6,7 +6,7 @@ import { OpenPointerHarness } from './openpointer-harness.js';
 
 function baseSettings(patch: Partial<AppSettings> = {}): AppSettings {
   return {
-    agentBackend: 'auto',
+    agentBackend: 'codex',
     localVlmEnabled: true,
     requireApprovalBeforeCua: true,
     cuaMode: 'prefer',

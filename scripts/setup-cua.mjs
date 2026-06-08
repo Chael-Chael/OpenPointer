@@ -22,6 +22,7 @@ const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const CUA_DRIVER_TARGET_VERSION = '0.5.2';
 const wantBuild = process.argv.includes('--build');
 const patchOnly = process.argv.includes('--patch-only');
+const requireBuild = process.argv.includes('--require-build');
 
 function log(step, msg) {
   console.log(`\n[setup:cua] ${step}: ${msg}`);
@@ -147,6 +148,11 @@ function installDriver() {
 }
 
 // Optional: compile the patched driver for pixel-precise element bounds.
+function vendoredDriverPath(profile = 'release') {
+  const exe = process.platform === 'win32' ? 'cua-driver.exe' : 'cua-driver';
+  return join(repoRoot, 'vendor', 'cua', 'libs', 'cua-driver', 'rust', 'target', profile, exe);
+}
+
 function resolveUserCargo() {
   const exe = process.platform === 'win32' ? 'cargo.exe' : 'cargo';
   const candidates = [
@@ -158,6 +164,15 @@ function resolveUserCargo() {
     if (candidate !== 'cargo' && !existsSync(candidate)) return false;
     return runQuiet(candidate, ['--version']).code === 0;
   });
+}
+
+function stopExistingVendoredDriver() {
+  const releaseDriver = vendoredDriverPath('release');
+  const debugDriver = vendoredDriverPath('debug');
+  const stopCandidates = [releaseDriver, debugDriver].filter((candidate) => existsSync(candidate));
+  for (const candidate of stopCandidates) {
+    runQuiet(candidate, ['stop']);
+  }
 }
 
 function hasMsvcLinker() {
@@ -207,22 +222,25 @@ function resolveVsDevCmd() {
 function buildDriver() {
   const cargoBin = resolveUserCargo();
   if (!cargoBin) {
-    log('build', 'cargo not found; skipping native build. Install Rust + a C/C++ toolchain to enable precise bounds.');
-    return;
+    const message = 'cargo not found; skipping native build. Install Rust + a C/C++ toolchain to enable precise bounds.';
+    if (requireBuild) throw new Error(message);
+    log('build', message);
+    return false;
   }
   const cargo = runQuiet(cargoBin, ['--version']);
   log('build', `compiling patched cua-driver with ${cargo.out.trim()} ...`);
+  stopExistingVendoredDriver();
   const rustDir = join('vendor', 'cua', 'libs', 'cua-driver', 'rust');
   const rustPath = join(repoRoot, rustDir);
   let code;
   if (process.platform === 'win32' && !hasMsvcLinker()) {
     const vsDevCmd = resolveVsDevCmd();
     if (!vsDevCmd) {
-      log(
-        'build',
-        'MSVC linker link.exe not found; skipping native build. Install Visual Studio Build Tools with the Desktop development with C++ workload, then rerun `npm run setup:cua -- --build`.'
-      );
-      return;
+      const message =
+        'MSVC linker link.exe not found; skipping native build. Install Visual Studio Build Tools with the Desktop development with C++ workload, then rerun `npm run setup:cua -- --build`.';
+      if (requireBuild) throw new Error(message);
+      log('build', message);
+      return false;
     }
     log('build', 'link.exe is not in PATH; building via Visual Studio developer environment.');
     code = run('cmd.exe', ['/d', '/c', 'call', vsDevCmd, '-arch=x64', '-host_arch=x64', '&&', cargoBin, 'build', '--release'], {
@@ -231,7 +249,14 @@ function buildDriver() {
   } else {
     code = run(cargoBin, ['build', '--release'], { cwd: rustPath });
   }
-  log('build', code === 0 ? 'native driver built.' : 'WARNING: cargo build failed; release binary still usable.');
+  if (code !== 0) {
+    const message = 'cargo build failed; release binary still usable.';
+    if (requireBuild) throw new Error(message);
+    log('build', `WARNING: ${message}`);
+    return false;
+  }
+  log('build', `native driver built at ${vendoredDriverPath('release')}.`);
+  return true;
 }
 
 function main() {

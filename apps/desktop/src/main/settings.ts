@@ -28,7 +28,7 @@ type SaveSettingsPatch = Partial<AppSettings> & {
 };
 
 const DEFAULTS: AppSettings = {
-  agentBackend: 'auto',
+  agentBackend: 'codex',
   localVlmEnabled: true,
   localVlmBaseUrl: 'https://token-plan-cn.xiaomimimo.com/v1',
   localVlmModel: '',
@@ -294,7 +294,7 @@ function writeSecret(
 }
 
 function normalizeBackend(value: string): AppSettings['agentBackend'] {
-  return ['auto', 'local-vlm', 'hermes', 'opencode', 'openclaw', 'claude-agent', 'codex'].includes(value) ? (value as AppSettings['agentBackend']) : 'auto';
+  return ['hermes', 'opencode', 'openclaw', 'claude-agent', 'codex'].includes(value) ? (value as AppSettings['agentBackend']) : 'codex';
 }
 
 function normalizeCodexTransport(value: string): AppSettings['codexAppServerTransport'] {

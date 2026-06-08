@@ -4,7 +4,7 @@ import { backendReadiness, secretConfigured, runtimeStatusFor } from './backend-
 
 function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
   return {
-    agentBackend: 'auto',
+    agentBackend: 'codex',
     localVlmEnabled: false,
     localVlmBaseUrl: '',
     localVlmModel: '',

@@ -149,6 +149,31 @@ Validate the gesture handlers, coordinate mappings, local VLMs, and API adapters
 npm run test
 ```
 
+### Refreshing the CUA Driver for Team Debugging
+
+When debugging Windows CUA grounding, refresh the patched native driver before
+running tests:
+
+```powershell
+npm run test:cua
+```
+
+This command applies the local `patches/cua` patch set, builds the vendored
+release driver, verifies that `get_window_state` returns structured elements
+with bounding boxes, and then runs `npm test`.
+
+You can also run the driver steps separately:
+
+```powershell
+npm run cua:prepare
+npm run cua:verify
+```
+
+`npm test` intentionally does not rebuild Rust on every run. Use `test:cua`
+when a change depends on the patched `cua-driver.exe`. The app resolves the
+vendored release driver first, so teammates do not need a separate global driver
+install for this path.
+
 ### Code Formatting & Type Checks
 
 Verify typings across all packages and workspaces:

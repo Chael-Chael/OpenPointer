@@ -141,7 +141,7 @@ export class OpenPointerHarness {
       envelope,
       brokerSessionId: cuaBrokerSession?.sessionId,
       backendSessionId,
-      allowLocalFallback: settings.localVlmEnabled && backend !== 'local-vlm',
+      allowLocalFallback: false,
       cleanup: cuaBrokerSession ? () => this.options.cuaBroker.releaseSession(cuaBrokerSession.sessionId) : undefined,
       runner: this.streamBridgeEvents
     });

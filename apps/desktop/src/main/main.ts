@@ -1357,7 +1357,7 @@ async function buildLightPointerContext(
   preferredWindowBounds?: Rect,
   selectionText?: string
 ): Promise<PointerContext> {
-  let windowInfo = preferredWindowInfo ?? (await activeWindowInfo());
+  const windowInfo = preferredWindowInfo ?? (await activeWindowInfo());
   let groundingPreview: Awaited<ReturnType<CuaGroundingProvider['preview']>> | undefined;
   let groundedEntities = includeCua ? cuaEntities.filter((entity) => entity.groundingRef?.provider === 'cua') : [];
   if (includeCua && groundedEntities.length === 0) {
