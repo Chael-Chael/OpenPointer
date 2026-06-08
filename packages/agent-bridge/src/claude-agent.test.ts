@@ -299,7 +299,7 @@ describe('ClaudeAgentBridge', () => {
         transport: 'local-http',
         sessionId: 'broker-session',
         endpoint: 'http://127.0.0.1:9999/sessions/broker-session/mcp',
-        tools: ['list_windows', 'click', 'page']
+        tools: ['list_windows', 'get_window_state', 'click', 'replace_text']
       }
     ];
     const events: unknown[] = [];
@@ -311,7 +311,13 @@ describe('ClaudeAgentBridge', () => {
       cua: {
         type: 'http',
         url: 'http://127.0.0.1:9999/sessions/broker-session/mcp',
-        alwaysLoad: true
+        alwaysLoad: true,
+        tools: [
+          { name: 'list_windows', permission_policy: 'always_allow' },
+          { name: 'get_window_state', permission_policy: 'always_allow' },
+          { name: 'click', permission_policy: 'always_allow' },
+          { name: 'replace_text', permission_policy: 'always_allow' }
+        ]
       }
     });
   });

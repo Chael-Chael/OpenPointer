@@ -187,6 +187,79 @@ describe('CuaBroker', () => {
     expect(started).toEqual(['first', 'second']);
   });
 
+  it('keeps post-tool verification inside the serialized path for parallel agent MCP tasks', async () => {
+    const clickRelease = deferred<void>();
+    const verificationStarted = deferred<void>();
+    const verificationRelease = deferred<void>();
+    const events: string[] = [];
+    const sidecarCall = vi.fn(async (name: string) => {
+      if (name === 'click') {
+        events.push('click');
+        await clickRelease.promise;
+        return okResult;
+      }
+      if (name === 'get_window_state') {
+        events.push('verify-start');
+        verificationStarted.resolve();
+        await verificationRelease.promise;
+        events.push('verify-end');
+        return {
+          content: [{ type: 'text', text: 'verified' }],
+          structuredContent: {
+            elements: [{ id: 'submit' }],
+            screenshot_width: 800,
+            screenshot_height: 600
+          }
+        };
+      }
+      return okResult;
+    });
+    const { broker } = createBroker(sidecarCall);
+    const session = await broker.ensureStarted({
+      ...brokerDefaults,
+      requireApprovalBeforeCua: false,
+      allowedTools: ['click', 'replace_text', 'list_windows'],
+      localTools: {
+        replace_text: async () => {
+          events.push('replace');
+          return okResult;
+        }
+      },
+      emit: vi.fn()
+    });
+
+    const click = fetch(session.endpoint, {
+      method: 'POST',
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'click', arguments: { pid: 123, window_id: 456, element_index: 7 } }
+      })
+    });
+    await waitFor(() => events.includes('click'));
+
+    const replace = fetch(session.endpoint, {
+      method: 'POST',
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'replace_text', arguments: { text: 'updated value' } }
+      })
+    });
+
+    clickRelease.resolve();
+    await verificationStarted.promise;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(events).toEqual(['click', 'verify-start']);
+
+    verificationRelease.resolve();
+    await expect(click).resolves.toMatchObject({ status: 200 });
+    await expect(replace).resolves.toMatchObject({ status: 200 });
+    expect(events).toEqual(['click', 'verify-start', 'verify-end', 'replace']);
+  });
+
   it('hides the overlay around state-changing desktop tool execution', async () => {
     const events: string[] = [];
     const { broker } = createBroker(async (name) => {

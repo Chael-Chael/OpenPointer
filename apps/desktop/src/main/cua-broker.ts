@@ -356,9 +356,17 @@ export class CuaBroker {
     const run = async () => {
       session.options.emit({ type: 'tool.started', name, input: redactToolInput(args) });
       try {
-        const result = isSerializedTool(name, args) ? await this.withStateChangingLock(maybeHideOverlay) : await maybeHideOverlay();
-        const verification = await this.verifyAfterTool(session, name, args, result);
-        const resultWithVerification = attachVerification(result, verification);
+        const executeAndVerify = async () => {
+          const result = await maybeHideOverlay();
+          const verification = await this.verifyAfterTool(session, name, args, result);
+          return {
+            verification,
+            resultWithVerification: attachVerification(result, verification)
+          };
+        };
+        const { resultWithVerification, verification } = isSerializedTool(name, args)
+          ? await this.withStateChangingLock(executeAndVerify)
+          : await executeAndVerify();
         session.options.emit({
           type: 'tool.completed',
           name,
