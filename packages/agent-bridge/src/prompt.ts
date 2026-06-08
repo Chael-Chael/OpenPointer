@@ -365,7 +365,8 @@ function formatToolServers(toolServers: NonNullable<AgentContextEnvelope['toolSe
     JSON.stringify(toolServers, null, 2),
     'OpenPointer local CUA tools include:',
     '- read_selected_text({}): read the currently selected text from the target app.',
-    '- insert_text({ "text": string, "click_target"?: boolean }): insert text at the current pointer/target location.'
+    '- insert_text({ "text": string, "click_target"?: boolean }): insert text at the current pointer/target location without deleting existing content.',
+    '- replace_text({ "text": string, "click_target"?: boolean }): replace or clear the current editable CUA target or active text selection. Use this for rewrite/edit/modify/replace requests, not for ordinary button clicks.'
   ].join('\n');
 }
 

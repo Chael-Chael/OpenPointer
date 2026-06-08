@@ -60,7 +60,10 @@ const CUA_AGENT_TOOLS = [
   'set_config',
   'start_recording',
   'stop_recording',
-  'zoom'
+  'zoom',
+  'read_selected_text',
+  'insert_text',
+  'replace_text'
 ];
 
 class EventQueue<T> {

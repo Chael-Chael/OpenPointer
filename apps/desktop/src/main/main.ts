@@ -106,7 +106,7 @@ const CUA_DRIVER_AGENT_TOOLS = [
   'stop_recording',
   'zoom'
 ];
-const OP_AGENT_TOOLS = ['read_selected_text', 'insert_text'];
+const OP_AGENT_TOOLS = ['read_selected_text', 'insert_text', 'replace_text'];
 const CUA_AGENT_TOOLS = [...CUA_DRIVER_AGENT_TOOLS, ...OP_AGENT_TOOLS];
 const openPointerHarness = new OpenPointerHarness({
   taskManager: cuaTaskManager,
@@ -1013,6 +1013,20 @@ function createOpenPointerTools(context: PointerContext): Record<string, (args: 
           clickTarget
         })
       );
+    },
+    replace_text: async (args) => {
+      if (typeof args.text !== 'string') return toolError('replace_text: missing required string field `text`.');
+      const clickTarget = typeof args.click_target === 'boolean' ? args.click_target : true;
+      return toolResultFromInsertText(
+        await insertText({
+          text: args.text,
+          cursor: context.cursor,
+          windowContext: context.window,
+          targetEntity: context.target,
+          clickTarget,
+          replaceExisting: true
+        })
+      );
     }
   };
 }
@@ -1101,8 +1115,9 @@ async function readSelectedTextViaUia(target: { pid: number; windowId: string })
 }
 
 async function insertText(req: InsertTextRequest): Promise<InsertTextResponse> {
-  const text = req.text;
-  if (!text) return { status: 'unavailable', error: 'Missing text to insert.' };
+  const text = typeof req.text === 'string' ? req.text : '';
+  const replaceExisting = req.replaceExisting === true;
+  if (!replaceExisting && !text) return { status: 'unavailable', error: 'Missing text to insert.' };
   const settings = getSettings();
   if (settings.cuaMode === 'off') {
     return { status: 'unavailable', error: 'CUA mode is off.' };
@@ -1117,15 +1132,39 @@ async function insertText(req: InsertTextRequest): Promise<InsertTextResponse> {
         return { status: 'unavailable', error: 'No CUA window matched the insertion target.' };
       }
 
+      const setValueAttempt = replaceExisting ? await setTargetValueIfPossible(target, req.targetEntity, text) : undefined;
+      if (setValueAttempt?.status === 'matched') {
+        return setValueAttempt;
+      }
+
+      const source = replaceExisting ? 'cua-replace-paste' : 'cua-click-paste';
       if (req.clickTarget !== false) {
         const focused = await focusInsertionTarget(target, cursor, req.targetEntity);
         if (!focused.ok) {
           return {
             status: 'unavailable',
-            source: 'cua-click-paste',
+            source,
             pid: target.pid,
             windowId: target.windowId,
-            error: focused.error
+            error: appendPriorAttemptError(focused.error, setValueAttempt?.error)
+          };
+        }
+        await wait(120);
+      }
+
+      if (replaceExisting) {
+        const selectAll = await cuaSidecar.callTool('hotkey', {
+          pid: target.pid,
+          window_id: Number(target.windowId),
+          keys: ['ctrl', 'a']
+        });
+        if (selectAll.isError) {
+          return {
+            status: 'unavailable',
+            source,
+            pid: target.pid,
+            windowId: target.windowId,
+            error: appendPriorAttemptError(cuaToolResultText(selectAll) ?? 'CUA select-all hotkey failed before replacement.', setValueAttempt?.error)
           };
         }
         await wait(120);
@@ -1140,21 +1179,55 @@ async function insertText(req: InsertTextRequest): Promise<InsertTextResponse> {
       if (result.isError) {
         return {
           status: 'unavailable',
-          source: 'cua-click-paste',
+          source,
           pid: target.pid,
           windowId: target.windowId,
-          error: cuaToolResultText(result) ?? 'CUA paste hotkey failed.'
+          error: appendPriorAttemptError(cuaToolResultText(result) ?? 'CUA paste hotkey failed.', setValueAttempt?.error)
         };
       }
 
       await wait(180);
-      return { status: 'matched', source: 'cua-click-paste', pid: target.pid, windowId: target.windowId };
+      return { status: 'matched', source, pid: target.pid, windowId: target.windowId };
     });
   } catch (error) {
     return { status: 'unavailable', error: error instanceof Error ? error.message : String(error) };
   } finally {
     restoreClipboard(snapshot);
   }
+}
+
+async function setTargetValueIfPossible(
+  target: { pid: number; windowId: string; bounds?: Rect },
+  targetEntity: PointerEntity | undefined,
+  text: string
+): Promise<InsertTextResponse | undefined> {
+  const ref = targetEntity?.groundingRef?.provider === 'cua' ? targetEntity.groundingRef : undefined;
+  if (!ref || typeof ref.elementIndex !== 'number') return undefined;
+
+  const result = await cuaSidecar.callTool('set_value', {
+    pid: ref.pid ?? target.pid,
+    window_id: Number(ref.windowId ?? target.windowId),
+    element_index: ref.elementIndex,
+    value: text
+  });
+  return result.isError
+    ? {
+        status: 'unavailable',
+        source: 'cua-set-value',
+        pid: ref.pid ?? target.pid,
+        windowId: ref.windowId ?? target.windowId,
+        error: cuaToolResultText(result) ?? 'CUA set_value failed.'
+      }
+    : {
+        status: 'matched',
+        source: 'cua-set-value',
+        pid: ref.pid ?? target.pid,
+        windowId: ref.windowId ?? target.windowId
+      };
+}
+
+function appendPriorAttemptError(error: string, priorError?: string): string {
+  return priorError ? `${error} Prior set_value attempt failed: ${priorError}` : error;
 }
 
 async function resolveCuaSelectionTarget(

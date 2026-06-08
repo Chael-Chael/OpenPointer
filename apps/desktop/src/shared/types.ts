@@ -154,11 +154,12 @@ export type InsertTextRequest = {
   windowContext?: PointerContext['window'];
   targetEntity?: PointerEntity;
   clickTarget?: boolean;
+  replaceExisting?: boolean;
 };
 
 export type InsertTextResponse = {
   status: 'matched' | 'unavailable';
-  source?: 'cua-click-paste';
+  source?: 'cua-click-paste' | 'cua-replace-paste' | 'cua-set-value';
   pid?: number;
   windowId?: string;
   error?: string;

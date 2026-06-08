@@ -67,4 +67,20 @@ describe('capability hints in prompts', () => {
     expect(input).toContain('Resolved intent and entity bindings');
     expect(input).toContain('resolvedIntent');
   });
+
+  it('documents local CUA text replacement tools when a CUA tool server is attached', () => {
+    const env = envelope();
+    env.toolServers = [
+      {
+        id: 'cua',
+        transport: 'local-http',
+        sessionId: 'session-1',
+        endpoint: 'http://127.0.0.1:9999/sessions/session-1/mcp',
+        tools: ['read_selected_text', 'insert_text', 'replace_text']
+      }
+    ];
+    const instructions = buildAgentInstructions(env);
+    expect(instructions).toContain('replace_text');
+    expect(instructions).toContain('Use this for rewrite/edit/modify/replace requests');
+  });
 });

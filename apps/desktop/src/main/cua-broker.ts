@@ -4,6 +4,12 @@ import { randomUUID } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { CuaSidecarManager, type CuaToolResult } from './cua-sidecar.js';
 
+type McpToolDescriptor = {
+  name: string;
+  description?: string;
+  inputSchema?: unknown;
+};
+
 type BrokerOptions = {
   requireApprovalBeforeCua: boolean;
   cuaAgentCursorEnabled: boolean;
@@ -63,6 +69,7 @@ const STATE_CHANGING_TOOLS = new Set([
   'press_key',
   'read_selected_text',
   'replay_trajectory',
+  'replace_text',
   'right_click',
   'scroll',
   'set_agent_cursor_enabled',
@@ -79,6 +86,43 @@ const STATE_CHANGING_TOOLS = new Set([
 const ALWAYS_APPROVAL_TOOLS = new Set(['kill_app', 'replay_trajectory', 'set_config']);
 const PAGE_STATE_CHANGING_ACTIONS = new Set(['click_element', 'type_text', 'scroll', 'execute_javascript', 'enable_javascript_apple_events']);
 const OVERLAY_SENSITIVE_READ_TOOLS = new Set(['debug_window_info', 'get_accessibility_tree', 'get_window_state']);
+const LOCAL_TOOL_DESCRIPTORS: Record<string, McpToolDescriptor> = {
+  read_selected_text: {
+    name: 'read_selected_text',
+    description: 'Read currently selected text from the OpenPointer target application using CUA/UIA or clipboard fallback.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false
+    }
+  },
+  insert_text: {
+    name: 'insert_text',
+    description: 'Insert text at the current OpenPointer CUA target or pointer location without deleting existing content.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'Text to insert.' },
+        click_target: { type: 'boolean', description: 'Click/focus the current target before inserting. Defaults to true.' }
+      },
+      required: ['text'],
+      additionalProperties: false
+    }
+  },
+  replace_text: {
+    name: 'replace_text',
+    description: 'Replace or clear the text value of the current OpenPointer CUA target. Use only for editable text controls or an active text selection.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'Replacement text. Use an empty string to clear the field.' },
+        click_target: { type: 'boolean', description: 'Click/focus the current target before replacing. Defaults to true.' }
+      },
+      required: ['text'],
+      additionalProperties: false
+    }
+  }
+};
 
 export class CuaBroker {
   private server: Server | null = null;
@@ -268,7 +312,8 @@ export class CuaBroker {
       }
       if (method === 'tools/list') {
         const allowed = new Set(session.options.allowedTools);
-        const tools = (await this.sidecar.listTools()).filter((tool) => allowed.has(tool.name));
+        const sidecarTools = (await this.sidecar.listTools()).filter((tool) => allowed.has(tool.name));
+        const tools = mergeToolDescriptors(sidecarTools, localToolDescriptorsForSession(session, allowed));
         sendJson(res, 200, { jsonrpc: '2.0', id, result: { tools } });
         return;
       }
@@ -540,4 +585,29 @@ function isOverlaySensitiveTool(name: string, args: Record<string, unknown>): bo
 function toolApprovalLabel(name: string, args: Record<string, unknown>): string {
   if (name === 'page' && typeof args.action === 'string') return `page.${args.action}`;
   return name;
+}
+
+function localToolDescriptorsForSession(session: BrokerSession, allowed: Set<string>): McpToolDescriptor[] {
+  const localTools = session.options.localTools ?? {};
+  return Object.keys(localTools)
+    .filter((name) => allowed.has(name))
+    .map((name) => LOCAL_TOOL_DESCRIPTORS[name] ?? fallbackLocalToolDescriptor(name));
+}
+
+function mergeToolDescriptors(sidecarTools: McpToolDescriptor[], localTools: McpToolDescriptor[]): McpToolDescriptor[] {
+  const byName = new Map<string, McpToolDescriptor>();
+  for (const tool of sidecarTools) byName.set(tool.name, tool);
+  for (const tool of localTools) byName.set(tool.name, tool);
+  return [...byName.values()];
+}
+
+function fallbackLocalToolDescriptor(name: string): McpToolDescriptor {
+  return {
+    name,
+    description: 'OpenPointer local CUA tool.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: true
+    }
+  };
 }

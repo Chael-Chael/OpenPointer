@@ -59,6 +59,40 @@ describe('CuaBroker', () => {
     expect(sidecarCall).not.toHaveBeenCalled();
   });
 
+  it('lists OpenPointer local text tools alongside sidecar tools', async () => {
+    const sidecar = {
+      callTool: vi.fn(async () => okResult),
+      listTools: vi.fn(async () => [{ name: 'click', description: 'Click an element.' }])
+    };
+    const broker = new CuaBroker(sidecar as never);
+    brokers.push(broker);
+    const session = await broker.ensureStarted({
+      ...brokerDefaults,
+      requireApprovalBeforeCua: false,
+      allowedTools: ['click', 'read_selected_text', 'insert_text', 'replace_text'],
+      localTools: {
+        read_selected_text: vi.fn(async () => okResult),
+        insert_text: vi.fn(async () => okResult),
+        replace_text: vi.fn(async () => okResult)
+      },
+      emit: vi.fn()
+    });
+
+    const response = await fetch(session.endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    const names = body.result.tools.map((tool: { name: string }) => tool.name);
+    expect(names).toEqual(expect.arrayContaining(['click', 'read_selected_text', 'insert_text', 'replace_text']));
+    expect(body.result.tools.find((tool: { name: string }) => tool.name === 'replace_text')).toMatchObject({
+      description: expect.stringContaining('Replace or clear'),
+      inputSchema: expect.objectContaining({ required: ['text'] })
+    });
+  });
+
   it('requires approval before state-changing tool calls', async () => {
     const { broker, sidecarCall } = createBroker();
     let approvalId = '';

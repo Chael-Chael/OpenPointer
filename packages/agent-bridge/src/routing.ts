@@ -12,7 +12,7 @@ import type {
 } from '@openpointer/core';
 
 const OPERATION_PATTERN =
-  /\b(click|merge|add|insert|paste|fill|type|open|move|drag|scroll|operate|select|selection|selected|highlight|read|copy)\b|(?:\u70b9|\u9ede)(?:\u51fb|\u64ca)|\u5408\u5e76|\u6dfb\u52a0|\u52a0\u5165|\u63d2\u5165|\u7c98\u8d34|\u66ff\u6362|\u6539\u5199|\u586b(?:\u5145)?|\u8f93\u5165|\u8bfb\u53d6|\u8bc6\u522b|\u590d\u5236|\u9ad8\u4eae|\u6253\u5f00|\u64cd\u4f5c|\u9009\u62e9|\u9009\u4e2d/iu;
+  /\b(click|merge|add|insert|paste|replace|rewrite|edit|modify|fill|type|open|move|drag|scroll|operate|select|selection|selected|highlight|read|copy)\b|(?:\u70b9|\u9ede)(?:\u51fb|\u64ca)|\u5408\u5e76|\u6dfb\u52a0|\u52a0\u5165|\u63d2\u5165|\u7c98\u8d34|\u66ff\u6362|\u6539\u5199|\u586b(?:\u5145)?|\u8f93\u5165|\u8bfb\u53d6|\u8bc6\u522b|\u590d\u5236|\u9ad8\u4eae|\u6253\u5f00|\u64cd\u4f5c|\u9009\u62e9|\u9009\u4e2d/iu;
 const FORCE_CUA_PATTERN = /\b(force|must|directly).*(cua|desktop|computer)|\u5f3a\u5236.*(cua|\u684c\u9762|\u7535\u8111)|\u76f4\u63a5\u64cd\u4f5c/iu;
 
 export function buildAgentContextEnvelope(args: {

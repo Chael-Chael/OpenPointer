@@ -417,7 +417,7 @@ export function builtInSkillCapabilities(): DiscoveredCapability[] {
       sources: ['built-in'],
       tags: ['selection', 'text', 'rewrite', 'summarize', 'insert', 'selected', '选中文本', '改写'],
       triggers: ['selected text', 'selection', 'rewrite', 'summarize', 'insert text', '选中', '改写', '总结', '插入'],
-      requiredTools: ['cua:read_selected_text', 'cua:insert_text'],
+      requiredTools: ['cua:read_selected_text', 'cua:insert_text', 'cua:replace_text'],
       executionTemplate: {
         objective: 'Prefer selected text and explicit insertion targets over screenshot-only interpretation.',
         steps: [
@@ -463,7 +463,7 @@ export function builtInSkillCapabilities(): DiscoveredCapability[] {
       sources: ['built-in'],
       tags: ['document', 'pdf', 'paper', 'word', 'office', '论文', '文档', '段落'],
       triggers: ['pdf', 'paper', 'document', 'paragraph', 'word', 'office', '论文', '文档', '段落', '摘要'],
-      requiredTools: ['document-skill', 'cua:read_selected_text', 'cua:insert_text'],
+      requiredTools: ['document-skill', 'cua:read_selected_text', 'cua:insert_text', 'cua:replace_text'],
       executionTemplate: {
         objective: 'Ground document tasks in selected text or document-specific tooling before using screenshots.',
         steps: [
