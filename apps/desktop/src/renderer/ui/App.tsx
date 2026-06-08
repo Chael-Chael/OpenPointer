@@ -85,7 +85,7 @@ import { matchCapabilitySnapshot } from './lib/capability-match';
 import { HoldRing } from './components/fields';
 import { SettingsPanel } from './components/SettingsPanel';
 import { HistoryPanel } from './components/HistoryPanel';
-import { getBackendIcon } from './components/icons';
+import { getBackendIcon, SettingsMark } from './components/icons';
 import { ChevronIcon, EntityKindGlyph, WindowGlyph } from './components/glyphs';
 import { PointerContextPreview } from './components/PointerContextPreview';
 import { HistoryThinkingBlock } from './components/HistoryThinkingBlock';
@@ -104,6 +104,42 @@ const CONTEXT_TRANSFER_PATTERN = /\b(copy|move|insert|paste|send|put|into|to)\b|
 const CLAUDE_MODEL_CHOICES = ['', 'sonnet', 'opus', 'haiku'];
 const CODEX_MODEL_CHOICES = ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'];
 const EFFORT_CHOICES = ['low', 'medium', 'high', 'max'] as const;
+
+function MenuGlyph({ kind, size = 14 }: { kind: 'voice' | 'model' | 'new' | 'history' | 'settings'; size?: number }) {
+  if (kind === 'voice') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <rect x="5.3" y="2" width="5.4" height="7.2" rx="2.7" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M3.5 7.2a4.5 4.5 0 0 0 9 0M8 11.8V14M5.8 14h4.4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (kind === 'model') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M8 2.4 9.4 6l3.7 1.4-3.7 1.4L8 12.4 6.6 8.8 2.9 7.4 6.6 6 8 2.4Z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+        <path d="M12.6 2.5v2.2M11.5 3.6h2.2" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (kind === 'new') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (kind === 'history') {
+    return (
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <path d="M5.2 4H2.7V1.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M3.1 4.2A5.6 5.6 0 1 1 2.6 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+        <path d="M8 5.2v3.1l2 1.2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    );
+  }
+  return <SettingsMark />;
+}
 
 type CuaBrushTuningKey = keyof CuaBrushOptions;
 type SettingsBackend = AppSettings['agentBackend'];
@@ -1854,7 +1890,9 @@ export function App() {
     if (backend === 'claude-agent') {
       return (
         <label className="bubble-dropdown-item bubble-dropdown-control">
-          <span className="bubble-dropdown-icon">M</span>
+          <span className="bubble-dropdown-icon">
+            <MenuGlyph kind="model" />
+          </span>
           <select className="bubble-dropdown-select" value={settings.claudeAgentModel || ''} onChange={(event) => void updateSelectedBackendModel(event.target.value)} title="Claude model">
             {CLAUDE_MODEL_CHOICES.map((model) => (
               <option key={model || 'default'} value={model}>
@@ -1868,7 +1906,9 @@ export function App() {
     if (backend === 'codex') {
       return (
         <label className="bubble-dropdown-item bubble-dropdown-control">
-          <span className="bubble-dropdown-icon">M</span>
+          <span className="bubble-dropdown-icon">
+            <MenuGlyph kind="model" />
+          </span>
           <select className="bubble-dropdown-select" value={settings.codexModel || 'gpt-5.4'} onChange={(event) => void updateSelectedBackendModel(event.target.value)} title="Codex model">
             {CODEX_MODEL_CHOICES.map((model) => (
               <option key={model} value={model}>
@@ -1882,7 +1922,9 @@ export function App() {
     if (backend === 'openclaw') {
       return (
         <label className="bubble-dropdown-item bubble-dropdown-control">
-          <span className="bubble-dropdown-icon">M</span>
+          <span className="bubble-dropdown-icon">
+            <MenuGlyph kind="model" />
+          </span>
           <input
             className="bubble-dropdown-input"
             value={settings.openclawModel}
@@ -2712,17 +2754,14 @@ export function App() {
     showCuaBrushTuningPanel;
   const menuStyle = useMemo<CSSProperties>(() => {
     const width = 220;
-    const estimatedHeight = 232;
     const viewportW = window.innerWidth;
     const viewportH = window.innerHeight;
     const shellWidth = Math.min(pillWidth, viewportW - 32);
     const left = Math.min(Math.max(12, effectiveShellPos.x + shellWidth - width), Math.max(12, viewportW - width - 12));
     const belowY = effectiveShellPos.y + visualPillHeight + 8;
-    const aboveY = effectiveShellPos.y - estimatedHeight - 8;
-    const shouldOpenAbove = hasPanel || belowY + estimatedHeight > viewportH;
-    const top = shouldOpenAbove && aboveY >= 12 ? aboveY : Math.min(belowY, Math.max(12, viewportH - estimatedHeight - 12));
-    return { left, top, width };
-  }, [effectiveShellPos.x, effectiveShellPos.y, hasPanel, pillWidth, visualPillHeight]);
+    const maxHeight = Math.max(96, viewportH - belowY - 12);
+    return { left, top: belowY, width, maxHeight };
+  }, [effectiveShellPos.x, effectiveShellPos.y, pillWidth, visualPillHeight]);
 
   return (
     <div
@@ -3730,12 +3769,14 @@ export function App() {
           {menuOpen && !shellHiddenForContextCapture && (
             <div className="bubble-dropdown" style={menuStyle} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => event.stopPropagation()}>
               <button className="bubble-dropdown-item" onClick={startVoice}>
-                <span className="bubble-dropdown-icon">V</span>
+                <span className="bubble-dropdown-icon">
+                  <MenuGlyph kind="voice" />
+                </span>
                 Voice input
               </button>
               <div className="bubble-dropdown-separator" />
               <label className="bubble-dropdown-item">
-                <span className="bubble-dropdown-icon">B</span>
+                <span className="bubble-dropdown-icon">{getBackendIcon(backend, 14)}</span>
                 <select
                   className="bubble-dropdown-select"
                   value={backend}
@@ -3751,7 +3792,9 @@ export function App() {
               </label>
               {backendModelControl()}
               <button className="bubble-dropdown-item" onClick={startNewConversation}>
-                <span className="bubble-dropdown-icon">N</span>
+                <span className="bubble-dropdown-icon">
+                  <MenuGlyph kind="new" />
+                </span>
                 New Conversation
               </button>
               <button
@@ -3762,7 +3805,9 @@ export function App() {
                   void refreshConversationsList();
                 }}
               >
-                <span className="bubble-dropdown-icon">H</span>
+                <span className="bubble-dropdown-icon">
+                  <MenuGlyph kind="history" />
+                </span>
                 History
               </button>
               <button
@@ -3772,7 +3817,9 @@ export function App() {
                   setSettingsOpen(true);
                 }}
               >
-                <span className="bubble-dropdown-icon">S</span>
+                <span className="bubble-dropdown-icon">
+                  <MenuGlyph kind="settings" />
+                </span>
                 Settings
               </button>
             </div>
