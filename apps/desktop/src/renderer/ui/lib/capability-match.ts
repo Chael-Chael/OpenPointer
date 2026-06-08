@@ -34,7 +34,7 @@ function supportsBackend(item: CapabilityItem, backend: AgentBackendId): boolean
 }
 
 function matchedKeywords(item: CapabilityItem, keywords: string[]): string[] {
-  const haystack = [item.name, item.description, ...(item.tags ?? [])].filter(Boolean).join(' ').toLowerCase();
+  const haystack = [item.name, item.description, ...(item.tags ?? []), ...(item.triggers ?? [])].filter(Boolean).join(' ').toLowerCase();
   const normalizedName = item.name.toLowerCase();
   return keywords.filter((keyword) => haystack.includes(keyword) || keyword.includes(normalizedName));
 }

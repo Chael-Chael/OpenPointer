@@ -296,4 +296,70 @@ describe('CuaBroker', () => {
     broker.releaseSession(session.sessionId);
     expect(endSession).toHaveBeenCalledWith(session.sessionId);
   });
+
+  it('emits post-tool verification after grounded state-changing calls', async () => {
+    const events: string[] = [];
+    const emitted: unknown[] = [];
+    const sidecarCall = vi.fn(async (name: string) => {
+      events.push(`tool:${name}`);
+      if (name === 'get_window_state') {
+        return {
+          content: [{ type: 'text', text: 'window observed' }],
+          structuredContent: {
+            elements: [{ id: 1 }, { id: 2 }],
+            screenshot_width: 800,
+            screenshot_height: 600
+          }
+        };
+      }
+      return okResult;
+    });
+    const { broker } = createBroker(sidecarCall);
+    const session = await broker.ensureStarted({
+      ...brokerDefaults,
+      requireApprovalBeforeCua: false,
+      allowedTools: ['click'],
+      withDesktopInteractionHidden: async (work) => {
+        events.push('hide');
+        try {
+          return await work();
+        } finally {
+          events.push('restore');
+        }
+      },
+      emit: (event) => {
+        emitted.push(event);
+      }
+    });
+
+    const response = await fetch(session.endpoint, {
+      method: 'POST',
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'click', arguments: { pid: 123, window_id: 456, element_index: 7 } }
+      })
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.result.structuredContent.openpointerVerification).toMatchObject({
+      status: 'observed',
+      strategy: 'uia-state',
+      target: { pid: 123, windowId: 456, elementIndex: 7 },
+      summary: { elementCount: 2, screenshotWidth: 800, screenshotHeight: 600 }
+    });
+    expect(events).toEqual(['hide', 'tool:click', 'restore', 'hide', 'tool:get_window_state', 'restore']);
+    expect(emitted).toEqual([
+      expect.objectContaining({ type: 'tool.started', name: 'click' }),
+      expect.objectContaining({
+        type: 'tool.completed',
+        name: 'click',
+        output: expect.objectContaining({
+          verification: expect.objectContaining({ status: 'observed', strategy: 'uia-state' })
+        })
+      })
+    ]);
+  });
 });

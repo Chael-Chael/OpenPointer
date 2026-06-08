@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentContextEnvelope, PointerContext } from '@openpointer/core';
 import { buildAgentContextEnvelope } from './routing.js';
-import { buildAgentInstructions, buildToolDiscoveryEvent } from './prompt.js';
+import { buildAgentInput, buildAgentInstructions, buildToolDiscoveryEvent } from './prompt.js';
 
 const context: PointerContext = {
   id: 'ctx',
@@ -57,7 +57,14 @@ describe('capability hints in prompts', () => {
     const instructions = buildAgentInstructions(envelope());
     expect(instructions).toContain('Context-matched capability hints');
     expect(instructions).toContain('paper-reader');
+    expect(instructions).toContain('Resolved intent');
     expect(instructions).not.toContain('server_config');
     expect(instructions).not.toContain('env');
+  });
+
+  it('includes resolved intent and entity bindings in the model input bundle', () => {
+    const input = buildAgentInput(envelope());
+    expect(input).toContain('Resolved intent and entity bindings');
+    expect(input).toContain('resolvedIntent');
   });
 });

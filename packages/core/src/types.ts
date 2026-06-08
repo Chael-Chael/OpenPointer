@@ -181,7 +181,18 @@ export type AgentInputMode = 'text' | 'voice';
 export type AgentToolPolicy = 'agent_decides' | 'prefer' | 'require';
 
 export type CapabilityKind = 'mcp' | 'skill';
-export type CapabilitySource = 'cc-switch' | 'native';
+export type CapabilitySource = 'cc-switch' | 'native' | 'built-in';
+
+export type SkillVerificationStrategy = 'none' | 'recapture' | 'uia-state' | 'read-selection' | 'test-command';
+
+export type SkillExecutionTemplate = {
+  objective: string;
+  steps: string[];
+  verification: {
+    strategy: SkillVerificationStrategy;
+    successSignals: string[];
+  };
+};
 
 export type CapabilityItem = {
   id: string;
@@ -191,6 +202,9 @@ export type CapabilityItem = {
   backendIds: AgentBackendId[];
   sources: CapabilitySource[];
   tags?: string[];
+  triggers?: string[];
+  requiredTools?: string[];
+  executionTemplate?: SkillExecutionTemplate;
 };
 
 export type CapabilityHint = CapabilityItem & {
@@ -220,6 +234,62 @@ export type AgentAttachment = {
   dataUrl?: string;
   tempPath?: string;
   crop?: Rect;
+};
+
+export type ResolvedIntentAction =
+  | 'answer'
+  | 'summarize'
+  | 'rewrite'
+  | 'copy'
+  | 'insert'
+  | 'click'
+  | 'fill'
+  | 'navigate'
+  | 'operate'
+  | 'compare'
+  | 'code'
+  | 'unknown';
+
+export type ResolvedIntentDomain =
+  | 'general'
+  | 'screen'
+  | 'browser'
+  | 'document'
+  | 'code'
+  | 'text-selection'
+  | 'desktop-control'
+  | 'image';
+
+export type ResolvedIntent = {
+  action: ResolvedIntentAction;
+  domain: ResolvedIntentDomain;
+  summary: string;
+  confidence: number;
+  needs: {
+    visualUnderstanding: boolean;
+    structuredUi: boolean;
+    desktopControl: boolean;
+    toolUse: boolean;
+  };
+  suggestedSkillIds: string[];
+  sourceBindingIds: string[];
+  targetBindingIds: string[];
+};
+
+export type EntityBindingRole = 'source' | 'target' | 'destination' | 'selection' | 'window' | 'region' | 'context';
+
+export type EntityBinding = {
+  id: string;
+  role: EntityBindingRole;
+  label: string;
+  kind: PointerEntityKind | ContextChipKind | 'cursor' | 'window';
+  confidence: number;
+  entityId?: string;
+  chipId?: string;
+  text?: string;
+  region?: Rect;
+  window?: ContextWindowRef;
+  groundingRef?: PointerEntity['groundingRef'];
 };
 
 export type CuaDirective = {
@@ -282,6 +352,8 @@ export type AgentContextEnvelope = {
   };
   cuaDirective?: CuaDirective;
   capabilityHints?: CapabilityHints;
+  resolvedIntent?: ResolvedIntent;
+  entityBindings?: EntityBinding[];
   toolServers?: Array<{
     id: 'cua';
     transport: 'local' | 'local-http';

@@ -104,6 +104,13 @@ describe('buildAgentContextEnvelope', () => {
     expect(envelope.routing.toolPolicy).toBe('prefer');
     expect(envelope.cuaDirective?.mode).toBe('prefer');
     expect(envelope.cuaDirective?.target?.bbox).toEqual(context.target?.bbox);
+    expect(envelope.resolvedIntent).toMatchObject({
+      action: 'operate',
+      domain: 'desktop-control',
+      needs: { desktopControl: true, toolUse: true }
+    });
+    expect(envelope.resolvedIntent?.suggestedSkillIds).toContain('openpointer.generic-cua');
+    expect(envelope.entityBindings?.some((binding) => binding.role === 'target' && binding.entityId === 'entity-1')).toBe(true);
   });
 
   it('includes pinned context windows in the CUA app allowlist', () => {
@@ -147,5 +154,23 @@ describe('buildAgentContextEnvelope', () => {
     });
     expect(envelope.routing.toolPolicy).toBe('require');
     expect(envelope.cuaDirective?.mode).toBe('require');
+  });
+
+  it('resolves document and selection workflows into skill hints', () => {
+    const envelope = buildAgentContextEnvelope({
+      instruction: 'summarize this selected paper paragraph',
+      mode: 'text',
+      context: {
+        ...context,
+        selection: { text: 'Important selected paragraph.' }
+      }
+    });
+
+    expect(envelope.resolvedIntent).toMatchObject({
+      action: 'summarize',
+      domain: 'document'
+    });
+    expect(envelope.resolvedIntent?.suggestedSkillIds).toEqual(expect.arrayContaining(['openpointer.document-pdf', 'openpointer.text-selection']));
+    expect(envelope.entityBindings?.some((binding) => binding.role === 'selection' && binding.text === 'Important selected paragraph.')).toBe(true);
   });
 });

@@ -30,6 +30,25 @@ type BrokerSession = {
   recordingDir?: string;
 };
 
+type ToolVerification = {
+  status: 'observed' | 'failed' | 'skipped';
+  strategy: 'uia-state';
+  tool: string;
+  checkedAt: number;
+  target?: {
+    pid?: number;
+    windowId?: number;
+    elementIndex?: number;
+  };
+  summary?: {
+    elementCount?: number;
+    screenshotWidth?: number;
+    screenshotHeight?: number;
+    text?: string;
+  };
+  error?: string;
+};
+
 const STATE_CHANGING_TOOLS = new Set([
   'bring_to_front',
   'click',
@@ -289,7 +308,79 @@ export class CuaBroker {
       return localTool ? await localTool(args) : await this.sidecar.callTool(name, withCuaSessionArg(args, session.id));
     };
     const maybeHideOverlay = () => (isOverlaySensitiveTool(name, args) ? this.withDesktopInteractionHidden(session, execute) : execute());
-    return isSerializedTool(name, args) ? this.withStateChangingLock(maybeHideOverlay) : maybeHideOverlay();
+    const run = async () => {
+      session.options.emit({ type: 'tool.started', name, input: redactToolInput(args) });
+      try {
+        const result = isSerializedTool(name, args) ? await this.withStateChangingLock(maybeHideOverlay) : await maybeHideOverlay();
+        const verification = await this.verifyAfterTool(session, name, args, result);
+        const resultWithVerification = attachVerification(result, verification);
+        session.options.emit({
+          type: 'tool.completed',
+          name,
+          output: {
+            isError: Boolean(resultWithVerification.isError),
+            structuredContent: summarizeStructuredContent(resultWithVerification.structuredContent),
+            verification
+          }
+        });
+        return resultWithVerification;
+      } catch (error) {
+        session.options.emit({
+          type: 'tool.completed',
+          name,
+          output: {
+            isError: true,
+            error: error instanceof Error ? error.message : String(error)
+          }
+        });
+        throw error;
+      }
+    };
+    return run();
+  }
+
+  private async verifyAfterTool(session: BrokerSession, name: string, args: Record<string, unknown>, result: CuaToolResult): Promise<ToolVerification | undefined> {
+    if (!shouldVerifyAfterTool(name, args, result)) return undefined;
+    const pid = numberArg(args.pid);
+    const windowId = numberArg(args.window_id ?? args.windowId);
+    const elementIndex = numberArg(args.element_index ?? args.elementIndex);
+    try {
+      const observed = await this.withDesktopInteractionHidden(session, () =>
+        this.sidecar.callTool('get_window_state', {
+          session: session.id,
+          pid,
+          window_id: windowId,
+          capture_mode: 'metadata'
+        })
+      );
+      if (observed.isError) {
+        return {
+          status: 'failed',
+          strategy: 'uia-state',
+          tool: name,
+          checkedAt: Date.now(),
+          target: { pid, windowId, elementIndex },
+          error: contentText(observed) || 'Post-tool UIA verification returned an error.'
+        };
+      }
+      return {
+        status: 'observed',
+        strategy: 'uia-state',
+        tool: name,
+        checkedAt: Date.now(),
+        target: { pid, windowId, elementIndex },
+        summary: summarizeWindowStateObservation(observed)
+      };
+    } catch (error) {
+      return {
+        status: 'failed',
+        strategy: 'uia-state',
+        tool: name,
+        checkedAt: Date.now(),
+        target: { pid, windowId, elementIndex },
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
   }
 
   private async requiresApproval(session: BrokerSession, name: string, args: Record<string, unknown>): Promise<boolean> {
@@ -379,6 +470,67 @@ function isSerializedTool(name: string, args: Record<string, unknown>): boolean 
   if (STATE_CHANGING_TOOLS.has(name)) return true;
   if (name === 'page' && PAGE_STATE_CHANGING_ACTIONS.has(String(args.action))) return true;
   return false;
+}
+
+function shouldVerifyAfterTool(name: string, args: Record<string, unknown>, result: CuaToolResult): boolean {
+  if (result.isError) return false;
+  if (!isSerializedTool(name, args)) return false;
+  if (name === 'start_recording' || name === 'stop_recording' || name === 'replay_trajectory') return false;
+  return Number.isFinite(numberArg(args.pid)) && Number.isFinite(numberArg(args.window_id ?? args.windowId));
+}
+
+function numberArg(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function redactToolInput(args: Record<string, unknown>): Record<string, unknown> {
+  const redacted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(args)) {
+    redacted[key] = /key|token|secret|password/i.test(key) ? '[redacted]' : value;
+  }
+  return redacted;
+}
+
+function attachVerification(result: CuaToolResult, verification: ToolVerification | undefined): CuaToolResult {
+  if (!verification) return result;
+  const structured = isRecord(result.structuredContent) ? result.structuredContent : {};
+  return {
+    ...result,
+    structuredContent: {
+      ...structured,
+      openpointerVerification: verification
+    }
+  };
+}
+
+function summarizeStructuredContent(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const summary: Record<string, unknown> = {};
+  for (const key of ['status', 'ok', 'error', 'window_id', 'pid', 'element_count', 'openpointerVerification']) {
+    if (key in value) summary[key] = value[key];
+  }
+  return Object.keys(summary).length > 0 ? summary : undefined;
+}
+
+function summarizeWindowStateObservation(result: CuaToolResult): ToolVerification['summary'] {
+  const structured = isRecord(result.structuredContent) ? result.structuredContent : {};
+  const elements = Array.isArray(structured.elements) ? structured.elements : undefined;
+  return {
+    elementCount: numberArg(structured.element_count) ?? elements?.length,
+    screenshotWidth: numberArg(structured.screenshot_width),
+    screenshotHeight: numberArg(structured.screenshot_height),
+    text: contentText(result)?.slice(0, 500)
+  };
+}
+
+function contentText(result: CuaToolResult): string | undefined {
+  const parts = result.content?.map((part) => (part.type === 'text' ? part.text : undefined)).filter((text): text is string => Boolean(text?.trim()));
+  return parts && parts.length > 0 ? parts.join('\n') : undefined;
 }
 
 function isOverlaySensitiveTool(name: string, args: Record<string, unknown>): boolean {

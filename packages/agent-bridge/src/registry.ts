@@ -28,14 +28,9 @@ export function createAgentBridge(backend: AgentBackendId, config: AgentBridgeRe
 
 export function resolveBackendForEnvelope(envelope: AgentContextEnvelope, config: AgentBridgeRegistryConfig = {}): AgentBackendId {
   if (envelope.routing.backend !== 'auto') return envelope.routing.backend;
-  if (looksLikeCodingWorkflow(envelope)) return config.codex?.baseUrl ? 'codex' : config.opencode?.baseUrl ? 'opencode' : config.openclaw?.baseUrl ? 'openclaw' : 'local-vlm';
-  if (envelope.cuaDirective?.enabled) {
-    if (config.hermes?.baseUrl) return 'hermes';
-    if (config.openclaw?.baseUrl) return 'openclaw';
-    if (config.opencode?.baseUrl) return 'opencode';
-    if (config.claudeAgent?.enabled) return 'claude-agent';
-  }
-  return config.localVlm?.baseUrl ? 'local-vlm' : resolveAutoBackend(config);
+  if (looksLikeCodingWorkflow(envelope)) return resolveCodingBackend(config);
+  if (requiresAgentRuntime(envelope)) return resolveAgentRuntimeBackend(config);
+  return config.localVlm?.baseUrl ? 'local-vlm' : resolveAgentRuntimeBackend(config);
 }
 
 function resolveAutoBackend(config: AgentBridgeRegistryConfig): AgentBackendId {
@@ -48,8 +43,38 @@ function resolveAutoBackend(config: AgentBridgeRegistryConfig): AgentBackendId {
   return 'local-vlm';
 }
 
+function resolveAgentRuntimeBackend(config: AgentBridgeRegistryConfig): AgentBackendId {
+  if (config.hermes?.baseUrl) return 'hermes';
+  if (config.claudeAgent?.enabled) return 'claude-agent';
+  if (config.codex?.baseUrl) return 'codex';
+  if (config.opencode?.baseUrl) return 'opencode';
+  if (config.openclaw?.baseUrl) return 'openclaw';
+  return config.localVlm?.baseUrl ? 'local-vlm' : resolveAutoBackend(config);
+}
+
+function resolveCodingBackend(config: AgentBridgeRegistryConfig): AgentBackendId {
+  if (config.codex?.baseUrl) return 'codex';
+  if (config.opencode?.baseUrl) return 'opencode';
+  if (config.openclaw?.baseUrl) return 'openclaw';
+  if (config.claudeAgent?.enabled) return 'claude-agent';
+  return config.localVlm?.baseUrl ? 'local-vlm' : resolveAutoBackend(config);
+}
+
 function looksLikeCodingWorkflow(envelope: AgentContextEnvelope): boolean {
   const text = envelope.instruction.text.toLowerCase();
   const title = envelope.pointerContext.window?.title?.toLowerCase() ?? '';
-  return /\b(code|repo|diff|error|test|build|terminal|stack trace|pull request|issue)\b/.test(text + ' ' + title);
+  return envelope.resolvedIntent?.domain === 'code' || /\b(code|repo|diff|error|test|build|terminal|stack trace|pull request|issue)\b/.test(text + ' ' + title);
+}
+
+function requiresAgentRuntime(envelope: AgentContextEnvelope): boolean {
+  const intent = envelope.resolvedIntent;
+  return Boolean(
+    envelope.cuaDirective?.enabled ||
+      envelope.toolServers?.length ||
+      intent?.needs.desktopControl ||
+      intent?.needs.structuredUi ||
+      intent?.needs.toolUse ||
+      intent?.domain === 'browser' ||
+      intent?.domain === 'document'
+  );
 }

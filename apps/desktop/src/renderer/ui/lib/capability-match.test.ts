@@ -32,7 +32,8 @@ const snapshot: CapabilitySnapshot = {
       name: 'paper-reader',
       description: 'Read and summarize academic papers.',
       backendIds: ['codex'],
-      sources: ['native']
+      sources: ['native'],
+      triggers: ['selected paragraph']
     }
   ]
 };
@@ -48,5 +49,11 @@ describe('matchCapabilitySnapshot', () => {
     const matched = matchCapabilitySnapshot(snapshot, 'opencode', 'summarize this paper');
     expect(matched.mcp).toEqual([]);
     expect(matched.skills).toEqual([]);
+  });
+
+  it('matches skill triggers in addition to descriptions and tags', () => {
+    const matched = matchCapabilitySnapshot(snapshot, 'codex', 'polish the selected paragraph');
+    expect(matched.skills.map((item) => item.name)).toEqual(['paper-reader']);
+    expect(matched.skills[0]?.matchedKeywords).toContain('selected');
   });
 });

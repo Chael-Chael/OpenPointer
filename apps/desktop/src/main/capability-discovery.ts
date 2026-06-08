@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
-import type { AgentBackendId, CapabilityItem, CapabilitySnapshot, CapabilitySource } from '@openpointer/core';
+import type { AgentBackendId, CapabilityItem, CapabilitySnapshot, CapabilitySource, SkillExecutionTemplate } from '@openpointer/core';
 
 const execFileAsync = promisify(execFile);
 
@@ -15,7 +15,7 @@ type CapabilityDiscoveryOptions = {
   now?: () => number;
 };
 
-type DiscoveredCapability = CapabilityItem & {
+export type DiscoveredCapability = CapabilityItem & {
   mergeKey: string;
 };
 
@@ -69,6 +69,8 @@ export async function discoverCapabilities(options: CapabilityDiscoveryOptions):
   } catch (error) {
     errors.push(`native: ${errorMessage(error)}`);
   }
+
+  items.push(...builtInSkillCapabilities());
 
   const merged = mergeCapabilityItems(items);
   const sources = unique([...merged.mcp, ...merged.skills].flatMap((item) => item.sources));
@@ -128,6 +130,9 @@ export function mergeCapabilityItems(items: DiscoveredCapability[]): { mcp: Capa
     existing.backendIds = sortBackends(unique([...existing.backendIds, ...item.backendIds]));
     existing.sources = sortSources(unique([...existing.sources, ...item.sources]));
     existing.tags = unique([...(existing.tags ?? []), ...(item.tags ?? [])]);
+    existing.triggers = unique([...(existing.triggers ?? []), ...(item.triggers ?? [])]);
+    existing.requiredTools = unique([...(existing.requiredTools ?? []), ...(item.requiredTools ?? [])]);
+    existing.executionTemplate ??= item.executionTemplate;
     if (!existing.description || (item.sources.includes('native') && !hadNativeSource)) {
       existing.description = item.description;
     }
@@ -356,6 +361,10 @@ function skillItem(args: {
   directory: string;
   backendIds: AgentBackendId[];
   sources: CapabilitySource[];
+  tags?: string[];
+  triggers?: string[];
+  requiredTools?: string[];
+  executionTemplate?: SkillExecutionTemplate;
 }): DiscoveredCapability {
   const name = args.name.trim();
   const mergeKey = ['skill', normalizeKey(name), normalizeKey(basename(args.directory) || name)].join(':');
@@ -366,8 +375,156 @@ function skillItem(args: {
     description: args.description,
     backendIds: args.backendIds,
     sources: args.sources,
+    tags: args.tags,
+    triggers: args.triggers,
+    requiredTools: args.requiredTools,
+    executionTemplate: args.executionTemplate,
     mergeKey
   };
+}
+
+export function builtInSkillCapabilities(): DiscoveredCapability[] {
+  const backends: AgentBackendId[] = ['claude-agent', 'codex', 'opencode', 'openclaw', 'hermes'];
+  return [
+    skillItem({
+      name: 'openpointer.generic-cua',
+      description: 'Operate grounded desktop UI elements through OpenPointer CUA with approval and verification.',
+      directory: 'openpointer.generic-cua',
+      backendIds: backends,
+      sources: ['built-in'],
+      tags: ['desktop', 'cua', 'click', 'type', 'scroll', 'drag', 'automation', '桌面', '操作'],
+      triggers: ['click', 'type', 'fill', 'open', 'move', 'drag', 'scroll', '点击', '输入', '打开', '操作'],
+      requiredTools: ['cua:get_window_state', 'cua:click', 'cua:type_text', 'cua:press_key', 'cua:scroll', 'cua:drag'],
+      executionTemplate: {
+        objective: 'Plan against CUA element indices and execute only through approved CUA tools.',
+        steps: [
+          'Bind the user instruction to target/destination entity bindings.',
+          'Read current UI state with get_window_state when the target is ambiguous.',
+          'Execute one small desktop action at a time through the CUA broker.',
+          'Re-read UI state after state-changing tools and compare against the requested end state.'
+        ],
+        verification: {
+          strategy: 'uia-state',
+          successSignals: ['target element changed as requested', 'requested text/value appears', 'no unexpected window/app change']
+        }
+      }
+    }),
+    skillItem({
+      name: 'openpointer.text-selection',
+      description: 'Read, transform, copy, or insert text around the active selection or pointer target.',
+      directory: 'openpointer.text-selection',
+      backendIds: backends,
+      sources: ['built-in'],
+      tags: ['selection', 'text', 'rewrite', 'summarize', 'insert', 'selected', '选中文本', '改写'],
+      triggers: ['selected text', 'selection', 'rewrite', 'summarize', 'insert text', '选中', '改写', '总结', '插入'],
+      requiredTools: ['cua:read_selected_text', 'cua:insert_text'],
+      executionTemplate: {
+        objective: 'Prefer selected text and explicit insertion targets over screenshot-only interpretation.',
+        steps: [
+          'Read selected text when the envelope does not already contain it.',
+          'Transform the text according to the instruction.',
+          'Insert only after the target or insertion point is clear.',
+          'Verify by reading the selection or nearby UI state after insertion.'
+        ],
+        verification: {
+          strategy: 'read-selection',
+          successSignals: ['inserted text matches the requested transformation', 'selection remains in the expected app/window']
+        }
+      }
+    }),
+    skillItem({
+      name: 'openpointer.browser',
+      description: 'Use browser page/DOM tools and CUA fallback for web navigation, extraction, and form tasks.',
+      directory: 'openpointer.browser',
+      backendIds: backends,
+      sources: ['built-in'],
+      tags: ['browser', 'web', 'chrome', 'edge', 'dom', 'form', '网页', '浏览器'],
+      triggers: ['browser', 'webpage', 'link', 'tab', 'form', 'search', 'chrome', 'edge', '网页', '链接'],
+      requiredTools: ['cua:page', 'cua:get_window_state', 'cua:click', 'cua:type_text'],
+      executionTemplate: {
+        objective: 'Prefer DOM/page tools for web semantics, with CUA only for unavailable page actions.',
+        steps: [
+          'Use page tools to inspect DOM text and element identities when available.',
+          'Choose links, fields, and buttons by semantic labels instead of pixels.',
+          'Use CUA fallback for browser chrome or non-DOM UI.',
+          'Verify navigation or form state after each state-changing step.'
+        ],
+        verification: {
+          strategy: 'recapture',
+          successSignals: ['expected URL/title/content is visible', 'form field contains requested text', 'target page state changed']
+        }
+      }
+    }),
+    skillItem({
+      name: 'openpointer.document-pdf',
+      description: 'Handle document, PDF, paper, and office workflows using selection text, screenshots, and document skills.',
+      directory: 'openpointer.document-pdf',
+      backendIds: backends,
+      sources: ['built-in'],
+      tags: ['document', 'pdf', 'paper', 'word', 'office', '论文', '文档', '段落'],
+      triggers: ['pdf', 'paper', 'document', 'paragraph', 'word', 'office', '论文', '文档', '段落', '摘要'],
+      requiredTools: ['document-skill', 'cua:read_selected_text', 'cua:insert_text'],
+      executionTemplate: {
+        objective: 'Ground document tasks in selected text or document-specific tooling before using screenshots.',
+        steps: [
+          'Prefer selected text, document APIs, or PDF extraction over OCR from screenshots.',
+          'Summarize, rewrite, or transform only the requested region.',
+          'Insert edits through a confirmed insertion target.',
+          'Verify by reading back selected text or visible document state.'
+        ],
+        verification: {
+          strategy: 'read-selection',
+          successSignals: ['edited passage appears in the target document', 'source text meaning is preserved when requested']
+        }
+      }
+    }),
+    skillItem({
+      name: 'openpointer.code',
+      description: 'Route code, repo, diff, terminal, and error tasks to coding agents with tests or static checks.',
+      directory: 'openpointer.code',
+      backendIds: ['codex', 'opencode', 'openclaw', 'claude-agent'],
+      sources: ['built-in'],
+      tags: ['code', 'repo', 'diff', 'error', 'terminal', 'test', '代码', '报错', '测试'],
+      triggers: ['code', 'bug', 'error', 'stack trace', 'diff', 'test', 'build', 'repo', '代码', '报错', '修复'],
+      requiredTools: ['coding-agent', 'shell', 'filesystem'],
+      executionTemplate: {
+        objective: 'Use a coding backend for repository-aware changes and verify with available checks.',
+        steps: [
+          'Identify the repo, file, diff, terminal, or error context from the pointer bindings.',
+          'Inspect relevant files before editing.',
+          'Make minimal changes through the coding backend.',
+          'Run targeted tests, typechecks, or static checks when available.'
+        ],
+        verification: {
+          strategy: 'test-command',
+          successSignals: ['targeted tests pass', 'typecheck/lint passes or failures are reported with cause']
+        }
+      }
+    }),
+    skillItem({
+      name: 'openpointer.image-region',
+      description: 'Analyze or transform a selected screenshot/image region and ask for clarification when visual grounding is weak.',
+      directory: 'openpointer.image-region',
+      backendIds: backends,
+      sources: ['built-in'],
+      tags: ['image', 'screenshot', 'region', 'vision', '图片', '截图', '区域'],
+      triggers: ['image', 'screenshot', 'region', 'photo', 'visual', '图片', '截图', '区域'],
+      requiredTools: ['vision-model', 'cua:get_window_state'],
+      executionTemplate: {
+        objective: 'Use the selected image/screenshot crop as visual evidence and avoid unsupported object assumptions.',
+        steps: [
+          'Anchor the analysis to the provided crop or image entity.',
+          'State uncertainty when the object/region is visually ambiguous.',
+          'Use structured UI evidence when available before image-only reasoning.',
+          'Verify any requested desktop action with CUA after execution.'
+        ],
+        verification: {
+          strategy: 'recapture',
+          successSignals: ['requested visual region remains the focus', 'post-action screenshot reflects the expected visual state']
+        }
+      }
+    })
+  ];
 }
 
 function summarizeMcpConfig(config: unknown): McpConfigSummary {
@@ -494,7 +651,7 @@ function unique<T>(items: T[]): T[] {
 }
 
 function sortSources(items: CapabilitySource[]): CapabilitySource[] {
-  const order: CapabilitySource[] = ['native', 'cc-switch'];
+  const order: CapabilitySource[] = ['built-in', 'native', 'cc-switch'];
   return [...items].sort((a, b) => order.indexOf(a) - order.indexOf(b));
 }
 

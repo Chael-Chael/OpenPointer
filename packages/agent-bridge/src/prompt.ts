@@ -7,10 +7,11 @@ export function buildToolDiscoveryEvent(envelope: AgentContextEnvelope) {
   const serverTools = envelope.toolServers?.flatMap((server) => server.tools.map((tool) => `${server.id}:${tool}`)) ?? [];
   const hintedMcp = envelope.capabilityHints?.mcp.map((item) => `mcp:${item.name}`) ?? [];
   const hintedSkills = envelope.capabilityHints?.skills.map((item) => item.name) ?? [];
+  const intentSkills = envelope.resolvedIntent?.suggestedSkillIds ?? [];
   return {
     type: 'tool.discovery' as const,
     tools: [...envelope.routing.preferredTools, ...serverTools, ...hintedMcp],
-    skills: [...skills, ...hintedSkills],
+    skills: uniqueStrings([...skills, ...hintedSkills, ...intentSkills]),
     message: TOOL_DISCOVERY_MESSAGE
   };
 }
@@ -25,6 +26,8 @@ export function buildAgentInstructions(envelope: AgentContextEnvelope): string {
     'If useful, discover and use configured MCP tools, skills, or CUA tools in your own runtime.',
     'If a desktop-control action can change state, request approval before proceeding.',
     `Tool policy: ${envelope.routing.toolPolicy}.`,
+    envelope.resolvedIntent ? formatResolvedIntent(envelope) : '',
+    envelope.entityBindings?.length ? formatEntityBindings(envelope) : '',
     envelope.routing.preferredTools.length > 0 ? `Preferred tools: ${envelope.routing.preferredTools.join(', ')}.` : '',
     envelope.routing.requiredCapabilities.length > 0 ? `Required capabilities: ${envelope.routing.requiredCapabilities.join(', ')}.` : '',
     envelope.capabilityHints ? formatCapabilityHints(envelope.capabilityHints) : '',
@@ -40,6 +43,16 @@ export function buildAgentInput(envelope: AgentContextEnvelope): string {
     '',
     'Multimodal context bundle:',
     JSON.stringify(summarizeMultimodalContext(envelope), null, 2),
+    '',
+    'Resolved intent and entity bindings:',
+    JSON.stringify(
+      {
+        resolvedIntent: envelope.resolvedIntent,
+        entityBindings: envelope.entityBindings
+      },
+      null,
+      2
+    ),
     '',
     'Conversation context history:',
     JSON.stringify(summarizeConversationContextHistory(envelope), null, 2),
@@ -243,6 +256,22 @@ function summarizeMultimodalContext(envelope: AgentContextEnvelope) {
   };
 }
 
+function formatResolvedIntent(envelope: AgentContextEnvelope): string {
+  return [
+    'Resolved intent:',
+    JSON.stringify(envelope.resolvedIntent, null, 2),
+    'Use this as a planning hint, not as a replacement for the user instruction. Prefer the suggested skill ids when they match available runtime capabilities.'
+  ].join('\n');
+}
+
+function formatEntityBindings(envelope: AgentContextEnvelope): string {
+  return [
+    'Entity bindings:',
+    JSON.stringify(envelope.entityBindings, null, 2),
+    'Treat target/destination bindings as action constraints. Verify ambiguous bindings before changing desktop state.'
+  ].join('\n');
+}
+
 function summarizeContextChips(context: PointerContext) {
   return (context.contextChips ?? []).map((chip) => ({
     id: chip.id,
@@ -364,6 +393,13 @@ function formatCapabilityHint(item: NonNullable<AgentContextEnvelope['capability
     description: item.description,
     sources: item.sources,
     backendIds: item.backendIds,
-    matchedKeywords: item.matchedKeywords
+    matchedKeywords: item.matchedKeywords,
+    triggers: item.triggers,
+    requiredTools: item.requiredTools,
+    executionTemplate: item.executionTemplate
   };
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
 }

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
-import { capabilitiesFromCcSwitchRows, mergeCapabilityItems, scanNativeCapabilities } from './capability-discovery.js';
+import { builtInSkillCapabilities, capabilitiesFromCcSwitchRows, mergeCapabilityItems, scanNativeCapabilities } from './capability-discovery.js';
 
 function makeHome(): string {
   return mkdtempSync(join(tmpdir(), 'openpointer-capabilities-'));
@@ -86,5 +86,21 @@ describe('capability discovery', () => {
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
+  });
+
+  it('provides built-in skill registry metadata for common pointer workflows', () => {
+    const skills = builtInSkillCapabilities();
+    const names = skills.map((item) => item.name);
+
+    expect(names).toEqual(expect.arrayContaining(['openpointer.generic-cua', 'openpointer.text-selection', 'openpointer.browser', 'openpointer.document-pdf', 'openpointer.code']));
+    expect(skills.find((item) => item.name === 'openpointer.generic-cua')).toMatchObject({
+      sources: ['built-in'],
+      requiredTools: expect.arrayContaining(['cua:get_window_state', 'cua:click']),
+      executionTemplate: {
+        verification: {
+          strategy: 'uia-state'
+        }
+      }
+    });
   });
 });
