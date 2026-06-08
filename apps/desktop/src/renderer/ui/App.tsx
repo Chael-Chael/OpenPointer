@@ -40,7 +40,13 @@ import {
   type CuaBrushOptions,
   type CuaBrushState
 } from './lib/cua-brush';
-import { mergeCuaEntityGroup, removeCuaEntityFromGroup, selectedCuaAttachmentTitle, selectedListItemsForContext } from './lib/cua-selection';
+import {
+  mergeCuaEntityGroup,
+  refreshCuaEntityRefsFromLatest,
+  removeCuaEntityFromGroup,
+  selectedCuaAttachmentTitle,
+  selectedListItemsForContext
+} from './lib/cua-selection';
 import {
   CUA_DRAFT_GROUP_MAX_ENTITIES,
   CUA_GROUNDING_INITIAL_DELAY_MS,
@@ -93,9 +99,19 @@ const initialCursor: CursorPayload = { x: 300, y: 300, localX: 300, localY: 300,
 const CONTEXT_CHIP_HOVER_DELAY_MS = 120;
 const FLOATING_CONTEXT_CHIP_LIMIT = 6;
 const CUA_GROUP_LIMIT_MAX = 200;
+const CUA_BRUSH_TUNING_STORAGE_KEY = 'openpointer.cuaBrushTuning.v1';
 const CONTEXT_TRANSFER_PATTERN = /\b(copy|move|insert|paste|send|put|into|to)\b|放到|整理到|插入到|复制到|粘贴到|移到/u;
+const CLAUDE_MODEL_CHOICES = ['', 'sonnet', 'opus', 'haiku'];
+const CODEX_MODEL_CHOICES = ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'];
+const EFFORT_CHOICES = ['low', 'medium', 'high', 'max'] as const;
 
 type CuaBrushTuningKey = keyof CuaBrushOptions;
+type SettingsBackend = AppSettings['agentBackend'];
+
+type CuaBrushTuningSnapshot = {
+  options: CuaBrushOptions;
+  groupLimit: number;
+};
 
 type CuaBrushTuningField = {
   key: CuaBrushTuningKey;
@@ -129,6 +145,64 @@ function clampCuaBrushOptionValue(field: CuaBrushTuningField, value: number) {
 
 function clampCuaGroupLimit(value: number) {
   return Math.round(clampNumber(value, 1, CUA_GROUP_LIMIT_MAX, CUA_DRAFT_GROUP_MAX_ENTITIES));
+}
+
+function defaultCuaBrushTuning(): CuaBrushTuningSnapshot {
+  return {
+    options: { ...DEFAULT_CUA_BRUSH_OPTIONS },
+    groupLimit: CUA_DRAFT_GROUP_MAX_ENTITIES
+  };
+}
+
+function numberFromStoredValue(value: unknown) {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') return Number(value);
+  return Number.NaN;
+}
+
+function normalizeCuaBrushOptions(input: unknown): CuaBrushOptions {
+  const next = { ...DEFAULT_CUA_BRUSH_OPTIONS };
+  if (!input || typeof input !== 'object') return next;
+  const record = input as Partial<Record<CuaBrushTuningKey, unknown>>;
+  for (const field of CUA_BRUSH_TUNING_FIELDS) {
+    next[field.key] = clampCuaBrushOptionValue(field, numberFromStoredValue(record[field.key]));
+  }
+  return next;
+}
+
+function loadCuaBrushTuning(): CuaBrushTuningSnapshot {
+  const fallback = defaultCuaBrushTuning();
+  if (typeof window === 'undefined') return fallback;
+  try {
+    const raw = window.localStorage.getItem(CUA_BRUSH_TUNING_STORAGE_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as { options?: unknown; groupLimit?: unknown };
+    return {
+      options: normalizeCuaBrushOptions(parsed.options),
+      groupLimit: clampCuaGroupLimit(numberFromStoredValue(parsed.groupLimit))
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function saveCuaBrushTuning(options: CuaBrushOptions, groupLimit: number) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(
+      CUA_BRUSH_TUNING_STORAGE_KEY,
+      JSON.stringify({
+        options,
+        groupLimit: clampCuaGroupLimit(groupLimit)
+      })
+    );
+  } catch {
+    // Persistence is best-effort; tuning should still work if storage is unavailable.
+  }
+}
+
+function isSettingsBackend(value: AgentBackendId): value is SettingsBackend {
+  return ['hermes', 'opencode', 'openclaw', 'claude-agent', 'codex'].includes(value);
 }
 
 type ContinuableBackend = {
@@ -246,6 +320,20 @@ function pinnedCuaEntityIdsFromChips(chips: ContextChip[]): Set<string> {
   return ids;
 }
 
+function refreshCuaContextChipRefsFromLatest(chip: ContextChip, latestEntities: PointerEntity[]): ContextChip {
+  if (!chip.entityRefs?.some((entity) => entity.groundingRef?.provider === 'cua')) return chip;
+  const nextRefs = refreshCuaEntityRefsFromLatest(chip.entityRefs, latestEntities);
+  if (nextRefs === chip.entityRefs) return chip;
+  const rebuiltChip = contextChipFromCuaEntityGroup(nextRefs, chip.status);
+  if (!rebuiltChip) return { ...chip, entityRefs: nextRefs, lastSeenAt: Date.now() };
+  return {
+    ...rebuiltChip,
+    role: chip.role,
+    createdAt: chip.createdAt,
+    lastSeenAt: Date.now()
+  };
+}
+
 function uniqueContextChips(chips: Array<ContextChip | undefined>, max = 4): ContextChip[] {
   const seen = new Set<string>();
   const result: ContextChip[] = [];
@@ -296,6 +384,8 @@ export function App() {
   const pillWidth = clampNumber(settings?.pillWidth, 280, 900, 520);
   const pillHeight = clampNumber(settings?.pillHeight, 24, 96, 24);
   const pillRadius = Math.max(14, pillHeight / 2);
+  const [measuredPillHeight, setMeasuredPillHeight] = useState(pillHeight);
+  const visualPillHeight = Math.max(pillHeight, measuredPillHeight);
 
   // Dynamic sizing responsive to pillHeight
   const menuSize = Math.max(20, Math.min(32, pillHeight - 6));
@@ -305,7 +395,7 @@ export function App() {
   const padXRight = Math.max(12, Math.min(24, pillHeight / 1.5));
   const padXLeft = Math.max(8, Math.min(12, pillHeight / 3));
   const smallPillHeight = Math.max(22, Math.min(28, pillHeight - 2));
-  const previewCardBottom = 12 + smallPillHeight;
+  const previewCardBottom = 12 + Math.max(smallPillHeight, visualPillHeight);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [secretDrafts, setSecretDrafts] = useState<SecretDrafts>(emptySecretDrafts);
   const [clearSecrets, setClearSecrets] = useState<ClearSecretFlags>(emptyClearSecretFlags);
@@ -335,8 +425,9 @@ export function App() {
   const [hoveredCuaEntityId, setHoveredCuaEntityId] = useState<string | null>(null);
   const [draftCuaEntities, setDraftCuaEntities] = useState<PointerEntity[]>([]);
   const [selectedCuaEntities, setSelectedCuaEntities] = useState<PointerEntity[]>([]);
-  const [cuaBrushOptions, setCuaBrushOptions] = useState<CuaBrushOptions>(() => ({ ...DEFAULT_CUA_BRUSH_OPTIONS }));
-  const [cuaGroupLimit, setCuaGroupLimit] = useState(CUA_DRAFT_GROUP_MAX_ENTITIES);
+  const [initialCuaBrushTuning] = useState(loadCuaBrushTuning);
+  const [cuaBrushOptions, setCuaBrushOptions] = useState<CuaBrushOptions>(() => initialCuaBrushTuning.options);
+  const [cuaGroupLimit, setCuaGroupLimit] = useState(() => initialCuaBrushTuning.groupLimit);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const conversationIdRef = useRef<string | null>(null);
   conversationIdRef.current = conversationId;
@@ -445,6 +536,7 @@ export function App() {
   }
 
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const commandBubbleRef = useRef<HTMLDivElement | null>(null);
   const contextShelfRef = useRef<HTMLDivElement | null>(null);
   const draggingContextChipRef = useRef<typeof draggingContextChip>(null);
   draggingContextChipRef.current = draggingContextChip;
@@ -468,6 +560,29 @@ export function App() {
   const lastInteractiveRef = useRef(false);
   const lastGlobalContextMenuAtRef = useRef(0);
   const cuaBrushStateRef = useRef<CuaBrushState>(createCuaBrushState(Date.now()));
+
+  useEffect(() => {
+    const node = commandBubbleRef.current;
+    if (!node) {
+      setMeasuredPillHeight(pillHeight);
+      return;
+    }
+    function syncMeasuredHeight() {
+      const currentNode = commandBubbleRef.current;
+      if (!currentNode) return;
+      const nextHeight = Math.ceil(currentNode.getBoundingClientRect().height);
+      setMeasuredPillHeight((current) => (nextHeight > 0 && Math.abs(current - nextHeight) >= 1 ? nextHeight : current));
+    }
+    syncMeasuredHeight();
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', syncMeasuredHeight);
+      return () => window.removeEventListener('resize', syncMeasuredHeight);
+    }
+    const observer = new ResizeObserver(syncMeasuredHeight);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [pillHeight]);
+
   const cuaSelectionActive =
     active &&
     settings?.cuaMode !== 'off' &&
@@ -530,6 +645,10 @@ export function App() {
   useEffect(() => {
     resetCuaBrushState(liveGroundingWindowKeyRef.current);
   }, [cuaBrushOptions, resetCuaBrushState]);
+
+  useEffect(() => {
+    saveCuaBrushTuning(cuaBrushOptions, cuaGroupLimit);
+  }, [cuaBrushOptions, cuaGroupLimit]);
 
   const clearTransientCuaPreviewState = useCallback(
     (options?: { clearUnpinnedSelected?: boolean }) => {
@@ -627,7 +746,7 @@ export function App() {
           setSelecting(true);
           setSelection({ x1: origin.x, y1: origin.y, x2: origin.x, y2: origin.y });
           // Freeze shell position during selection
-          setDetachedPos(computeShellPosition(payload.cursor.localX, payload.cursor.localY));
+          setDetachedPos(computeShellPosition(payload.cursor.localX, payload.cursor.localY, pillWidth, visualPillHeight, false));
         } else {
           setState('composing');
         }
@@ -647,7 +766,7 @@ export function App() {
       // Wake-up stays parked at the activation point. The shell can still be
       // clicked, while the rest of the desktop remains pass-through.
       setDetached(false);
-      setDetachedPos(computeShellPosition(payload.localX, payload.localY, pillWidth, pillHeight, false));
+      setDetachedPos(computeShellPosition(payload.localX, payload.localY, pillWidth, visualPillHeight, false));
       pinActivationWindowContext(payload);
 
       window.openPointer.getSettings().then(async (currentSettings) => {
@@ -751,7 +870,7 @@ export function App() {
         thinkingTimerRef.current = null;
       }
     };
-  }, [isCursorOnThisOverlay, parkConversationInBackground, pillHeight, pillWidth, resetCuaBrushState]);
+  }, [isCursorOnThisOverlay, parkConversationInBackground, pillHeight, pillWidth, resetCuaBrushState, visualPillHeight]);
 
   useEffect(() => {
     if (conversationId && (state === 'completed' || state === 'composing' || state === 'idle' || state === 'failed')) {
@@ -863,7 +982,7 @@ export function App() {
     state
   ]);
 
-  // Esc = close this session; Right-click = restore follow mode or cancel local selection.
+  // Esc = close this session; Right-click toggles follow mode or cancels local selection.
   useEffect(() => {
     function collapseSubmittedRun(): boolean {
       if (!activeRef.current || !isSubmittedUnfinishedState(stateRef.current)) return false;
@@ -873,7 +992,7 @@ export function App() {
       return true;
     }
 
-    function restoreFollowMode() {
+    function toggleFollowMode(cursorOverride?: CursorPayload) {
       setCuaPickerLocked(false);
       setCuaPickerPosition(null);
       resetCuaBrushState(liveGroundingWindowKeyRef.current);
@@ -893,8 +1012,15 @@ export function App() {
         return;
       }
       if (!activeRef.current) return;
-      setDetachedPos(null);
       setSelection(null);
+      if (detachedPos) {
+        setDetached(false);
+        setDetachedPos(null);
+      } else {
+        const currentCursor = cursorOverride ?? cursorRef.current;
+        setDetached(false);
+        setDetachedPos(computeShellPosition(currentCursor.localX, currentCursor.localY, pillWidth, visualPillHeight, showFullContext));
+      }
       if (detached) {
         window.setTimeout(() => focusPromptInput(inputRef.current), 0);
       } else {
@@ -909,20 +1035,20 @@ export function App() {
       window.openPointer.cancelRun();
       window.openPointer.deactivate({ startNewConversationOnNextActivate: true });
     }
-    // Right click is a one-way return to follow mode; it does not close the
-    // active conversation panel.
+    // Right click toggles parked/following mode; it does not close the active
+    // conversation panel.
     function onContextMenu(event: MouseEvent) {
       // Always suppress the native right-click menu on the overlay.
       event.preventDefault();
       if (Date.now() - lastGlobalContextMenuAtRef.current < 300) return;
-      restoreFollowMode();
+      toggleFollowMode();
     }
     const offGlobalContextMenu = window.openPointer.onGlobalContextMenu((payload) => {
       if (!isCursorOnThisOverlay(payload)) return;
       lastGlobalContextMenuAtRef.current = Date.now();
       setCursor(payload);
       setCuaPickerAnchor(payload);
-      restoreFollowMode();
+      toggleFollowMode(payload);
     });
     const offGlobalMouseDown = window.openPointer.onGlobalMouseDown((payload) => {
       if (!isCursorOnThisOverlay(payload)) return;
@@ -944,7 +1070,19 @@ export function App() {
       window.removeEventListener('contextmenu', onContextMenu, { capture: true });
       window.removeEventListener('blur', onWindowBlur);
     };
-  }, [isCursorOnThisOverlay, menuOpen, selecting, selectionDrag, detached, releaseOverlayPointerCapture, resetCuaBrushState]);
+  }, [
+    detached,
+    detachedPos,
+    isCursorOnThisOverlay,
+    menuOpen,
+    pillWidth,
+    releaseOverlayPointerCapture,
+    resetCuaBrushState,
+    selecting,
+    selectionDrag,
+    showFullContext,
+    visualPillHeight
+  ]);
 
   // Live-update selection rectangle while selecting (cursor comes via IPC)
   useEffect(() => {
@@ -1003,7 +1141,7 @@ export function App() {
       const nextY = activeDrag.initialPos.y + dy;
 
       const maxPanelH = showFullContext ? Math.max(160, panelHeight ?? 0) : 0;
-      const maxY = window.innerHeight - pillHeight - maxPanelH - 12;
+      const maxY = window.innerHeight - visualPillHeight - maxPanelH - 12;
 
       setDetachedPos({
         x: Math.min(Math.max(12, nextX), Math.max(12, window.innerWidth - pillWidth - 12)),
@@ -1019,7 +1157,7 @@ export function App() {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
-  }, [pillDrag, pillWidth, pillHeight, showFullContext, panelHeight]);
+  }, [pillDrag, pillWidth, visualPillHeight, showFullContext, panelHeight]);
 
   useEffect(() => {
     if (!pillWidthDrag) return;
@@ -1068,7 +1206,7 @@ export function App() {
   useEffect(() => {
     if (showFullContext && detached && detachedPos) {
       const maxPanelH = Math.max(160, panelHeight ?? 0);
-      const maxY = window.innerHeight - pillHeight - maxPanelH - 12;
+      const maxY = window.innerHeight - visualPillHeight - maxPanelH - 12;
       if (detachedPos.y > maxY) {
         setDetachedPos({
           ...detachedPos,
@@ -1076,7 +1214,7 @@ export function App() {
         });
       }
     }
-  }, [showFullContext, detached, panelHeight, pillHeight, detachedPos]);
+  }, [showFullContext, detached, panelHeight, visualPillHeight, detachedPos]);
 
   useEffect(() => {
     if (state === 'composing' && active && !selecting && !selectionDrag && !settingsOpen && !captureActivity.active) {
@@ -1129,6 +1267,13 @@ export function App() {
       if (force || !lastRequestedCursor) return true;
       const now = Date.now();
       const current = cursorRef.current;
+      if (
+        draftCuaEntitiesRef.current.length > 0 ||
+        selectedCuaEntitiesRef.current.length > 0 ||
+        pinnedCuaEntityIdsFromChips(pinnedContextChipsRef.current).size > 0
+      ) {
+        return true;
+      }
       return cursorDistanceSquared(current, lastRequestedCursor) >= minCursorDeltaSquared || now - lastCompletedAt >= CUA_GROUNDING_STALE_MS;
     };
 
@@ -1154,6 +1299,17 @@ export function App() {
           const cursorStillNearRequest = cursorDistanceSquared(cursorRef.current, requestCursor) < minCursorDeltaSquared;
           const hoveredEntityId = cursorStillNearRequest ? (preview.hoveredEntityId ?? null) : null;
           setCuaEntities(preview.entities);
+          setDraftCuaEntities((current) => refreshCuaEntityRefsFromLatest(current, preview.entities));
+          setSelectedCuaEntities((current) => refreshCuaEntityRefsFromLatest(current, preview.entities));
+          setPinnedContextChips((current) => {
+            let changed = false;
+            const next = current.map((chip) => {
+              const refreshed = refreshCuaContextChipRefsFromLatest(chip, preview.entities);
+              if (refreshed !== chip) changed = true;
+              return refreshed;
+            });
+            return changed ? next : current;
+          });
           setHoveredCuaEntityId(hoveredEntityId);
           const selectedListItems = selectedListItemsForContext(preview.entities);
           if (selectedListItems.length > 0 && selectedCuaEntitiesRef.current.length === 0 && draftCuaEntitiesRef.current.length === 0) {
@@ -1286,8 +1442,8 @@ export function App() {
 
   const hasPanel = showFullContext;
   const shellPosition = useMemo(
-    () => computeShellPosition(cursor.localX, cursor.localY, pillWidth, pillHeight, hasPanel),
-    [cursor.localX, cursor.localY, pillWidth, pillHeight, hasPanel]
+    () => computeShellPosition(cursor.localX, cursor.localY, pillWidth, visualPillHeight, hasPanel),
+    [cursor.localX, cursor.localY, pillWidth, visualPillHeight, hasPanel]
   );
   const effectiveShellPos = detachedPos ?? shellPosition;
   const shouldUseLagFollow = active && !detachedPos && !pillDrag && !panelResizeDrag && !cuaPickerResizeDrag && !selecting && !selectionDrag;
@@ -1362,7 +1518,7 @@ export function App() {
     const activeDrag = panelResizeDrag;
     function onMouseMove(event: MouseEvent) {
       const dy = event.clientY - activeDrag.startY;
-      const maxH = availablePanelHeight(effectiveShellPos.y, pillHeight);
+      const maxH = availablePanelHeight(effectiveShellPos.y, visualPillHeight);
       const nextHeight = Math.max(120, Math.min(maxH, activeDrag.startHeight + dy));
       setPanelHeight(nextHeight);
     }
@@ -1375,7 +1531,7 @@ export function App() {
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
-  }, [panelResizeDrag, effectiveShellPos.y, pillHeight]);
+  }, [panelResizeDrag, effectiveShellPos.y, visualPillHeight]);
 
   useEffect(() => {
     if (!cuaPickerResizeDrag) return;
@@ -1403,13 +1559,13 @@ export function App() {
   const streamPanelStyle = useMemo<CSSProperties>(() => {
     // Cap the panel to the space actually left below the pill so it scrolls
     // internally instead of being clipped by the screen's bottom edge.
-    const maxHeight = availablePanelHeight(effectiveShellPos.y, pillHeight);
-    const height = resolvedPanelHeight(effectiveShellPos.y, pillHeight, panelHeight, streamContentHeight);
+    const maxHeight = availablePanelHeight(effectiveShellPos.y, visualPillHeight);
+    const height = resolvedPanelHeight(effectiveShellPos.y, visualPillHeight, panelHeight, streamContentHeight);
     return {
       height: `${height}px`,
       maxHeight: `${maxHeight}px`
     };
-  }, [panelHeight, streamContentHeight, effectiveShellPos.y, pillHeight]);
+  }, [panelHeight, streamContentHeight, effectiveShellPos.y, visualPillHeight]);
   function onResizeMouseDown(event: ReactMouseEvent<HTMLDivElement>) {
     event.preventDefault();
     event.stopPropagation();
@@ -1517,7 +1673,7 @@ export function App() {
     setContinueError(null);
     setState('submitting');
     submitInFlightRef.current = true;
-    setDetachedPos((current) => current ?? computeShellPosition(cursor.localX, cursor.localY, pillWidth, pillHeight, false));
+    setDetachedPos((current) => current ?? computeShellPosition(cursor.localX, cursor.localY, pillWidth, visualPillHeight, false));
     setMenuOpen(false);
 
     setThinkingTime(0);
@@ -1647,6 +1803,101 @@ export function App() {
     recognition.start();
   }
 
+  async function applyBackendSettings(nextBackend: AgentBackendId, patch: Partial<AppSettings> = {}) {
+    if (!settings || !isSettingsBackend(nextBackend)) {
+      setBackend(nextBackend);
+      return null;
+    }
+    const next = await window.openPointer.saveSettings({
+      ...settings,
+      ...patch,
+      agentBackend: nextBackend
+    });
+    setSettings(next);
+    setBackend(next.agentBackend);
+    return next;
+  }
+
+  async function selectBackend(nextBackend: AgentBackendId, options: { closeBackendDropdown?: boolean; keepMenuOpen?: boolean } = {}) {
+    await applyBackendSettings(nextBackend);
+    if (options.closeBackendDropdown) {
+      setBackendDropdownOpen(false);
+      setClaudeSubmenuOpen(false);
+      setCodexSubmenuOpen(false);
+    }
+    if (!options.keepMenuOpen) setMenuOpen(false);
+    if (!options.keepMenuOpen) window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+  }
+
+  async function updateSelectedBackendModel(value: string) {
+    if (!settings || !isSettingsBackend(backend)) return;
+    const patch: Partial<AppSettings> =
+      backend === 'claude-agent'
+        ? { claudeAgentModel: value }
+        : backend === 'codex'
+          ? { codexModel: value }
+          : backend === 'openclaw'
+            ? { openclawModel: value }
+            : {};
+    if (Object.keys(patch).length === 0) return;
+    await applyBackendSettings(backend, patch);
+  }
+
+  function backendModelControl() {
+    if (!settings) return null;
+    if (backend === 'claude-agent') {
+      return (
+        <label className="bubble-dropdown-item bubble-dropdown-control">
+          <span className="bubble-dropdown-icon">M</span>
+          <select className="bubble-dropdown-select" value={settings.claudeAgentModel || ''} onChange={(event) => void updateSelectedBackendModel(event.target.value)} title="Claude model">
+            {CLAUDE_MODEL_CHOICES.map((model) => (
+              <option key={model || 'default'} value={model}>
+                {model || 'Default'}
+              </option>
+            ))}
+          </select>
+        </label>
+      );
+    }
+    if (backend === 'codex') {
+      return (
+        <label className="bubble-dropdown-item bubble-dropdown-control">
+          <span className="bubble-dropdown-icon">M</span>
+          <select className="bubble-dropdown-select" value={settings.codexModel || 'gpt-5.4'} onChange={(event) => void updateSelectedBackendModel(event.target.value)} title="Codex model">
+            {CODEX_MODEL_CHOICES.map((model) => (
+              <option key={model} value={model}>
+                {model}
+              </option>
+            ))}
+          </select>
+        </label>
+      );
+    }
+    if (backend === 'openclaw') {
+      return (
+        <label className="bubble-dropdown-item bubble-dropdown-control">
+          <span className="bubble-dropdown-icon">M</span>
+          <input
+            className="bubble-dropdown-input"
+            value={settings.openclawModel}
+            onChange={(event) => updateSettings({ openclawModel: event.target.value })}
+            onBlur={(event) => void updateSelectedBackendModel(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                void updateSelectedBackendModel(event.currentTarget.value);
+                window.setTimeout(() => focusPromptInput(inputRef.current), 0);
+              }
+            }}
+            placeholder="Model"
+            title="OpenClaw model"
+          />
+        </label>
+      );
+    }
+    return null;
+  }
+
   async function saveSettings() {
     if (!settings) return;
     const backendToSave: AppSettings['agentBackend'] = selectableBackends.includes(backend) && backend !== 'mock' ? (backend as AppSettings['agentBackend']) : 'codex';
@@ -1691,7 +1942,7 @@ export function App() {
       event.preventDefault();
       event.stopPropagation();
       setDetached(true);
-      setDetachedPos((current) => current ?? computeShellPosition(cursor.localX, cursor.localY, pillWidth, pillHeight, true));
+      setDetachedPos((current) => current ?? computeShellPosition(cursor.localX, cursor.localY, pillWidth, visualPillHeight, true));
       window.setTimeout(() => focusPromptInput(inputRef.current), 0);
       return;
     }
@@ -1780,7 +2031,7 @@ export function App() {
       setDraggingContextChip(null);
       setActive(true);
       setDetached(true);
-      setDetachedPos((current) => current ?? computeShellPosition(cursorRef.current.localX, cursorRef.current.localY, pillWidth, pillHeight, true));
+      setDetachedPos((current) => current ?? computeShellPosition(cursorRef.current.localX, cursorRef.current.localY, pillWidth, visualPillHeight, true));
       setState('composing');
       resetCuaBrushState(liveGroundingWindowKeyRef.current);
       setDraftCuaEntities([]);
@@ -2458,12 +2709,12 @@ export function App() {
     const viewportH = window.innerHeight;
     const shellWidth = Math.min(pillWidth, viewportW - 32);
     const left = Math.min(Math.max(12, effectiveShellPos.x + shellWidth - width), Math.max(12, viewportW - width - 12));
-    const belowY = effectiveShellPos.y + pillHeight + 8;
+    const belowY = effectiveShellPos.y + visualPillHeight + 8;
     const aboveY = effectiveShellPos.y - estimatedHeight - 8;
     const shouldOpenAbove = hasPanel || belowY + estimatedHeight > viewportH;
     const top = shouldOpenAbove && aboveY >= 12 ? aboveY : Math.min(belowY, Math.max(12, viewportH - estimatedHeight - 12));
     return { left, top, width };
-  }, [effectiveShellPos.x, effectiveShellPos.y, hasPanel, pillHeight, pillWidth]);
+  }, [effectiveShellPos.x, effectiveShellPos.y, hasPanel, pillWidth, visualPillHeight]);
 
   return (
     <div
@@ -2948,7 +3199,10 @@ export function App() {
                     height: `${smallPillHeight}px`,
                     fontSize: `${Math.max(9, Math.min(11, pillHeight - 14))}px`
                   }}
-                  onClick={() => setBackendDropdownOpen(!backendDropdownOpen)}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setBackendDropdownOpen((open) => !open);
+                  }}
                 >
                   {/* Inner Shadow Layer covering the ENTIRE small pill, inheriting border-radius */}
                   <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_1.5px_2px_2px_-2px_rgba(255,255,255,0.55),inset_0px_-0.5px_0.5px_0px_rgba(255,255,255,0.2),inset_0px_0.5px_0.5px_0px_rgba(255,255,255,0.2)]" />
@@ -2965,7 +3219,7 @@ export function App() {
               {/* Custom glassmorphic backend selector dropdown list, hovering above the small pill */}
               {backendDropdownOpen && (
                 <div
-                  className="backend-dropdown absolute left-0 z-10 animate-dropdown-appear flex flex-row items-end gap-1"
+                  className="backend-dropdown absolute left-0 z-[1002] animate-dropdown-appear flex flex-row items-end gap-1"
                   style={{ bottom: `calc(100% + ${previewCardBottom}px)` }}
                 >
                   {/* Column 1: Main backend list */}
@@ -2984,7 +3238,8 @@ export function App() {
                             className={`flex items-center justify-between w-full py-1.5 px-3 border-0 rounded-[var(--radius-pill)] bg-transparent text-left cursor-pointer transition-colors duration-140 font-semibold text-[11px] relative z-1 ${
                               isSelected ? 'bg-white text-[#0D6FFF] shadow-[0_1.5px_4px_rgba(0,0,0,0.08)]' : 'text-white/80 hover:bg-white/10 hover:text-white'
                             }`}
-                            onClick={() => {
+                            onClick={async () => {
+                              await applyBackendSettings(item);
                               if (isClaude) {
                                 setClaudeSubmenuOpen(!claudeSubmenuOpen);
                                 setCodexSubmenuOpen(false);
@@ -2992,7 +3247,6 @@ export function App() {
                                 setCodexSubmenuOpen(!codexSubmenuOpen);
                                 setClaudeSubmenuOpen(false);
                               } else {
-                                setBackend(item);
                                 setBackendDropdownOpen(false);
                                 setClaudeSubmenuOpen(false);
                                 setCodexSubmenuOpen(false);
@@ -3019,7 +3273,7 @@ export function App() {
                     <div className="relative min-w-[110px] p-1 border border-glass-border rounded-[var(--radius-pill)] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] flex flex-col gap-0.5 animate-dropdown-appear">
                       <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
                       <div className="text-[9px] text-white/50 uppercase tracking-wider px-3 pt-1.5 pb-0.5">Model</div>
-                      {['', 'sonnet', 'opus', 'haiku'].map((model) => (
+                      {CLAUDE_MODEL_CHOICES.map((model) => (
                         <button
                           key={model || 'default'}
                           type="button"
@@ -3030,9 +3284,7 @@ export function App() {
                           }`}
                           onClick={async (e) => {
                             e.stopPropagation();
-                            const next = await window.openPointer.saveSettings({ ...settings!, claudeAgentModel: model });
-                            setSettings(next);
-                            setBackend('claude-agent');
+                            await applyBackendSettings('claude-agent', { claudeAgentModel: model });
                             setClaudeSubmenuOpen(false);
                             setBackendDropdownOpen(false);
                             window.setTimeout(() => focusPromptInput(inputRef.current), 0);
@@ -3049,7 +3301,7 @@ export function App() {
                     <div className="relative min-w-[100px] p-1 border border-glass-border rounded-[var(--radius-pill)] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] flex flex-col gap-0.5 animate-dropdown-appear">
                       <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
                       <div className="text-[9px] text-white/50 uppercase tracking-wider px-3 pt-1.5 pb-0.5">Effort</div>
-                      {(['low', 'medium', 'high', 'max'] as const).map((effort) => (
+                      {EFFORT_CHOICES.map((effort) => (
                         <button
                           key={effort}
                           type="button"
@@ -3060,8 +3312,7 @@ export function App() {
                           }`}
                           onClick={async (e) => {
                             e.stopPropagation();
-                            const next = await window.openPointer.saveSettings({ ...settings!, claudeAgentEffort: effort });
-                            setSettings(next);
+                            await applyBackendSettings('claude-agent', { claudeAgentEffort: effort });
                           }}
                         >
                           {effort.charAt(0).toUpperCase() + effort.slice(1)}
@@ -3075,7 +3326,7 @@ export function App() {
                     <div className="relative min-w-[118px] p-1 border border-glass-border rounded-[var(--radius-pill)] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] flex flex-col gap-0.5 animate-dropdown-appear">
                       <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
                       <div className="text-[9px] text-white/50 uppercase tracking-wider px-3 pt-1.5 pb-0.5">Model</div>
-                      {['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'].map((model) => (
+                      {CODEX_MODEL_CHOICES.map((model) => (
                         <button
                           key={model}
                           type="button"
@@ -3086,9 +3337,7 @@ export function App() {
                           }`}
                           onClick={async (e) => {
                             e.stopPropagation();
-                            const next = await window.openPointer.saveSettings({ ...settings!, codexModel: model });
-                            setSettings(next);
-                            setBackend('codex');
+                            await applyBackendSettings('codex', { codexModel: model });
                             setCodexSubmenuOpen(false);
                             setBackendDropdownOpen(false);
                             window.setTimeout(() => focusPromptInput(inputRef.current), 0);
@@ -3105,7 +3354,7 @@ export function App() {
                     <div className="relative min-w-[100px] p-1 border border-glass-border rounded-[var(--radius-pill)] bg-[rgba(13,111,255,0.95)] backdrop-blur-[40px] shadow-[0px_8px_32px_rgba(0,0,0,0.15)] flex flex-col gap-0.5 animate-dropdown-appear">
                       <div className="absolute inset-0 pointer-events-none rounded-[inherit] shadow-[inset_2px_3px_3px_-3px_rgba(255,255,255,0.6),inset_0px_-1px_1px_0px_rgba(255,255,255,0.25),inset_0px_1px_1px_0px_rgba(255,255,255,0.25)]" />
                       <div className="text-[9px] text-white/50 uppercase tracking-wider px-3 pt-1.5 pb-0.5">Effort</div>
-                      {(['low', 'medium', 'high', 'max'] as const).map((effort) => (
+                      {EFFORT_CHOICES.map((effort) => (
                         <button
                           key={effort}
                           type="button"
@@ -3116,8 +3365,7 @@ export function App() {
                           }`}
                           onClick={async (e) => {
                             e.stopPropagation();
-                            const next = await window.openPointer.saveSettings({ ...settings!, codexEffort: effort });
-                            setSettings(next);
+                            await applyBackendSettings('codex', { codexEffort: effort });
                           }}
                         >
                           {effort.charAt(0).toUpperCase() + effort.slice(1)}
@@ -3135,6 +3383,7 @@ export function App() {
               />
 
               <div
+                ref={commandBubbleRef}
                 className="command-bubble relative z-4 flex flex-col animate-pill-unfold origin-left"
                 data-pill-theme={settings?.modalTheme ?? 'blue'}
                 style={{
@@ -3284,7 +3533,12 @@ export function App() {
                       fontSize: `${Math.max(10, Math.min(18, menuSize - 4))}px`
                     }}
                     title="Menu"
-                    onClick={() => setMenuOpen(!menuOpen)}
+                    onClick={() => {
+                      setBackendDropdownOpen(false);
+                      setClaudeSubmenuOpen(false);
+                      setCodexSubmenuOpen(false);
+                      setMenuOpen((open) => !open);
+                    }}
                     aria-label="Menu"
                   >
                     ···
@@ -3444,7 +3698,7 @@ export function App() {
                 <select
                   className="bubble-dropdown-select"
                   value={backend}
-                  onChange={(event) => setBackend(event.target.value as AgentBackendId)}
+                  onChange={(event) => void selectBackend(event.target.value as AgentBackendId, { keepMenuOpen: true })}
                   title="Agent backend"
                 >
                   {selectableBackends.map((item) => (
@@ -3454,6 +3708,7 @@ export function App() {
                   ))}
                 </select>
               </label>
+              {backendModelControl()}
               <button className="bubble-dropdown-item" onClick={startNewConversation}>
                 <span className="bubble-dropdown-icon">N</span>
                 New Conversation

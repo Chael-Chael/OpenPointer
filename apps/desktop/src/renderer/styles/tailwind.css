@@ -817,8 +817,9 @@
   position: relative;
   z-index: 1;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 6px;
+  width: 100%;
   min-width: 0;
   min-height: 31px;
   padding: 6px 8px 2px;
@@ -936,6 +937,10 @@
   transform: scale(0.98);
 }
 
+.bubble-dropdown-control:active {
+  transform: none;
+}
+
 .bubble-dropdown-icon {
   display: grid;
   place-items: center;
@@ -974,6 +979,24 @@
   background-repeat: no-repeat;
   background-position: right 8px center;
   cursor: pointer;
+}
+
+.bubble-dropdown-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  outline: none;
+}
+
+.bubble-dropdown-input::placeholder {
+  color: rgba(255, 255, 255, 0.48);
 }
 
 .bubble-dropdown-select option {
@@ -2951,17 +2974,18 @@
 .context-chip-shelf {
   display: inline-flex;
   flex: 1 1 auto;
+  flex-wrap: wrap;
   align-items: center;
+  align-content: flex-start;
   gap: 4px;
   max-width: 100%;
   min-width: 36px;
   min-height: 24px;
   padding: 2px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
+  border-radius: 14px;
   background: rgba(255, 255, 255, 0.07);
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: visible;
   scrollbar-width: none;
   transition:
     min-width 140ms ease,
@@ -2999,7 +3023,7 @@
   align-items: center;
   gap: 5px;
   min-width: 0;
-  max-width: 150px;
+  max-width: min(180px, 100%);
   min-height: 22px;
   padding: 2px 3px 2px 7px;
   border-radius: 999px;
@@ -3009,9 +3033,12 @@
 
 .context-chip-token-label {
   min-width: 0;
-  max-width: 82px;
+  max-width: 112px;
   font-size: 10px;
   font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .context-chip-token-remove {
@@ -3282,6 +3309,14 @@
   background-repeat: no-repeat !important;
   background-position: right 8px center !important;
 }
+[data-pill-theme="white"] .bubble-dropdown-input {
+  background: rgba(0, 0, 0, 0.06) !important;
+  border-color: rgba(0, 0, 0, 0.12) !important;
+  color: #1c1c1e !important;
+}
+[data-pill-theme="white"] .bubble-dropdown-input::placeholder {
+  color: rgba(0, 0, 0, 0.35) !important;
+}
 [data-pill-theme="white"] .bubble-dropdown-select option {
   background: #ffffff !important;
   color: #1c1c1e !important;
@@ -3391,6 +3426,11 @@
 }
 [data-pill-theme="black"] .bubble-dropdown-select option {
   background: #1c1c1e !important;
+}
+
+[data-pill-theme="black"] .bubble-dropdown-input {
+  background: rgba(255, 255, 255, 0.09) !important;
+  border-color: rgba(255, 255, 255, 0.14) !important;
 }
 
 /* Preview cards */
