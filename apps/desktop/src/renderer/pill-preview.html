@@ -7,6 +7,28 @@
     <style>
       @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
 
+      @font-face {
+        font-family: 'Source Han Sans SC';
+        src: url('./assets/fonts/source-han-sans/SourceHanSansSC-VF.ttf') format('truetype');
+        font-weight: 250 900;
+        font-style: normal;
+        font-display: swap;
+        unicode-range:
+          U+2E80-2EFF,
+          U+3000-303F,
+          U+31C0-31EF,
+          U+3400-4DBF,
+          U+4E00-9FFF,
+          U+F900-FAFF,
+          U+FF00-FFEF,
+          U+20000-2A6DF,
+          U+2A700-2B73F,
+          U+2B740-2B81F,
+          U+2B820-2CEAF,
+          U+2CEB0-2EBEF,
+          U+30000-3134F;
+      }
+
       * {
         margin: 0;
         padding: 0;
@@ -26,6 +48,7 @@
       body {
         font-family:
           'DM Sans',
+          'Source Han Sans SC',
           -apple-system,
           BlinkMacSystemFont,
           sans-serif;
@@ -293,7 +316,7 @@
 
       .pill-text {
         flex: 1;
-        font-family: 'DM Sans', sans-serif;
+        font-family: 'DM Sans', 'Source Han Sans SC', sans-serif;
         font-weight: 500;
         font-size: 24px;
         white-space: nowrap;
@@ -1031,7 +1054,7 @@
         return `\n\n/* ── Content ── */
 .pill-text {
   flex: 1;
-  font-family: 'DM Sans', sans-serif;
+  font-family: 'DM Sans', 'Source Han Sans SC', sans-serif;
   font-weight: ${s.fontWeight};
   font-size: ${s.fontSize}px;
   color: ${s.textColor};

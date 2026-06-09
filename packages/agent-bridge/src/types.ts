@@ -45,6 +45,7 @@ export type ClaudeAgentBridgeConfig = {
   executable?: string;
   model?: string;
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  approvalMode?: 'request' | 'allow-all';
   permissionStorePath?: string;
   sdk?: {
     query(args: unknown): AsyncIterable<unknown>;

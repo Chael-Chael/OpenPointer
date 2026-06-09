@@ -24,7 +24,7 @@ vi.mock('node:fs', () => ({
   mkdirSync: () => undefined
 }));
 
-const ENV_KEYS = ['OP_AGENT_BACKEND', 'OP_LOCAL_VLM_BASE_URL', 'OP_LOCAL_VLM_MODEL', 'OP_CUA_MODE', 'OP_CODEX_MODEL', 'OP_CODEX_EFFORT'];
+const ENV_KEYS = ['OP_AGENT_BACKEND', 'OP_LOCAL_VLM_BASE_URL', 'OP_LOCAL_VLM_MODEL', 'OP_APPROVAL_MODE', 'OP_CUA_MODE', 'OP_CODEX_MODEL', 'OP_CODEX_EFFORT'];
 
 let settings: typeof import('./settings.js');
 
@@ -42,11 +42,14 @@ afterEach(() => {
 describe('getSettings env vs persisted precedence', () => {
   it('uses env vars to seed config when no settings file exists', () => {
     process.env.OP_LOCAL_VLM_BASE_URL = 'http://env-host/v1';
+    process.env.OP_APPROVAL_MODE = 'allow-all';
     process.env.OP_CUA_MODE = 'off';
     process.env.OP_CODEX_MODEL = 'gpt-5.4';
     process.env.OP_CODEX_EFFORT = 'low';
     const result = settings.getSettings();
     expect(result.localVlmBaseUrl).toBe('http://env-host/v1');
+    expect(result.approvalMode).toBe('allow-all');
+    expect(result.requireApprovalBeforeCua).toBe(false);
     expect(result.cuaMode).toBe('off');
     expect(result.codexModel).toBe('gpt-5.4');
     expect(result.codexEffort).toBe('low');
@@ -64,6 +67,23 @@ describe('getSettings env vs persisted precedence', () => {
     const result = settings.getSettings();
     expect(result.localVlmBaseUrl).toBe('http://saved-host/v1');
     expect(result.cuaMode).toBe('require-on-explicit-command');
+  });
+
+  it('normalizes approval mode and derives CUA approval from it', () => {
+    settings.saveSettings({ approvalMode: 'allow-all' });
+    expect(settings.getSettings()).toMatchObject({
+      approvalMode: 'allow-all',
+      requireApprovalBeforeCua: false
+    });
+
+    settings.saveSettings({ approvalMode: 'request', requireApprovalBeforeCua: false });
+    expect(settings.getSettings()).toMatchObject({
+      approvalMode: 'request',
+      requireApprovalBeforeCua: true
+    });
+
+    fileContent = JSON.stringify({ approvalMode: 'invalid' });
+    expect(settings.getSettings().approvalMode).toBe('request');
   });
 });
 

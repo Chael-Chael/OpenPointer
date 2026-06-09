@@ -8,6 +8,7 @@ function baseSettings(patch: Partial<AppSettings> = {}): AppSettings {
   return {
     agentBackend: 'codex',
     localVlmEnabled: true,
+    approvalMode: 'request',
     requireApprovalBeforeCua: true,
     cuaMode: 'prefer',
     cuaAgentCursorEnabled: true,
@@ -150,6 +151,7 @@ describe('OpenPointerHarness', () => {
 
     expect(result).toMatchObject({ backend: 'mock', conversationId: expect.stringMatching(/^conv-/), taskId: 'task-1' });
     expect(broker.ensureStarted).toHaveBeenCalledOnce();
+    expect(broker.ensureStarted).toHaveBeenCalledWith(expect.objectContaining({ approvalMode: 'request' }));
     expect(submitted).toHaveLength(1);
     const task = submitted[0];
     expect(task).toBeDefined();

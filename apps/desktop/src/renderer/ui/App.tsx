@@ -536,6 +536,18 @@ export function App() {
     stopRecording: stopCuaTaskRecording,
     replayRecording: replayCuaTaskRecording
   } = useCuaTasks();
+  const activeCuaConversationIds = useMemo(
+    () =>
+      new Set(
+        cuaTasks
+          .filter((task) => task.status === 'pending' || task.status === 'running')
+          .map((task) => task.conversationId)
+          .filter((id): id is string => Boolean(id))
+      ),
+    [cuaTasks]
+  );
+  const activeCuaConversationIdsRef = useRef(activeCuaConversationIds);
+  activeCuaConversationIdsRef.current = activeCuaConversationIds;
 
   const showFullContext = active && (historyTurns.length > 0 || state !== 'composing');
 
@@ -1025,7 +1037,9 @@ export function App() {
     function collapseSubmittedRun(): boolean {
       if (!activeRef.current || !isSubmittedUnfinishedState(stateRef.current)) return false;
       if (submitInFlightRef.current) return false;
-      if (!conversationIdRef.current) collapseAfterSubmitRef.current = true;
+      const currentConversationId = conversationIdRef.current;
+      if (currentConversationId && activeCuaConversationIdsRef.current.has(currentConversationId)) return false;
+      if (!currentConversationId) collapseAfterSubmitRef.current = true;
       window.openPointer.deactivate();
       return true;
     }
@@ -2061,6 +2075,7 @@ export function App() {
   async function loadConversation(id: string) {
     const conv = await window.openPointer.getConversation(id);
     if (conv) {
+      const wakeCursor = cursorRef.current;
       removeConversationFromBackground(conv.id);
       conversationRestoreEpochRef.current += 1;
       newConversationRequestedRef.current = false;
@@ -2078,8 +2093,8 @@ export function App() {
       setCandidateContextChips([]);
       setDraggingContextChip(null);
       setActive(true);
-      setDetached(true);
-      setDetachedPos((current) => current ?? computeShellPosition(cursorRef.current.localX, cursorRef.current.localY, pillWidth, visualPillHeight, true));
+      setDetached(false);
+      setDetachedPos(computeShellPosition(wakeCursor.localX, wakeCursor.localY, pillWidth, visualPillHeight, true));
       setState('composing');
       resetCuaBrushState(liveGroundingWindowKeyRef.current);
       setDraftCuaEntities([]);

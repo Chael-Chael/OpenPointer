@@ -24,6 +24,8 @@ export type CuaHealth = {
 // The cua-driver-rs-v0.5.2 Windows package still reports serverVersion 0.5.1
 // from its Cargo metadata, so runtime gating must accept that reported version.
 const REQUIRED_CUA_DRIVER_SERVER_VERSION = '0.5.1';
+const CUA_TOOL_TIMEOUT_MS = 15000;
+const CUA_LIST_TOOLS_TIMEOUT_MS = 8000;
 
 export class CuaSidecarManager {
   private proc: ChildProcess | null = null;
@@ -47,14 +49,24 @@ export class CuaSidecarManager {
   }
 
   async callTool(name: string, args: Record<string, unknown> = {}): Promise<CuaToolResult> {
-    await this.ensureStarted();
-    const result = await this.request('tools/call', { name, arguments: args }, 20000);
-    return result as CuaToolResult;
+    try {
+      await this.ensureStarted();
+      const result = await this.request('tools/call', { name, arguments: args }, CUA_TOOL_TIMEOUT_MS);
+      return result as CuaToolResult;
+    } catch (error) {
+      return cuaToolFailure(name, error, {
+        endpoint: this.endpoint || undefined,
+        driverPid: this.proc?.pid,
+        timeoutMs: CUA_TOOL_TIMEOUT_MS
+      });
+    }
   }
 
   async listTools(): Promise<Array<{ name: string; description?: string; inputSchema?: unknown }>> {
     await this.ensureStarted();
-    const result = (await this.request('tools/list', {}, 8000)) as { tools?: Array<{ name: string; description?: string; inputSchema?: unknown }> };
+    const result = (await this.request('tools/list', {}, CUA_LIST_TOOLS_TIMEOUT_MS)) as {
+      tools?: Array<{ name: string; description?: string; inputSchema?: unknown }>;
+    };
     return result.tools ?? [];
   }
 
@@ -183,7 +195,7 @@ export class CuaSidecarManager {
           `CUA HTTP driver requires cua-driver serverVersion >= ${REQUIRED_CUA_DRIVER_SERVER_VERSION}; found ${this.serverVersion || 'unknown'}. Install cua-driver release 0.5.2.`
         );
       }
-      const listed = (await this.request('tools/list', {}, 8000)) as { tools?: unknown[] };
+      const listed = (await this.request('tools/list', {}, CUA_LIST_TOOLS_TIMEOUT_MS)) as { tools?: unknown[] };
       this.toolCount = listed.tools?.length ?? 0;
       this.lastError = '';
     } catch (error) {
@@ -214,6 +226,42 @@ export class CuaSidecarManager {
       clearTimeout(timeout);
     }
   }
+}
+
+function cuaToolFailure(
+  tool: string,
+  error: unknown,
+  details: { endpoint?: string; driverPid?: number; timeoutMs: number }
+): CuaToolResult {
+  const message = cuaErrorMessage(error, details.timeoutMs);
+  return {
+    isError: true,
+    content: [
+      {
+        type: 'text',
+        text: `CUA tool "${tool}" failed before Claude MCP timeout: ${message}`
+      }
+    ],
+    structuredContent: {
+      openpointerCuaError: {
+        tool,
+        method: 'tools/call',
+        timeoutMs: details.timeoutMs,
+        endpoint: details.endpoint,
+        driverPid: details.driverPid,
+        error: message
+      }
+    }
+  };
+}
+
+function cuaErrorMessage(error: unknown, timeoutMs: number): string {
+  if (isAbortError(error)) return `CUA request timed out after ${timeoutMs}ms.`;
+  return error instanceof Error ? error.message : String(error);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
 }
 
 function resolveCuaDriverPath(repoRoot: string): string | undefined {

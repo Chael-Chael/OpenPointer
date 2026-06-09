@@ -82,5 +82,6 @@ describe('capability hints in prompts', () => {
     const instructions = buildAgentInstructions(env);
     expect(instructions).toContain('replace_text');
     expect(instructions).toContain('Use this for rewrite/edit/modify/replace requests');
+    expect(instructions).toContain('prefer insert_text first');
   });
 });

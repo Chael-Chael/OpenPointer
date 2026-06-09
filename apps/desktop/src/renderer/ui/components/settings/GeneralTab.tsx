@@ -318,20 +318,28 @@ export function GeneralTab({
 
       <section className="settings-section grid grid-cols-[minmax(200px,1fr)_repeat(4,minmax(0,auto))] items-center gap-3 mt-3 max-md:grid-cols-1">
         <label className="field">
+          <span>Approval mode</span>
+          <select
+            value={settings.approvalMode}
+            onChange={(event) => {
+              const approvalMode = event.target.value as AppSettings['approvalMode'];
+              updateSettings({
+                approvalMode,
+                requireApprovalBeforeCua: approvalMode === 'request'
+              });
+            }}
+          >
+            <option value="request">Request approval</option>
+            <option value="allow-all">Allow all permissions</option>
+          </select>
+        </label>
+        <label className="field">
           <span>CUA mode</span>
           <select value={settings.cuaMode} onChange={(event) => updateSettings({ cuaMode: event.target.value as AppSettings['cuaMode'] })}>
             <option value="off">Off</option>
             <option value="prefer">Prefer</option>
             <option value="require-on-explicit-command">Require on explicit command</option>
           </select>
-        </label>
-        <label className="toggle-row">
-          <input
-            type="checkbox"
-            checked={settings.requireApprovalBeforeCua}
-            onChange={(event) => updateSettings({ requireApprovalBeforeCua: event.target.checked })}
-          />
-          <span>Require approval before CUA</span>
         </label>
         <label className="toggle-row">
           <input

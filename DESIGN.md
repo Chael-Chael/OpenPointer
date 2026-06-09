@@ -32,25 +32,25 @@ colors:
   stream-code-bg: "#0B1329"
 typography:
   body:
-    fontFamily: "DM Sans, -apple-system, SF Pro Text, Segoe UI, system-ui, sans-serif"
+    fontFamily: "DM Sans, Source Han Sans SC, -apple-system, SF Pro Text, Segoe UI, system-ui, sans-serif"
     fontSize: "14px"
     fontWeight: 500
     lineHeight: 1.4
     letterSpacing: "0"
   body-small:
-    fontFamily: "DM Sans, -apple-system, SF Pro Text, Segoe UI, system-ui, sans-serif"
+    fontFamily: "DM Sans, Source Han Sans SC, -apple-system, SF Pro Text, Segoe UI, system-ui, sans-serif"
     fontSize: "13px"
     fontWeight: 600
     lineHeight: 1.25
     letterSpacing: "0"
   label-caps:
-    fontFamily: "DM Sans, -apple-system, SF Pro Text, Segoe UI, system-ui, sans-serif"
+    fontFamily: "DM Sans, Source Han Sans SC, -apple-system, SF Pro Text, Segoe UI, system-ui, sans-serif"
     fontSize: "11px"
     fontWeight: 900
     lineHeight: 1
     letterSpacing: "0.04em"
   micro:
-    fontFamily: "DM Sans, -apple-system, SF Pro Text, Segoe UI, system-ui, sans-serif"
+    fontFamily: "DM Sans, Source Han Sans SC, -apple-system, SF Pro Text, Segoe UI, system-ui, sans-serif"
     fontSize: "10px"
     fontWeight: 800
     lineHeight: 1
@@ -174,7 +174,7 @@ Status colors are functional and quiet: green for ready or success, red for dest
 
 ## Typography
 
-Use DM Sans as the default interface typeface. It should stay compact, legible, and close to native desktop UI. Body text is 13-14px, labels are 10-12px, and headings inside panels are restrained. Large display type does not belong in the overlay.
+Use DM Sans as the default interface typeface, with Source Han Sans SC immediately after it for Chinese glyphs. Latin text should continue to render through DM Sans, while Simplified Chinese should fall back to Source Han Sans SC. Body text is 13-14px, labels are 10-12px, and headings inside panels are restrained. Large display type does not belong in the overlay.
 
 Instrument Serif is allowed only for occasional identity text such as a backend label or modal title. It should be light, brief, and never used for dense controls, settings fields, history rows, task rows, or code output.
 

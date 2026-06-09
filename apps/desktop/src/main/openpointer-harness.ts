@@ -102,6 +102,7 @@ export class OpenPointerHarness {
     const allowedCuaTools = allowedCuaToolsForSettings(this.options.allowedCuaTools, settings);
     const cuaBrokerSession = shouldAttachCuaToolServer(input.context, initialEnvelope, settings)
       ? await this.options.cuaBroker.ensureStarted({
+          approvalMode: settings.approvalMode,
           requireApprovalBeforeCua: settings.requireApprovalBeforeCua,
           cuaAgentCursorEnabled: settings.cuaAgentCursorEnabled,
           cuaPageJavascriptPolicy: settings.cuaPageJavascriptPolicy,

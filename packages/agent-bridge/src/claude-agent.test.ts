@@ -208,6 +208,43 @@ describe('ClaudeAgentBridge', () => {
     await iterator.return?.();
   });
 
+  it('allows SDK tool permission requests without prompting in allow-all mode', async () => {
+    let decision: unknown;
+    const bridge = new ClaudeAgentBridge({
+      enabled: true,
+      approvalMode: 'allow-all',
+      sdk: {
+        async *query(args: unknown) {
+          const options = (args as { options: { canUseTool: (...args: unknown[]) => Promise<unknown> } }).options;
+          decision = await options.canUseTool(
+            'mcp__zotero__search',
+            {},
+            {
+              toolUseID: 'tool-allow-all',
+              title: 'Claude wants to use Zotero MCP.',
+              displayName: 'Zotero MCP',
+              suggestions: [{ type: 'addRules', rules: [{ toolName: 'mcp__zotero__search' }], behavior: 'allow', destination: 'session' }]
+            }
+          );
+          yield { type: 'result', result: 'done' };
+        }
+      }
+    });
+    const events = [];
+    for await (const event of bridge.run(buildAgentContextEnvelope({ instruction: 'summarize this paper', mode: 'text', context, backend: 'claude-agent' }))) {
+      events.push(event);
+    }
+
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'approval.requested' }));
+    expect(events.at(-1)).toMatchObject({ type: 'run.completed' });
+    expect(decision).toMatchObject({
+      behavior: 'allow',
+      toolUseID: 'tool-allow-all',
+      decisionClassification: 'user_permanent',
+      updatedPermissions: [{ type: 'addRules', rules: [{ toolName: 'mcp__zotero__search' }], behavior: 'allow', destination: 'session' }]
+    });
+  });
+
   it('persists always-allow rules across bridge instances', async () => {
     const permissionStorePath = tempPermissionStorePath();
     const suggestions = [{ type: 'addRules', rules: [{ toolName: 'mcp__zotero__search' }], behavior: 'allow', destination: 'session' }];
@@ -311,6 +348,7 @@ describe('ClaudeAgentBridge', () => {
       cua: {
         type: 'http',
         url: 'http://127.0.0.1:9999/sessions/broker-session/mcp',
+        timeout: 60000,
         alwaysLoad: true,
         tools: [
           { name: 'list_windows', permission_policy: 'always_allow' },

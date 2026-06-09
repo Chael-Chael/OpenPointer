@@ -11,6 +11,7 @@ type McpToolDescriptor = {
 };
 
 type BrokerOptions = {
+  approvalMode?: 'request' | 'allow-all';
   requireApprovalBeforeCua: boolean;
   cuaAgentCursorEnabled: boolean;
   cuaPageJavascriptPolicy: 'ask' | 'off';
@@ -182,7 +183,7 @@ export class CuaBroker {
 
   async replayRecording(sessionId: string, dir: string): Promise<CuaToolResult> {
     const session = this.requireSession(sessionId);
-    const approved = await this.requestApproval(session, 'replay_trajectory');
+    const approved = session.options.approvalMode === 'allow-all' || (await this.requestApproval(session, 'replay_trajectory'));
     if (!approved) return { isError: true, content: [{ type: 'text', text: 'CUA replay denied by user.' }] };
     return await this.withStateChangingLock(() =>
       this.withDesktopInteractionHidden(session, () => this.sidecar.callTool('replay_trajectory', { session: sessionId, dir }))
@@ -440,6 +441,7 @@ export class CuaBroker {
     if (name === 'page' && String(args.action) === 'execute_javascript' && session.options.cuaPageJavascriptPolicy === 'off') {
       throw new Error('CUA page.execute_javascript is disabled in Settings.');
     }
+    if (session.options.approvalMode === 'allow-all') return false;
     if (ALWAYS_APPROVAL_TOOLS.has(name)) return true;
     if (name === 'page' && PAGE_STATE_CHANGING_ACTIONS.has(String(args.action))) return true;
     return session.options.requireApprovalBeforeCua && isSerializedTool(name, args);

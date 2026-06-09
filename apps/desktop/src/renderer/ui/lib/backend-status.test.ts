@@ -29,6 +29,7 @@ function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
     codexAppServerTransport: 'http-adapter',
     codexModel: 'gpt-5.4',
     codexEffort: 'low',
+    approvalMode: 'request',
     cuaMode: 'off',
     requireApprovalBeforeCua: false,
     cuaDebugOverlayEnabled: false,

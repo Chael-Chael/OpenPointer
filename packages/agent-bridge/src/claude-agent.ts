@@ -27,6 +27,9 @@ type PermissionStore = {
 };
 
 const CUA_AGENT_TOOLS = [
+  'insert_text',
+  'replace_text',
+  'read_selected_text',
   'bring_to_front',
   'check_for_update',
   'check_permissions',
@@ -60,11 +63,10 @@ const CUA_AGENT_TOOLS = [
   'set_config',
   'start_recording',
   'stop_recording',
-  'zoom',
-  'read_selected_text',
-  'insert_text',
-  'replace_text'
+  'zoom'
 ];
+
+const CUA_MCP_OUTER_TIMEOUT_MS = 60000;
 
 class EventQueue<T> {
   private readonly items: T[] = [];
@@ -229,6 +231,9 @@ export class ClaudeAgentBridge implements AgentBridge {
     }
     if (this.inFlightPermissionResults.has(permissionKey)) {
       return this.inFlightPermissionResults.get(permissionKey) as Promise<PermissionResult>;
+    }
+    if (this.config?.approvalMode === 'allow-all') {
+      return { behavior: 'allow', toolUseID, updatedPermissions, decisionClassification: 'user_permanent' };
     }
     if (this.isPersistentlyAllowed(toolName, input)) {
       return { behavior: 'allow', toolUseID, decisionClassification: 'user_permanent' };
@@ -680,7 +685,7 @@ function mcpServersForEnvelope(envelope: AgentContextEnvelope): Record<string, u
     cua: {
       type: 'http',
       url: cuaServer.endpoint,
-      timeout: 20000,
+      timeout: CUA_MCP_OUTER_TIMEOUT_MS,
       alwaysLoad: true,
       tools: (cuaServer.tools.length > 0 ? cuaServer.tools : CUA_AGENT_TOOLS).map((name) => ({
         name,

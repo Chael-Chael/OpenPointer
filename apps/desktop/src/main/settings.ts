@@ -53,6 +53,7 @@ const DEFAULTS: AppSettings = {
   codexAppServerTransport: 'http-adapter',
   codexModel: 'gpt-5.4',
   codexEffort: 'low',
+  approvalMode: 'request',
   cuaMode: 'prefer',
   requireApprovalBeforeCua: true,
   cuaDebugOverlayEnabled: false,
@@ -92,6 +93,7 @@ export function getSettings(): AppSettings {
   const envOverride = (keys: string[]): string | undefined => (persisted ? undefined : firstEnv(keys));
   const envSeedIfEmpty = (keys: string[], loadedValue: string | undefined): string | undefined =>
     !persisted || !loadedValue?.trim() ? firstEnv(keys) : undefined;
+  const approvalMode = normalizeApprovalMode(envOverride(['OP_APPROVAL_MODE']) || loaded.approvalMode || DEFAULTS.approvalMode);
   return {
     ...DEFAULTS,
     ...loaded,
@@ -116,7 +118,9 @@ export function getSettings(): AppSettings {
     ),
     codexModel: envOverride(['OP_CODEX_MODEL']) || loaded.codexModel || DEFAULTS.codexModel,
     codexEffort: normalizeEffort(envOverride(['OP_CODEX_EFFORT']) || loaded.codexEffort || DEFAULTS.codexEffort),
+    approvalMode,
     cuaMode: normalizeCuaMode(envOverride(['OP_CUA_MODE']) || loaded.cuaMode || DEFAULTS.cuaMode),
+    requireApprovalBeforeCua: approvalMode === 'request',
     cuaDriverHttpPort: clampNumber(Number(envOverride(['OP_CUA_HTTP_PORT']) || loaded.cuaDriverHttpPort), 1, 65535, DEFAULTS.cuaDriverHttpPort),
     cuaRecordingMode: normalizeCuaRecordingMode(loaded.cuaRecordingMode || DEFAULTS.cuaRecordingMode),
     cuaPageJavascriptPolicy: normalizeCuaPageJavascriptPolicy(loaded.cuaPageJavascriptPolicy || DEFAULTS.cuaPageJavascriptPolicy),
@@ -303,6 +307,10 @@ function normalizeCodexTransport(value: string): AppSettings['codexAppServerTran
 
 function normalizeEffort(value: string): AppSettings['codexEffort'] {
   return ['low', 'medium', 'high', 'xhigh', 'max'].includes(value) ? (value as AppSettings['codexEffort']) : 'low';
+}
+
+function normalizeApprovalMode(value: string): AppSettings['approvalMode'] {
+  return ['request', 'allow-all'].includes(value) ? (value as AppSettings['approvalMode']) : 'request';
 }
 
 function normalizeCuaMode(value: string): AppSettings['cuaMode'] {

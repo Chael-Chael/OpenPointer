@@ -16,7 +16,7 @@ mermaid.initialize({
     lineColor: '#3478f6',
     secondaryColor: '#f7fbff',
     tertiaryColor: '#ffffff',
-    fontFamily: 'DM Sans, Segoe UI, system-ui, sans-serif'
+    fontFamily: 'DM Sans, Source Han Sans SC, Segoe UI, system-ui, sans-serif'
   }
 });
 

@@ -366,7 +366,8 @@ function formatToolServers(toolServers: NonNullable<AgentContextEnvelope['toolSe
     'OpenPointer local CUA tools include:',
     '- read_selected_text({}): read the currently selected text from the target app.',
     '- insert_text({ "text": string, "click_target"?: boolean }): insert text at the current pointer/target location without deleting existing content.',
-    '- replace_text({ "text": string, "click_target"?: boolean }): replace or clear the current editable CUA target or active text selection. Use this for rewrite/edit/modify/replace requests, not for ordinary button clicks.'
+    '- replace_text({ "text": string, "click_target"?: boolean }): replace or clear the current editable CUA target or active text selection. Use this for rewrite/edit/modify/replace requests, not for ordinary button clicks.',
+    'For inserting text into Word, documents, or editors, prefer insert_text first. Do not manually chain click, press_key, or type_text unless insert_text returns a concrete error.'
   ].join('\n');
 }
 

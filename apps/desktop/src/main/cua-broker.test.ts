@@ -118,6 +118,69 @@ describe('CuaBroker', () => {
     expect(sidecarCall).not.toHaveBeenCalled();
   });
 
+  it('allows all CUA tool calls without approval when approval mode is allow-all', async () => {
+    const { broker, sidecarCall } = createBroker();
+    const emit = vi.fn();
+    const session = await broker.ensureStarted({
+      ...brokerDefaults,
+      approvalMode: 'allow-all',
+      requireApprovalBeforeCua: true,
+      allowedTools: ['kill_app'],
+      emit
+    });
+
+    const response = await fetch(session.endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'kill_app', arguments: {} } })
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ result: { content: [{ text: 'ok' }] } });
+    expect(emit).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'approval.requested' }));
+    expect(sidecarCall).toHaveBeenCalledWith('kill_app', { session: session.sessionId });
+  });
+
+  it('returns sidecar tool failures as MCP tool results', async () => {
+    const sidecarFailure: CuaToolResult = {
+      isError: true,
+      content: [{ type: 'text', text: 'CUA tool "click" failed before Claude MCP timeout: CUA request timed out after 15000ms.' }],
+      structuredContent: {
+        openpointerCuaError: {
+          tool: 'click',
+          timeoutMs: 15000
+        }
+      }
+    };
+    const { broker } = createBroker(vi.fn(async () => sidecarFailure) as SidecarCall);
+    const session = await broker.ensureStarted({
+      ...brokerDefaults,
+      requireApprovalBeforeCua: false,
+      allowedTools: ['click'],
+      emit: vi.fn()
+    });
+
+    const response = await fetch(session.endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'click', arguments: {} } })
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body).not.toHaveProperty('error');
+    expect(body).toMatchObject({
+      result: {
+        isError: true,
+        content: [{ text: expect.stringContaining('failed before Claude MCP timeout') }],
+        structuredContent: {
+          openpointerCuaError: {
+            tool: 'click',
+            timeoutMs: 15000
+          }
+        }
+      }
+    });
+  });
+
   it('restores the overlay before emitting CUA approval requests', async () => {
     const { broker, sidecarCall } = createBroker();
     const events: string[] = [];

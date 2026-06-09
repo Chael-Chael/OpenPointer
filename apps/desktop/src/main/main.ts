@@ -107,7 +107,7 @@ const CUA_DRIVER_AGENT_TOOLS = [
   'zoom'
 ];
 const OP_AGENT_TOOLS = ['read_selected_text', 'insert_text', 'replace_text'];
-const CUA_AGENT_TOOLS = [...CUA_DRIVER_AGENT_TOOLS, ...OP_AGENT_TOOLS];
+const CUA_AGENT_TOOLS = [...OP_AGENT_TOOLS, ...CUA_DRIVER_AGENT_TOOLS];
 const openPointerHarness = new OpenPointerHarness({
   taskManager: cuaTaskManager,
   cuaBroker,
@@ -116,7 +116,7 @@ const openPointerHarness = new OpenPointerHarness({
   bridgeConfig,
   createOpenPointerTools,
   allowedCuaTools: CUA_AGENT_TOOLS,
-  withDesktopInteractionHidden: withOverlayHiddenForCua,
+  withDesktopInteractionHidden: keepOverlayVisibleForCua,
   showDesktopInteractionApproval: restoreOverlayForCuaApproval
 });
 
@@ -307,6 +307,10 @@ function restoreOverlayForCuaApproval(): void {
 
 async function withOverlayHiddenForCua<T>(task: () => Promise<T>): Promise<T> {
   return withOverlayHidden(undefined, task, { restoreDelayMs: CUA_OVERLAY_RESTORE_DELAY_MS });
+}
+
+async function keepOverlayVisibleForCua<T>(task: () => Promise<T>): Promise<T> {
+  return task();
 }
 
 async function hideOverlaysForDesktopRead(): Promise<void> {
@@ -732,7 +736,7 @@ function registerIpc(): void {
         cuaPageJavascriptPolicy: settings.cuaPageJavascriptPolicy,
         allowedTools: CUA_AGENT_TOOLS,
         localTools: {},
-        withDesktopInteractionHidden: withOverlayHiddenForCua,
+        withDesktopInteractionHidden: keepOverlayVisibleForCua,
         showDesktopInteractionApproval: restoreOverlayForCuaApproval,
         emit: (agentEvent) => cuaTaskManager.emitAgentEvent(taskId, agentEvent)
       });
@@ -968,6 +972,7 @@ function bridgeConfig(settings = getSettings()): AgentBridgeRegistryConfig {
       executable: settings.claudeAgentExecutable || undefined,
       model: settings.claudeAgentModel || undefined,
       effort: settings.claudeAgentEffort || 'high',
+      approvalMode: settings.approvalMode,
       permissionStorePath: join(app.getPath('userData'), 'claude-permissions.json')
     },
     codex:
@@ -1842,13 +1847,14 @@ function ensureClaudePermissionHookRegistered(): void {
     const entries = Array.isArray(hooks[eventName]) ? (hooks[eventName] as unknown[]) : [];
     const command = hookCommand(hookPath, eventName);
     const alreadyFirst = hookEntryContainsCommand(entries[0], hookPath);
+    const alreadyCurrent = hookEntryCommand(entries[0]) === command;
     const filtered = entries.filter((entry) => !hookEntryContainsCommand(entry, hookPath));
     const nextEntry = {
       matcher: '',
       hooks: [{ type: 'command', command }]
     };
     hooks[eventName] = [nextEntry, ...filtered];
-    changed = changed || !alreadyFirst || filtered.length !== entries.length - (alreadyFirst ? 1 : 0);
+    changed = changed || !alreadyFirst || !alreadyCurrent || filtered.length !== entries.length - (alreadyFirst ? 1 : 0);
   }
   if (!changed) return;
   mkdirSync(dirname(settingsPath), { recursive: true });
@@ -1856,18 +1862,30 @@ function ensureClaudePermissionHookRegistered(): void {
 }
 
 function hookCommand(hookPath: string, eventName: string): string {
-  const escaped = hookPath.replace(/\\/g, '/');
-  return `"node" "${escaped}" ${eventName}`;
+  const escapedHookPath = hookPath.replace(/\\/g, '/');
+  const escapedNodePath = hookNodeExecutable().replace(/\\/g, '/');
+  return `"${escapedNodePath}" "${escapedHookPath}" ${eventName}`;
+}
+
+function hookNodeExecutable(): string {
+  const candidate = process.env.ProgramFiles ? join(process.env.ProgramFiles, 'nodejs', 'node.exe') : '';
+  return candidate && existsSync(candidate) ? candidate : 'node';
 }
 
 function hookEntryContainsCommand(entry: unknown, hookPath: string): boolean {
   const marker = hookPath.replace(/\\/g, '/');
-  if (!isRecord(entry)) return false;
-  if (typeof entry.command === 'string' && entry.command.replace(/\\/g, '/').includes(marker)) return true;
+  const command = hookEntryCommand(entry);
+  return Boolean(command?.replace(/\\/g, '/').includes(marker));
+}
+
+function hookEntryCommand(entry: unknown): string | undefined {
+  if (!isRecord(entry)) return undefined;
+  if (typeof entry.command === 'string') return entry.command;
   if (Array.isArray(entry.hooks)) {
-    return entry.hooks.some((hook) => isRecord(hook) && typeof hook.command === 'string' && hook.command.replace(/\\/g, '/').includes(marker));
+    const hook = entry.hooks.find((candidate) => isRecord(candidate) && typeof candidate.command === 'string');
+    return isRecord(hook) && typeof hook.command === 'string' ? hook.command : undefined;
   }
-  return false;
+  return undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -26,6 +26,7 @@ export type AppSettings = {
   codexAppServerTransport: 'http-adapter' | 'websocket' | 'stdio';
   codexModel: string;
   codexEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+  approvalMode: 'request' | 'allow-all';
   cuaMode: 'off' | 'prefer' | 'require-on-explicit-command';
   requireApprovalBeforeCua: boolean;
   cuaDebugOverlayEnabled: boolean;
